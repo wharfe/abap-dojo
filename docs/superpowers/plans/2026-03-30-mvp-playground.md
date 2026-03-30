@@ -593,15 +593,30 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 };
 ```
 
-- [ ] **Step 2: Verify worker compiles**
+- [ ] **Step 2: Verify worker compiles and config import works**
 
 ```bash
 npx tsc --noEmit
 ```
 
-Expected: no type errors. (If there are issues with abaplint types, adjust the import paths or add type assertions as needed.)
+Expected: no type errors.
 
-- [ ] **Step 3: Commit**
+**Important:** The `config` export from `@abaplint/transpiler` may not exist in all versions. If `import { config as transpilerConfig }` fails at compile time or runtime:
+- **Fallback:** Replace with `Config.getDefault(Version.OpenABAP)` from `@abaplint/core`
+- Add `Version` to the import: `import { Registry, MemoryFile, Config, Issue, Version } from "@abaplint/core"`
+- Replace `const abaplintConfig = new Config(JSON.stringify(transpilerConfig))` with `const abaplintConfig = Config.getDefault(Version.OpenABAP)`
+
+- [ ] **Step 3: Manual smoke test — start dev server and verify Worker initializes**
+
+```bash
+npm run dev
+```
+
+Open browser DevTools console. The Worker should load without errors. If there are import errors in the Worker, check:
+- Vite `worker.format` config may need adjustment
+- CJS imports may need `optimizeDeps` for worker bundles
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/workers/abaplintWorker.ts
@@ -1217,20 +1232,48 @@ npm run dev
 
 Expected: Split-pane layout with editor on left, output on right. Toolbar with Run and Share buttons. Lint markers appear after typing.
 
-- [ ] **Step 4: Inspect transpiler output and fix runtime injection**
+- [ ] **Step 4: Inspect transpiler output to understand runtime dependencies**
 
-Run the transpiler on sample code to see what the output JS expects:
+This is the most critical investigation step. Run the transpiler and examine what the output JS expects:
 
-1. Open browser DevTools, set a breakpoint or add `console.log(data.js)` in the worker's transpile-result handler
+1. Open browser DevTools, add `console.log(data.js)` temporarily in `App.tsx`'s `transpile-result` handler
 2. Click Run with `REPORT ztest.\nWRITE 'Hello'.`
-3. Inspect the generated JS — look for what globals/requires it needs
+3. Inspect the generated JS and answer these questions:
+   - What globals does it reference? (e.g., `abap.statements.write()`, `require("@abaplint/runtime")`)
+   - How is WRITE translated? (likely `abap.statements.write()` or similar)
+   - Does it use `require()` or assume globals?
 
-Based on the output, update `buildSandboxHtml()` in `ExecutionSandbox.tsx`:
-- Bundle `@abaplint/runtime` using esbuild or a separate Vite config into a standalone IIFE
-- Import the bundle as a string using Vite's `?raw` suffix
-- Inject it into the srcdoc HTML before the execution script
+- [ ] **Step 5: Bundle @abaplint/runtime for iframe injection**
 
-Example approach once runtime is bundled:
+Try these approaches in order (stop at the first one that works):
+
+**Approach 1 (try first):** esbuild one-liner
+```bash
+npx esbuild node_modules/@abaplint/runtime/src/index.ts --bundle --format=iife --global-name=abaplintRuntime --outfile=src/sandbox/runtime-bundle.js
+```
+If this fails (e.g., TypeScript source not in node_modules, or missing deps), try:
+```bash
+npx esbuild node_modules/@abaplint/runtime/build/src/index.js --bundle --format=iife --global-name=abaplintRuntime --outfile=src/sandbox/runtime-bundle.js
+```
+
+**Approach 2:** Vite lib mode — create `vite.config.sandbox.ts` to build runtime as a standalone IIFE bundle.
+
+**Approach 3 (last resort):** Inspect what the transpiled JS actually `require()`s from runtime and manually extract only the needed functions into `src/sandbox/runtime-bundle.js`.
+
+Import the bundle as a raw string:
+```typescript
+import runtimeBundle from "../sandbox/runtime-bundle.js?raw";
+```
+
+- [ ] **Step 6: Hook up WRITE output capture in sandbox**
+
+The transpiler converts WRITE to a runtime function call (likely `abap.statements.write()`). The runtime's `MemoryConsole` captures this output. In the sandbox, we need to:
+
+1. Read the runtime's write function implementation to understand how output is buffered
+2. Monkey-patch or configure the console to send output via postMessage
+
+Update `buildSandboxHtml()` in `ExecutionSandbox.tsx`. The pattern will look something like:
+
 ```typescript
 import runtimeBundle from "../sandbox/runtime-bundle.js?raw";
 
@@ -1239,13 +1282,21 @@ function buildSandboxHtml(): string {
 <html><head><meta charset="utf-8"></head><body>
 <script>${runtimeBundle}</script>
 <script>
-// Execution context for transpiled ABAP-to-JS within sandboxed iframe
+// Execution context for transpiled ABAP-to-JS within sandboxed iframe.
+// iframe sandbox="allow-scripts" (no allow-same-origin) provides isolation.
 window.addEventListener("message", async function(event) {
   if (!event.data || event.data.type !== "execute") return;
   try {
+    // Initialize runtime with custom console that captures WRITE output.
+    // The exact setup depends on how the transpiled JS references the runtime.
+    // MemoryConsole.get() retrieves accumulated WRITE output.
     var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
     var fn = new AsyncFunction(event.data.js);
     await fn();
+
+    // After execution, retrieve WRITE output from the runtime console
+    // and send it to the parent via postMessage.
+    // Exact API: inspect step 4 output to determine how to access the console.
     window.parent.postMessage({ type: "done" }, "*");
   } catch (e) {
     window.parent.postMessage({ type: "error", message: e.message || String(e) }, "*");
@@ -1255,7 +1306,12 @@ window.addEventListener("message", async function(event) {
 }
 ```
 
-This step is exploratory — adapt based on actual transpiler output.
+**Key investigation items for this step:**
+- How the transpiled JS references `abap` (global? parameter? require?)
+- Where `MemoryConsole` or equivalent is instantiated
+- Whether `console.add()` is the write sink and can be overridden to call `postMessage`
+
+This step is exploratory — adapt based on actual transpiler output from Step 4.
 
 - [ ] **Step 5: Test end-to-end execution**
 
@@ -1704,16 +1760,26 @@ git push
 
 ## Risk Areas
 
-### Task 4 & 8 are the riskiest tasks
+### Task 4: transpiler config import
 
-The Web Worker (Task 4) and sandbox runtime injection (Task 8) involve the abaplint packages in browser context. Expect:
+The `config` export from `@abaplint/transpiler` may not exist in all versions. Fallback: `Config.getDefault(Version.OpenABAP)` from `@abaplint/core`. Task 4 includes a manual smoke test step to catch this early.
+
+### Task 8: runtime injection + WRITE output capture (highest risk)
+
+This is the mountain of the project. Three sub-problems:
 
 1. **CJS import issues in Worker** — Vite may need worker-specific config. If `import` fails in the worker, try `importScripts` or configure Vite's `worker.format`.
-2. **Runtime bundling for srcdoc** — The `@abaplint/runtime` needs to be available inside the sandboxed iframe which can't access parent resources. Options in priority order:
-   - Build runtime into a standalone IIFE using esbuild, import as `?raw` string
-   - Vite build step that bundles runtime into a string constant
-   - Build a separate `sandbox-runtime.js` entry point via Vite
-3. **Transpiler output format** — The generated JS may use `require()` or `import`. Inspect actual output and adjust the sandbox execution accordingly.
+2. **Runtime bundling for srcdoc** — The `@abaplint/runtime` needs to be available inside the sandboxed iframe which can't access parent resources. Approach priority with rationale:
+   - **Try first:** `npx esbuild` one-liner to bundle runtime as IIFE → `?raw` import (fastest, least config)
+   - **If esbuild fails:** Vite lib mode with separate config for runtime bundle
+   - **Last resort:** Manually extract only the runtime functions the transpiled JS actually calls
+3. **WRITE → postMessage bridge** — The transpiler converts WRITE to a runtime function (likely `abap.statements.write()` → `MemoryConsole.add()`). To get output from the sandbox, we need to either:
+   - Configure the runtime's Console implementation to call `window.parent.postMessage`
+   - Monkey-patch the write function after runtime initialization
+   - Read `MemoryConsole.get()` after execution completes and send in one batch
+
+   Task 8 Steps 4-6 guide this investigation explicitly.
+4. **Transpiler output format** — The generated JS may use `require()` or assume globals. Inspect actual output and adjust the sandbox execution accordingly.
 
 ### Testing Strategy
 
