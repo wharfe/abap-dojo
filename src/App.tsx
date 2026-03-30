@@ -140,9 +140,9 @@ function App() {
         onSelectSample={handleSelectSample}
       />
 
-      <main className="flex-1 min-h-0 flex">
+      <main className="flex-1 min-h-0 flex flex-col md:flex-row">
         {/* Editor */}
-        <div className="w-1/2 min-h-0 border-r border-gray-700">
+        <div className="h-1/2 md:h-auto md:w-1/2 min-h-0 border-b md:border-b-0 md:border-r border-gray-700">
           <EditorPanel
             value={source}
             onChange={handleChange}
@@ -151,7 +151,7 @@ function App() {
         </div>
 
         {/* Output */}
-        <div className="w-1/2 min-h-0">
+        <div className="h-1/2 md:h-auto md:w-1/2 min-h-0">
           <OutputPanel
             output={output}
             error={error}

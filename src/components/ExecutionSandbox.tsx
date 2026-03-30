@@ -36,11 +36,11 @@ export const ExecutionSandbox = forwardRef<
   ExecutionSandboxProps
 >(function ExecutionSandbox({ onOutput, onError, onDone }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timeoutRef = useRef<number | undefined>(undefined);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const cleanup = useCallback(() => {
-    clearTimeout(timeoutRef.current);
+    window.clearTimeout(timeoutRef.current);
     if (iframeRef.current) {
       iframeRef.current.remove();
       iframeRef.current = null;
@@ -93,7 +93,7 @@ export const ExecutionSandbox = forwardRef<
       window.addEventListener("message", handleMessage);
 
       // Set timeout for infinite loop protection
-      timeoutRef.current = setTimeout(() => {
+      timeoutRef.current = window.setTimeout(() => {
         onError("Execution timeout (5s)");
         cleanup();
       }, EXECUTION_TIMEOUT_MS);

@@ -69,9 +69,9 @@ async function handleTranspile(source: string): Promise<WorkerResponse> {
 }
 
 // eslint-disable-next-line no-restricted-globals
-const worker = self as unknown as DedicatedWorkerGlobalScope;
+const workerSelf = self as unknown as { onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null; postMessage: (data: WorkerResponse) => void };
 
-worker.onmessage = async (event: MessageEvent<WorkerRequest>) => {
+workerSelf.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
   let response: WorkerResponse;
 
@@ -83,5 +83,5 @@ worker.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     return;
   }
 
-  worker.postMessage(response);
+  workerSelf.postMessage(response);
 };
