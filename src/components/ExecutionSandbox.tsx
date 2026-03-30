@@ -39,8 +39,14 @@ export const ExecutionSandbox = forwardRef<
   const timeoutRef = useRef<number | undefined>(undefined);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
+  const handleMessageRef = useRef<((event: MessageEvent) => void) | null>(null);
+
   const cleanup = useCallback(() => {
     window.clearTimeout(timeoutRef.current);
+    if (handleMessageRef.current) {
+      window.removeEventListener("message", handleMessageRef.current);
+      handleMessageRef.current = null;
+    }
     if (iframeRef.current) {
       iframeRef.current.remove();
       iframeRef.current = null;
@@ -89,7 +95,8 @@ export const ExecutionSandbox = forwardRef<
       iframe.srcdoc = srcdoc;
       iframeRef.current = iframe;
 
-      // Listen for messages
+      // Listen for messages (store ref for cleanup)
+      handleMessageRef.current = handleMessage;
       window.addEventListener("message", handleMessage);
 
       // Set timeout for infinite loop protection

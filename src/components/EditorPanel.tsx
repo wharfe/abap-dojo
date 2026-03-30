@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import type { editor, MarkerSeverity } from "monaco-editor";
 import type { LintIssue } from "../types/messages";
@@ -56,30 +56,32 @@ export function EditorPanel({ value, onChange, lintIssues }: EditorPanelProps) {
   );
 
   // Update lint markers when issues change
-  const monaco = monacoRef.current;
-  const editorInstance = editorRef.current;
-  if (monaco && editorInstance) {
-    const model = editorInstance.getModel();
-    if (model) {
-      const severityMap: Record<string, MarkerSeverity> = {
-        error: monaco.MarkerSeverity.Error,
-        warning: monaco.MarkerSeverity.Warning,
-        info: monaco.MarkerSeverity.Info,
-      };
-      monaco.editor.setModelMarkers(
-        model,
-        "abaplint",
-        lintIssues.map((issue) => ({
-          startLineNumber: issue.startLine,
-          startColumn: issue.startCol,
-          endLineNumber: issue.endLine,
-          endColumn: issue.endCol,
-          message: `[${issue.key}] ${issue.message}`,
-          severity: severityMap[issue.severity] ?? monaco.MarkerSeverity.Info,
-        })),
-      );
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const editorInstance = editorRef.current;
+    if (monaco && editorInstance) {
+      const model = editorInstance.getModel();
+      if (model) {
+        const severityMap: Record<string, MarkerSeverity> = {
+          error: monaco.MarkerSeverity.Error,
+          warning: monaco.MarkerSeverity.Warning,
+          info: monaco.MarkerSeverity.Info,
+        };
+        monaco.editor.setModelMarkers(
+          model,
+          "abaplint",
+          lintIssues.map((issue) => ({
+            startLineNumber: issue.startLine,
+            startColumn: issue.startCol,
+            endLineNumber: issue.endLine,
+            endColumn: issue.endCol,
+            message: `[${issue.key}] ${issue.message}`,
+            severity: severityMap[issue.severity] ?? monaco.MarkerSeverity.Info,
+          })),
+        );
+      }
     }
-  }
+  }, [lintIssues]);
 
   return (
     <Editor
