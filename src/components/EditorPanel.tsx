@@ -1,5 +1,5 @@
 import { useRef, useCallback } from "react";
-import Editor, { BeforeMount, OnMount } from "@monaco-editor/react";
+import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import type { editor, MarkerSeverity } from "monaco-editor";
 import type { LintIssue } from "../types/messages";
 
