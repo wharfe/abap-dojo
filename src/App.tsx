@@ -9,6 +9,7 @@ import {
 import { debounce } from "./utils/debounce";
 import { encodeSource, decodeSource } from "./utils/urlShare";
 import type { LintIssue, WorkerResponse } from "./types/messages";
+import type { Sample } from "./samples";
 import AbaplintWorker from "./workers/abaplintWorker?worker";
 
 const DEFAULT_CODE = `REPORT ztest.
@@ -90,6 +91,14 @@ function App() {
     workerRef.current?.postMessage({ type: "transpile", source });
   }, [source]);
 
+  // Sample selection
+  const handleSelectSample = useCallback((sample: Sample) => {
+    setSource(sample.code);
+    setOutput([]);
+    setError(null);
+    requestLint(sample.code);
+  }, [requestLint]);
+
   // Share
   const handleShare = useCallback(() => {
     const encoded = encodeSource(source);
@@ -128,6 +137,7 @@ function App() {
         onRun={handleRun}
         isRunning={isRunning}
         onShare={handleShare}
+        onSelectSample={handleSelectSample}
       />
 
       <main className="flex-1 min-h-0 flex">
