@@ -60,15 +60,43 @@ debounceは300-500ms。タイピング中に毎キーストロークWorkerへメ
 | `SampleSelector` | `src/components/SampleSelector.tsx` | プリセットサンプルコード選択ドロップダウン |
 | `abaplintWorker` | `src/workers/abaplintWorker.ts` | Web Worker: parse + lint + transpile |
 | `ExecutionSandbox` | `src/components/ExecutionSandbox.tsx` | sandboxed iframe管理、postMessage通信、timeout制御 |
+| メッセージ型定義 | `src/types/messages.ts` | Worker・Sandbox間の全メッセージ型を一元管理 |
+
+## メッセージ型定義
+
+Worker・Sandbox間の2つの非同期通信チャネルの型を `src/types/messages.ts` で一元管理する。実装の最初に定義し、すべての通信でこの型を使用する。
+
+```typescript
+// Worker messages
+type WorkerRequest =
+  | { type: "lint"; source: string }
+  | { type: "transpile"; source: string }
+
+type WorkerResponse =
+  | { type: "lint-result"; issues: LintIssue[] }
+  | { type: "transpile-result"; js: string }
+  | { type: "transpile-error"; message: string; line?: number }
+
+// Sandbox messages
+type SandboxRequest =
+  | { type: "execute"; js: string }
+
+type SandboxResponse =
+  | { type: "output"; text: string }
+  | { type: "error"; message: string }
+  | { type: "done" }
+```
 
 ## Sandboxed iframe設計
 
 - `sandbox="allow-scripts"` のみ。allow-same-originは付与しない
-- iframe内にrunner HTMLを埋め込み（srcdoc or blob URL）
-- `@abaplint/runtime` はiframe内にバンドル
-- 通信プロトコル:
-  - 親→iframe: `{ type: "execute", js: "..." }`
-  - iframe→親: `{ type: "output", text: "..." }` / `{ type: "error", message: "..." }` / `{ type: "done" }`
+- **srcdoc方式**: `@abaplint/runtime` のコードをビルド時にインライン化したHTML文字列を作り、iframeの `srcdoc` 属性に埋め込む。blob URLよりCSP制御がシンプル
+  - Viteの `?raw` インポートでrunner用HTMLテンプレートを読み込み
+  - ビルド時にruntimeバンドルをテンプレートに注入
+  - allow-same-origin無しのiframeは親ページのリソースにアクセスできないため、すべての依存をsrcdoc内に含める必要がある
+- 通信プロトコル（型は `src/types/messages.ts` に定義）:
+  - 親→iframe: `SandboxRequest`
+  - iframe→親: `SandboxResponse`
 - timeout: 5秒。`setTimeout`で管理し、`done`メッセージ受信でクリア。timeout時はiframeをDOMから除去して再生成
 
 ## サンプルコード
