@@ -5,13 +5,13 @@ import runtimeBundleUrl from "../sandbox/runtime-bundle.js?url";
 const EXECUTION_TIMEOUT_MS = 5000;
 
 export interface ExecutionSandboxHandle {
-  execute: (js: string) => void;
+  execute: (js: string, requestId: string) => void;
 }
 
 interface ExecutionSandboxProps {
-  onOutput: (text: string) => void;
-  onError: (message: string) => void;
-  onDone: () => void;
+  onOutput: (text: string, requestId: string) => void;
+  onError: (message: string, requestId: string) => void;
+  onDone: (requestId: string) => void;
 }
 
 // Cache for the runtime bundle text (fetched once, reused for all executions)
@@ -65,12 +65,12 @@ export const ExecutionSandbox = forwardRef<
 
       const data = event.data;
       if (data.type === "output") {
-        onOutput(data.text);
+        onOutput(data.text, data.requestId);
       } else if (data.type === "error") {
-        onError(data.message);
+        onError(data.message, data.requestId);
         cleanup();
       } else if (data.type === "done") {
-        onDone();
+        onDone(data.requestId);
         cleanup();
       }
     },
@@ -78,7 +78,7 @@ export const ExecutionSandbox = forwardRef<
   );
 
   const execute = useCallback(
-    async (js: string) => {
+    async (js: string, requestId: string) => {
       // Clean up previous execution
       cleanup();
 
@@ -101,13 +101,13 @@ export const ExecutionSandbox = forwardRef<
 
       // Set timeout for infinite loop protection
       timeoutRef.current = window.setTimeout(() => {
-        onError("Execution timeout (5s)");
+        onError("Execution timeout (5s)", requestId);
         cleanup();
       }, EXECUTION_TIMEOUT_MS);
 
       // Append iframe and wait for load, then send execute message
       iframe.onload = () => {
-        iframe.contentWindow?.postMessage({ type: "execute", js }, "*");
+        iframe.contentWindow?.postMessage({ type: "execute", js, requestId }, "*");
       };
 
       containerRef.current?.appendChild(iframe);
@@ -171,6 +171,7 @@ var PostMessageConsole = (function() {
 
 window.addEventListener("message", async function(event) {
   if (!event.data || event.data.type !== "execute") return;
+  var requestId = event.data.requestId;
   try {
     // Create runtime with custom console for WRITE capture
     var customConsole = new PostMessageConsole();
@@ -202,14 +203,14 @@ window.addEventListener("message", async function(event) {
       var lines = output.split("\\n");
       for (var i = 0; i < lines.length; i++) {
         if (lines[i] !== "" || i < lines.length - 1) {
-          window.parent.postMessage({ type: "output", text: lines[i] }, "*");
+          window.parent.postMessage({ type: "output", text: lines[i], requestId: requestId }, "*");
         }
       }
     }
 
-    window.parent.postMessage({ type: "done" }, "*");
+    window.parent.postMessage({ type: "done", requestId: requestId }, "*");
   } catch (e) {
-    window.parent.postMessage({ type: "error", message: e.message || String(e) }, "*");
+    window.parent.postMessage({ type: "error", message: e.message || String(e), requestId: requestId }, "*");
   }
 });
 </script></body></html>`;
