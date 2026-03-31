@@ -187,9 +187,13 @@ window.addEventListener("message", async function(event) {
     js = js.replace(/^import\\s+.*$/gm, "");
     js = js.replace(/^export\\s+/gm, "");
 
-    // Remove the line: globalThis.abap = new runtime.ABAP();
-    // We already created our own abap instance with the custom console.
+    // The @abaplint/runtime internally references globalThis.abap in methods
+    // like append, loop, etc. (e.g., abap.builtin.sy.get().tabix.set(...)).
+    // We must set globalThis.abap BEFORE the transpiled code runs, and remove
+    // the init script's own ABAP() construction to avoid overwriting our
+    // custom-console instance.
     js = js.replace(/globalThis\\.abap\\s*=\\s*new\\s+runtime\\.ABAP\\(\\);?/g, "");
+    js = "globalThis.abap = abap;\\n" + js;
 
     // Execute the transpiled code with abap available in scope
     var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;

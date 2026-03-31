@@ -3,21 +3,56 @@ import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import type { editor, MarkerSeverity } from "monaco-editor";
 import type { LintIssue } from "../types/messages";
 
+// Monarch tokenizer for ABAP syntax highlighting.
+// Uses identifier-first matching with @keywords/@typeKeywords lookup
+// instead of \b word boundaries, which break in Monarch because regexes
+// are applied to remaining substrings (making \b match mid-identifier).
 const ABAP_MONARCH_TOKENIZER = {
   defaultToken: "",
   ignoreCase: true,
+  keywords: [
+    "REPORT", "WRITE", "DATA", "TYPES", "CONSTANTS", "FIELD-SYMBOLS",
+    "IF", "ELSE", "ELSEIF", "ENDIF", "DO", "ENDDO", "WHILE", "ENDWHILE",
+    "LOOP", "ENDLOOP", "AT", "ENDAT", "CASE", "WHEN", "ENDCASE",
+    "CLASS", "ENDCLASS", "METHOD", "ENDMETHOD", "FORM", "ENDFORM",
+    "PERFORM", "FUNCTION", "ENDFUNCTION", "MODULE", "ENDMODULE",
+    "TRY", "CATCH", "ENDTRY", "RAISE", "SELECT", "ENDSELECT",
+    "INSERT", "UPDATE", "DELETE", "MODIFY", "APPEND", "READ", "TABLE",
+    "INTO", "FROM", "WHERE", "AND", "OR", "NOT", "IS", "INITIAL",
+    "BOUND", "ASSIGNED", "MOVE", "CLEAR", "FREE", "SORT", "DESCRIBE",
+    "CALL", "RETURN", "EXPORTING", "IMPORTING", "CHANGING", "RECEIVING",
+    "EXCEPTIONS", "CREATE", "OBJECT", "NEW", "VALUE", "REF",
+    "CONV", "COND", "SWITCH", "CORRESPONDING", "REDUCE", "FILTER",
+    "FOR", "IN", "THEN", "LET", "BASE", "LINES", "OF", "TYPE", "LIKE",
+    "STANDARD", "SORTED", "HASHED", "ASSIGNING", "REFERENCE",
+    "CONCATENATE", "CONDENSE", "TRANSLATE", "SHIFT", "REPLACE", "FIND",
+    "SPLIT", "OVERLAY", "SEARCH", "STRLEN", "SUBSTRING", "TO",
+    "UPPER", "LOWER", "USING", "KEY", "WITH", "INDEX", "TRANSPORTING",
+    "NO", "FIELDS", "ABAP_TRUE", "ABAP_FALSE", "SY", "SYST", "ME",
+    "SUPER", "BEGIN", "END", "DEFINITION", "IMPLEMENTATION", "PUBLIC",
+    "PROTECTED", "PRIVATE", "SECTION", "METHODS", "RETURNING",
+    "RAISING", "INHERITING", "INTERFACES", "ABSTRACT", "FINAL",
+    "REDEFINITION", "DEFAULT",
+  ],
+  typeKeywords: [
+    "STRING", "INT4", "INT8", "CHAR", "NUMC", "DATS", "TIMS",
+    "DEC", "FLOAT", "XSTRING", "I", "C", "N", "D", "T", "F", "P", "X",
+  ],
   tokenizer: {
     root: [
       [/^\*.*$/, "comment"],
       [/".*$/, "comment"],
       [/'[^']*'/, "string"],
       [/`[^`]*`/, "string"],
-      [
-        /\b(REPORT|WRITE|DATA|TYPES|CONSTANTS|FIELD-SYMBOLS|IF|ELSE|ELSEIF|ENDIF|DO|ENDDO|WHILE|ENDWHILE|LOOP|ENDLOOP|AT|ENDAT|CASE|WHEN|ENDCASE|CLASS|ENDCLASS|METHOD|ENDMETHOD|FORM|ENDFORM|PERFORM|FUNCTION|ENDFUNCTION|MODULE|ENDMODULE|TRY|CATCH|ENDTRY|RAISE|SELECT|ENDSELECT|INSERT|UPDATE|DELETE|MODIFY|APPEND|READ|TABLE|INTO|FROM|WHERE|AND|OR|NOT|IS|INITIAL|BOUND|ASSIGNED|MOVE|CLEAR|FREE|SORT|DESCRIBE|CALL|RETURN|EXPORTING|IMPORTING|CHANGING|RECEIVING|EXCEPTIONS|CREATE|OBJECT|NEW|VALUE|REF|CONV|COND|SWITCH|CORRESPONDING|REDUCE|FILTER|FOR|IN|THEN|LET|BASE|LINES|OF|TYPE|LIKE|STANDARD|SORTED|HASHED|ASSIGNING|REFERENCE|CONCATENATE|CONDENSE|TRANSLATE|SHIFT|REPLACE|FIND|SPLIT|OVERLAY|SEARCH|STRLEN|SUBSTRING|TO|UPPER|LOWER|USING|KEY|WITH|INDEX|TRANSPORTING|NO|FIELDS|ABAP_TRUE|ABAP_FALSE|SY|SYST|ME|SUPER)\b/,
-        "keyword",
-      ],
-      [/\b(STRING|INT4|INT8|CHAR|NUMC|DATS|TIMS|DEC|FLOAT|XSTRING|I|C|N|D|T|F|P|X)\b/, "type"],
-      [/\b\d+\b/, "number"],
+      // Match full identifiers (including SY-TABIX style), then classify
+      [/[a-zA-Z_][\w-]*/, {
+        cases: {
+          "@keywords": "keyword",
+          "@typeKeywords": "type",
+          "@default": "",
+        },
+      }],
+      [/\d+/, "number"],
       [/[{}()[\]]/, "delimiter.bracket"],
       [/[.,;:]/, "delimiter"],
       [/[-+*/=<>&]/, "operator"],
