@@ -22,3 +22,15 @@ describe("urlShare", () => {
     expect(decodeSource("not-valid-base64%%%")).toBeNull();
   });
 });
+
+describe("urlShare with validator mode", () => {
+  it("roundtrips code through encode/decode when used in mode=validator hash", () => {
+    const code = `REPORT ztest.\nDATA lv_x TYPE string.`;
+    const encoded = encodeSource(code);
+    // Simulate what parseHash does: URLSearchParams extracts the code param
+    const hash = `#mode=validator&code=${encoded}`;
+    const params = new URLSearchParams(hash.slice(1));
+    const decoded = decodeSource(params.get("code")!);
+    expect(decoded).toBe(code);
+  });
+});
