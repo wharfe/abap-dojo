@@ -99,7 +99,7 @@ function App() {
           ...prev,
           [data.stage]: {
             ...prev[data.stage],
-            status: data.status === "running" ? "running" : "skipped",
+            status: data.status,
           },
         }));
       } else if (data.type === "validate-stage-result") {

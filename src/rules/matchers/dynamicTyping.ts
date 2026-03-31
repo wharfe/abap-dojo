@@ -22,10 +22,13 @@ export function matchDynamicTyping(registry: Registry): PitfallMatch[] {
         const tokenStrs = tokens.map((t) => t.getStr().toUpperCase());
 
         // DATA declaration without TYPE or LIKE keyword
+        // Skip structure declarations (DATA: BEGIN OF ...)
         if (tokenStrs[0] === "DATA" && tokenStrs.length >= 2) {
           const hasType = tokenStrs.includes("TYPE");
           const hasLike = tokenStrs.includes("LIKE");
-          if (!hasType && !hasLike) {
+          const hasBegin = tokenStrs.includes("BEGIN");
+          const hasEnd = tokenStrs.includes("END");
+          if (!hasType && !hasLike && !hasBegin && !hasEnd) {
             const firstToken = stmt.getFirstToken();
             const lastToken = stmt.getLastToken();
             matches.push({

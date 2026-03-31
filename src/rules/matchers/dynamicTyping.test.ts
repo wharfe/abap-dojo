@@ -31,4 +31,12 @@ describe("matchDynamicTyping", () => {
     const matches = matchDynamicTyping(reg);
     expect(matches.length).toBe(0);
   });
+
+  it("ignores DATA: BEGIN OF structure declarations", async () => {
+    const reg = await parseSource(
+      `REPORT ztest.\nDATA: BEGIN OF ls_struct,\n        value TYPE i,\n      END OF ls_struct.`,
+    );
+    const matches = matchDynamicTyping(reg);
+    expect(matches.length).toBe(0);
+  });
 });
