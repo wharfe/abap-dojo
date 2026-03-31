@@ -25,3 +25,6 @@ dist-ssr
 
 # Windows WSL metadata
 *:Zone.Identifier
+
+# Superpowers brainstorm sessions
+.superpowers/
