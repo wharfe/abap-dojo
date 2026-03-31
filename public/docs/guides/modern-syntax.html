@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Modern ABAP Syntax — Inline Declarations, VALUE, NEW (7.40+)</title>
+  <meta name="description" content="Master ABAP 7.40+ features: inline DATA declarations, VALUE expressions, constructor operators. Try each example in ABAP Dojo." />
+  <link rel="canonical" href="https://abapdojo.com/docs/guides/modern-syntax.html" />
+  <meta property="og:title" content="Modern ABAP Syntax — Inline Declarations, VALUE, NEW (7.40+)" />
+  <meta property="og:description" content="Master ABAP 7.40+ features: inline DATA declarations, VALUE expressions, constructor operators. Try each example in ABAP Dojo." />
+  <meta property="og:url" content="https://abapdojo.com/docs/guides/modern-syntax.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.png" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'] } } }
+    }
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-YY1YV51K2X');</script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <!-- Header with breadcrumb -->
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/" class="text-gray-400 hover:text-gray-200 transition-colors">Guides</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Modern ABAP Syntax</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">Modern ABAP Syntax (7.40+)</h1>
+    <p class="text-gray-400 text-lg mb-10">
+      ABAP 7.40, released with SAP NetWeaver 7.40 SP05 in 2013, introduced a wave of new language features
+      that dramatically modernized the language. Inline declarations, constructor operators, and expression-oriented
+      syntax reduce boilerplate and make code far more readable. If you are working with S/4HANA or ABAP Cloud,
+      mastering these features is essential.
+    </p>
+
+    <!-- Section: Inline DATA Declarations -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Inline DATA Declarations</h2>
+      <p class="text-gray-400 mb-4">
+        Before ABAP 7.40, every variable had to be declared in a separate <code class="text-blue-300">DATA</code> block
+        at the top of the program or method. Inline declarations with <code class="text-blue-300">DATA(...)</code> let you
+        declare variables exactly where they are first used, and the type is inferred automatically from context.
+        This eliminates a major source of verbosity in ABAP programs.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Old style: declare up front, use later
+DATA lv_result TYPE string.
+lv_result = 'Hello'.
+WRITE: / lv_result.
+
+" Modern style: declare inline at point of use
+DATA(lv_modern) = 'Hello'.          " type inferred as string
+WRITE: / lv_modern.
+
+" Inline in LOOP (very common pattern)
+TYPES: BEGIN OF ty_item,
+         id   TYPE i,
+         name TYPE string,
+       END OF ty_item.
+DATA lt_items TYPE TABLE OF ty_item.
+lt_items = VALUE #( ( id = 1 name = 'Alpha' ) ( id = 2 name = 'Beta' ) ).
+
+LOOP AT lt_items INTO DATA(ls_item).
+  WRITE: / ls_item-id, ls_item-name.
+ENDLOOP.</code></pre>
+    </section>
+
+    <!-- Section: Constructor Operators -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Constructor Operators: NEW and VALUE</h2>
+      <p class="text-gray-400 mb-4">
+        <code class="text-blue-300">NEW</code> creates a new object instance inline, replacing the old
+        <code class="text-blue-300">CREATE OBJECT</code> statement. <code class="text-blue-300">VALUE</code> creates
+        and initializes structured data and internal tables in a single expression. Both operators use
+        <code class="text-blue-300">#</code> as a type placeholder when the type can be inferred from context,
+        keeping the code concise.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" NEW: create object inline
+" Old style:
+"   DATA lo_obj TYPE REF TO cl_some_class.
+"   CREATE OBJECT lo_obj.
+" Modern style:
+DATA(lo_obj) = NEW cl_abap_math( ).
+
+" VALUE: initialize a structure inline
+TYPES: BEGIN OF ty_address,
+         street TYPE string,
+         city   TYPE string,
+         zip    TYPE string,
+       END OF ty_address.
+
+" Old style required multiple assignments
+" Modern style: all in one expression
+DATA(ls_addr) = VALUE ty_address(
+  street = '123 Main St'
+  city   = 'Walldorf'
+  zip    = '69190'
+).
+WRITE: / ls_addr-city.
+
+" VALUE for internal tables (compact initialization)
+DATA(lt_numbers) = VALUE int4_table( ( 10 ) ( 20 ) ( 30 ) ).
+LOOP AT lt_numbers INTO DATA(lv_num).
+  WRITE: / lv_num.
+ENDLOOP.</code></pre>
+    </section>
+
+    <!-- Section: Method Chaining -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Method Chaining</h2>
+      <p class="text-gray-400 mb-4">
+        Modern ABAP supports fluent method chaining: calling methods directly on the return value of another method
+        without storing intermediate results. This style is common with string utility classes and builder patterns.
+        Combined with inline declarations, it eliminates temporary variables that exist only to pass values between calls.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Old style: temporary variable for each step
+DATA lo_regex   TYPE REF TO cl_abap_regex.
+DATA lo_matcher TYPE REF TO cl_abap_matcher.
+CREATE OBJECT lo_regex EXPORTING pattern = '\d+'.
+lo_matcher = lo_regex-&gt;create_matcher( text = 'abc123def' ).
+
+" Modern style: chain the calls
+DATA(lo_matcher2) = cl_abap_regex=&gt;create( pattern = '\d+' )
+                      -&gt;create_matcher( text = 'abc123def' ).
+
+" String expressions with method calls inline
+DATA lv_text TYPE string VALUE '  hello world  '.
+DATA(lv_trimmed) = condense( lv_text ).
+WRITE: / |'{ lv_trimmed }'|.</code></pre>
+    </section>
+
+    <!-- Section: Why Modern Syntax for S/4HANA -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Why Modern Syntax Matters for S/4HANA Migration</h2>
+      <p class="text-gray-400 mb-4">
+        ABAP Cloud (the development model for S/4HANA and BTP) enforces the use of modern syntax through the
+        <em>clean core</em> paradigm. Many legacy statements like <code class="text-blue-300">MOVE</code>,
+        <code class="text-blue-300">COMPUTE</code>, and obsolete form routines are restricted or disallowed.
+        Starting to use modern syntax now — even on older systems — makes future migration smoother and produces
+        code that abaplint's modernization rules will not flag as problematic.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Legacy statements (avoid in new code)
+MOVE lv_a TO lv_b.           " use:  lv_b = lv_a.
+COMPUTE lv_sum = lv_a + lv_b. " use:  lv_sum = lv_a + lv_b.
+ADD 1 TO lv_counter.          " use:  lv_counter += 1.
+MULTIPLY lv_val BY 2.         " use:  lv_val *= 2.
+
+" Modern equivalents (clean core compliant)
+DATA lv_a TYPE i VALUE 5.
+DATA lv_b TYPE i.
+lv_b = lv_a.
+
+DATA lv_sum TYPE i.
+lv_sum = lv_a + lv_b.
+
+DATA lv_counter TYPE i.
+lv_counter += 1.
+WRITE: / lv_counter.</code></pre>
+    </section>
+
+    <!-- Full Example -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Full Example</h2>
+      <p class="text-gray-400 mb-4">
+        This complete example showcases inline declarations, VALUE initialization, and modern loop patterns together.
+        Paste it into ABAP Dojo and click Run to compare the output.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">REPORT zmodern_syntax.
+
+TYPES: BEGIN OF ty_product,
+         id    TYPE i,
+         name  TYPE string,
+         price TYPE p LENGTH 6 DECIMALS 2,
+       END OF ty_product.
+
+" VALUE: compact table initialization
+DATA(lt_products) = VALUE TABLE OF ty_product(
+  ( id = 1 name = 'Widget A' price = '9.99' )
+  ( id = 2 name = 'Widget B' price = '14.99' )
+  ( id = 3 name = 'Widget C' price = '4.50' )
+).
+
+WRITE: / '=== Product Catalog ==='.
+
+" Inline DATA in LOOP
+LOOP AT lt_products INTO DATA(ls_product).
+  WRITE: / ls_product-id, ls_product-name, ls_product-price.
+ENDLOOP.
+
+" LINES() with inline result
+WRITE: / '---'.
+WRITE: / 'Total products:', LINES( lt_products ).
+
+" Modern arithmetic
+DATA(lv_total) = REDUCE p LENGTH 6 DECIMALS 2
+  ( INIT sum = CONV p( 0 )
+    FOR row IN lt_products
+    NEXT sum = sum + row-price ).
+WRITE: / 'Total price:', lv_total.</code></pre>
+    </section>
+
+    <!-- CTA -->
+    <div class="text-center mt-10">
+      <a href="/#code=eJx1kEFPhDAUhO/8irntrlES97iJJl36VmugkFI0ngiymGxSJWGBg79eoBRdE68z05nvVVESK42vtjq3+Ud9rJpP3/OCkKUpTGnysjBlZ4q2bsDpIKTQIpa+ByTZPhQBUgqcAkSkH2Oe4lh3b6aaJEBE44KQDzj1eV8Y6NeEcJpdRTpTcnSfWZjRuunzpjp3pt3MOd8jySee/7iGgZAikpo5EssxY1i0pRd3juMK29Eb6m3+YokzzWDqaceSKDpAx3/GRyZFTBPi/dPwFe7J0rDMumvML5A5fHNvSdfY3mLjey9KaNphxScV9fug71bXP2X+N9sSgU8=" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Try this code in ABAP Dojo →
+      </a>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>

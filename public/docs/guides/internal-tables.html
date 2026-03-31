@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ABAP Internal Tables — LOOP, APPEND, READ TABLE Examples</title>
+  <meta name="description" content="Learn ABAP internal table operations with live examples. LOOP AT, APPEND, READ TABLE, and LINES() — try each example in ABAP Dojo." />
+  <link rel="canonical" href="https://abapdojo.com/docs/guides/internal-tables.html" />
+  <meta property="og:title" content="ABAP Internal Tables — LOOP, APPEND, READ TABLE Examples" />
+  <meta property="og:description" content="Learn ABAP internal table operations with live examples. LOOP AT, APPEND, READ TABLE, and LINES() — try each example in ABAP Dojo." />
+  <meta property="og:url" content="https://abapdojo.com/docs/guides/internal-tables.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.png" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'] } } }
+    }
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-YY1YV51K2X');</script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <!-- Header with breadcrumb -->
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/" class="text-gray-400 hover:text-gray-200 transition-colors">Guides</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Internal Tables</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">ABAP Internal Tables</h1>
+    <p class="text-gray-400 text-lg mb-10">
+      Internal tables are the core data structure in ABAP — the equivalent of arrays or lists in other languages.
+      They hold multiple rows of structured data in memory and can be processed with powerful built-in statements.
+      This guide walks through the most common operations with runnable examples.
+    </p>
+
+    <!-- Section: Declaring a Structured Type -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Declaring a Structured Type</h2>
+      <p class="text-gray-400 mb-4">
+        Before creating a table, you define a structure type using <code class="text-blue-300">TYPES: BEGIN OF ... END OF</code>.
+        This acts as a schema for each row in the table, specifying field names and their types.
+        You can use this same structure type both for the table and for single-row work areas.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">TYPES: BEGIN OF ty_employee,
+         id    TYPE i,
+         name  TYPE string,
+         dept  TYPE string,
+       END OF ty_employee.</code></pre>
+    </section>
+
+    <!-- Section: Creating and Populating a Table -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Creating and Populating a Table</h2>
+      <p class="text-gray-400 mb-4">
+        Declare a table variable using <code class="text-blue-300">DATA ... TYPE TABLE OF</code>, then populate it with
+        <code class="text-blue-300">APPEND</code>. Each call to APPEND adds a new row at the end of the table.
+        The work area (a single row variable) acts as a staging area before appending.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA: lt_employees TYPE TABLE OF ty_employee,
+      ls_employee  TYPE ty_employee.
+
+ls_employee-id   = 1.
+ls_employee-name = 'Alice'.
+ls_employee-dept = 'Finance'.
+APPEND ls_employee TO lt_employees.
+
+ls_employee-id   = 2.
+ls_employee-name = 'Bob'.
+ls_employee-dept = 'IT'.
+APPEND ls_employee TO lt_employees.</code></pre>
+      <p class="text-gray-500 text-sm mt-3">
+        Modern ABAP also supports VALUE syntax for compact inline initialization:
+        <code class="text-blue-300">lt_employees = VALUE #( ( id = 1 name = 'Alice' dept = 'Finance' ) ( id = 2 name = 'Bob' dept = 'IT' ) ).</code>
+      </p>
+    </section>
+
+    <!-- Section: Looping Through a Table -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Looping Through a Table</h2>
+      <p class="text-gray-400 mb-4">
+        <code class="text-blue-300">LOOP AT ... INTO</code> iterates over every row, copying each row into the work area variable.
+        This is the standard ABAP idiom for processing all rows. For better performance on large tables, prefer
+        <code class="text-blue-300">LOOP AT ... ASSIGNING FIELD-SYMBOL</code> to avoid copying each row.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Loop with INTO (copies each row)
+LOOP AT lt_employees INTO ls_employee.
+  WRITE: / ls_employee-id, ls_employee-name, ls_employee-dept.
+ENDLOOP.
+
+" Modern: loop with FIELD-SYMBOL (no copy, faster for large tables)
+LOOP AT lt_employees ASSIGNING FIELD-SYMBOL(&lt;ls_emp&gt;).
+  WRITE: / &lt;ls_emp&gt;-id, &lt;ls_emp&gt;-name.
+ENDLOOP.</code></pre>
+    </section>
+
+    <!-- Section: Counting Rows -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Counting Rows with LINES()</h2>
+      <p class="text-gray-400 mb-4">
+        The <code class="text-blue-300">LINES()</code> function returns the number of rows in an internal table.
+        It is the clearest way to check how many entries exist without looping.
+        Use it in conditions, calculations, or WRITE statements to inspect table size at runtime.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA lv_count TYPE i.
+lv_count = LINES( lt_employees ).
+WRITE: / 'Number of employees:', lv_count.</code></pre>
+    </section>
+
+    <!-- Full Example -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Full Example</h2>
+      <p class="text-gray-400 mb-4">
+        This complete example combines all the operations above: defining a structure, populating a table,
+        looping through it, and printing the row count. Paste it into ABAP Dojo and click Run to see the output.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">REPORT zinternal_tables.
+
+TYPES: BEGIN OF ty_employee,
+         id    TYPE i,
+         name  TYPE string,
+         dept  TYPE string,
+       END OF ty_employee.
+
+DATA: lt_employees TYPE TABLE OF ty_employee,
+      ls_employee  TYPE ty_employee.
+
+ls_employee-id   = 1.
+ls_employee-name = 'Alice'.
+ls_employee-dept = 'Finance'.
+APPEND ls_employee TO lt_employees.
+
+ls_employee-id   = 2.
+ls_employee-name = 'Bob'.
+ls_employee-dept = 'IT'.
+APPEND ls_employee TO lt_employees.
+
+ls_employee-id   = 3.
+ls_employee-name = 'Carol'.
+ls_employee-dept = 'HR'.
+APPEND ls_employee TO lt_employees.
+
+WRITE: / '=== Employee List ==='.
+LOOP AT lt_employees INTO ls_employee.
+  WRITE: / ls_employee-id, ls_employee-name, ls_employee-dept.
+ENDLOOP.
+
+WRITE: / '---'.
+WRITE: / 'Total rows:', LINES( lt_employees ).</code></pre>
+    </section>
+
+    <!-- CTA -->
+    <div class="text-center mt-10">
+      <a href="/#code=eJydkE9rhDAUxO/5FHNLCzZbWnoR9hBrtpWKBn1l2dPiLrINWF00l/bTV/ePjeChNKfwZt5vhpcpnWaEb1t2dmtssROM0Uar3EegXqIE6Qr2a3ss266pPYbrq4vPEoMRnW1NfXCk4lDiLJlxqpJwQupTQkkSle0HzbG6sHKSSSizECSDWE02sI7oFaFayfeY8KY24kLoroYTwU0YpbtT2yW4rMy+5MJRhrJLPN4LJrUeWjq89LfeLC1odjOsh6f/sJ4/irYys93+wIvTVEOSc84oGSzdeAxgnUWkfCwwDfcwCRSsDxpwPXXc4NTYovK5hzhKVH7j5Nx64OcvFz+kyrVt" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Try this code in ABAP Dojo →
+      </a>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>
