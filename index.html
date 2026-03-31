@@ -2,10 +2,91 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ABAP Dojo — Browser-based ABAP Playground & AI Validator</title>
     <meta name="description" content="Write, lint, and execute ABAP code in your browser. No SAP system required. Validate LLM-generated ABAP with AI pitfall detection." />
+    <link rel="canonical" href="https://abapdojo.com/" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="ABAP Dojo — Browser-based ABAP Playground & AI Validator" />
+    <meta property="og:description" content="Write, lint, and execute ABAP code in your browser. No SAP system required. Validate LLM-generated ABAP with AI pitfall detection." />
+    <meta property="og:url" content="https://abapdojo.com/" />
+    <meta property="og:image" content="https://abapdojo.com/og-image.png" />
+    <meta property="og:site_name" content="ABAP Dojo" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ABAP Dojo — Browser-based ABAP Playground & AI Validator" />
+    <meta name="twitter:description" content="Write, lint, and execute ABAP code in your browser. No SAP system required." />
+    <meta name="twitter:image" content="https://abapdojo.com/og-image.png" />
+
+    <!-- Theme & Icons -->
+    <meta name="theme-color" content="#111827" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- JSON-LD: WebApplication -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "ABAP Dojo",
+      "url": "https://abapdojo.com",
+      "description": "Browser-based ABAP playground with real-time linting, code execution, and AI-generated code validation.",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Any",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+
+    <!-- JSON-LD: FAQPage -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is ABAP Dojo?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "ABAP Dojo is a free, browser-based ABAP playground that lets you write, lint, and execute ABAP code without an SAP system. It also includes an AI Validator to detect common mistakes in LLM-generated ABAP code."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is my code safe?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. ABAP Dojo runs 100% in your browser. Your code is never sent to any server. All parsing, linting, transpiling, and execution happens client-side using the abaplint open-source ecosystem."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need an SAP system to use ABAP Dojo?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. ABAP Dojo uses the abaplint transpiler to convert ABAP to JavaScript and run it directly in your browser. No SAP system, no BTP trial, no Docker setup required."
+          }
+        }
+      ]
+    }
+    </script>
+
+    <!-- Google Analytics 4 -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-YY1YV51K2X');
+    </script>
   </head>
   <body>
     <div id="root"></div>
