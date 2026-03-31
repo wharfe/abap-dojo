@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { EditorPanel } from "./components/EditorPanel";
 import { OutputPanel } from "./components/OutputPanel";
+import { ValidationReport } from "./components/ValidationReport";
+import { ModeHeader } from "./components/ModeHeader";
 import { Toolbar } from "./components/Toolbar";
 import {
   ExecutionSandbox,
@@ -10,22 +12,29 @@ import { debounce } from "./utils/debounce";
 import { encodeSource, decodeSource } from "./utils/urlShare";
 import type { LintIssue, WorkerResponse } from "./types/messages";
 import type { Sample } from "./samples";
+import type { AppMode, StageResult, ValidationStage } from "./types/validation";
 import AbaplintWorker from "./workers/abaplintWorker?worker";
 
 const DEFAULT_CODE = `REPORT ztest.
 WRITE 'Hello, ABAP Dojo!'.`;
 
-function getInitialCode(): string {
+function parseHash(): { mode: AppMode; code: string | null } {
   const hash = window.location.hash;
-  if (hash.startsWith("#code=")) {
-    const decoded = decodeSource(hash.slice(6));
-    if (decoded !== null) return decoded;
-  }
-  return DEFAULT_CODE;
+  if (!hash || hash === "#") return { mode: "playground", code: null };
+
+  const params = new URLSearchParams(hash.slice(1));
+  const mode = params.get("mode") === "validator" ? "validator" : "playground";
+  const codeParam = params.get("code");
+  const code = codeParam ? decodeSource(codeParam) : null;
+  return { mode, code };
+}
+
+function getInitialState(): { mode: AppMode; code: string } {
+  const { mode, code } = parseHash();
+  return { mode, code: code ?? DEFAULT_CODE };
 }
 
 // Module-level worker reference and debounced lint function.
-// Kept outside the component to satisfy react-hooks/refs (no ref reads during render).
 let appWorker: Worker | null = null;
 
 const debouncedLint = debounce((code: string) => {
@@ -34,13 +43,31 @@ const debouncedLint = debounce((code: string) => {
 
 type OutputTab = "output" | "lint";
 
+const INITIAL_STAGES: Record<ValidationStage, StageResult> = {
+  syntax: { status: "pending" },
+  lint: { status: "pending" },
+  transpile: { status: "pending" },
+  runtime: { status: "pending" },
+};
+
 function App() {
-  const [source, setSource] = useState(getInitialCode);
+  const initial = getInitialState();
+  const [mode, setMode] = useState<AppMode>(initial.mode);
+  const [source, setSource] = useState(initial.code);
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
   const [output, setOutput] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [activeTab, setActiveTab] = useState<OutputTab>("output");
+
+  // Validation state
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationStages, setValidationStages] =
+    useState<Record<ValidationStage, StageResult>>(INITIAL_STAGES);
+
+  // Track which requestId belongs to each execution context
+  const validationRequestIdRef = useRef<string | null>(null);
+  const playgroundRequestIdRef = useRef<string>("");
 
   const sandboxRef = useRef<ExecutionSandboxHandle>(null);
 
@@ -51,10 +78,12 @@ function App() {
 
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const data = event.data;
+
+      // Playground messages
       if (data.type === "lint-result") {
         setLintIssues(data.issues);
       } else if (data.type === "transpile-result") {
-        sandboxRef.current?.execute(data.js);
+        sandboxRef.current?.execute(data.js, playgroundRequestIdRef.current);
       } else if (data.type === "transpile-error") {
         setError(
           data.line
@@ -63,12 +92,90 @@ function App() {
         );
         setIsRunning(false);
       }
+
+      // Validation messages
+      if (data.type === "validate-progress") {
+        setValidationStages((prev) => ({
+          ...prev,
+          [data.stage]: {
+            ...prev[data.stage],
+            status: data.status === "running" ? "running" : "skipped",
+          },
+        }));
+      } else if (data.type === "validate-stage-result") {
+        setValidationStages((prev) => ({
+          ...prev,
+          [data.stage]: data.result,
+        }));
+
+        // If transpile stage succeeded with JS, trigger runtime check
+        if (
+          data.stage === "transpile" &&
+          data.result.status === "pass" &&
+          data.result.js
+        ) {
+          const reqId = crypto.randomUUID();
+          validationRequestIdRef.current = reqId;
+          setValidationStages((prev) => ({
+            ...prev,
+            runtime: { status: "running" },
+          }));
+          sandboxRef.current?.execute(data.result.js, reqId);
+        }
+
+        // If transpile or runtime was skipped/failed, validation is done
+        if (
+          data.stage === "transpile" &&
+          (data.result.status === "fail" || data.result.status === "skipped")
+        ) {
+          setIsValidating(false);
+        }
+        if (data.stage === "runtime" && data.result.status === "skipped") {
+          setIsValidating(false);
+        }
+      }
     };
 
     return () => {
       worker.terminate();
       appWorker = null;
     };
+  }, []);
+
+  // Sandbox callbacks — requestId disambiguates playground vs validation
+  const handleOutput = useCallback((text: string, requestId: string) => {
+    if (requestId === validationRequestIdRef.current) {
+      // Validation runtime output — we only care about success/failure, not output
+      return;
+    }
+    setOutput((prev) => [...prev, text]);
+  }, []);
+
+  const handleError = useCallback((message: string, requestId: string) => {
+    if (requestId === validationRequestIdRef.current) {
+      setValidationStages((prev) => ({
+        ...prev,
+        runtime: { status: "fail", error: message },
+      }));
+      validationRequestIdRef.current = null;
+      setIsValidating(false);
+      return;
+    }
+    setError(message);
+    setIsRunning(false);
+  }, []);
+
+  const handleDone = useCallback((requestId: string) => {
+    if (requestId === validationRequestIdRef.current) {
+      setValidationStages((prev) => ({
+        ...prev,
+        runtime: { status: "pass" },
+      }));
+      validationRequestIdRef.current = null;
+      setIsValidating(false);
+      return;
+    }
+    setIsRunning(false);
   }, []);
 
   const handleChange = useCallback((value: string) => {
@@ -81,14 +188,46 @@ function App() {
     debouncedLint(source);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Run
+  // Run (Playground mode)
   const handleRun = useCallback(() => {
     setOutput([]);
     setError(null);
     setIsRunning(true);
     setActiveTab("output");
+    playgroundRequestIdRef.current = crypto.randomUUID();
     appWorker?.postMessage({ type: "transpile", source });
   }, [source]);
+
+  // Validate (Validator mode)
+  const handleValidate = useCallback(() => {
+    validationRequestIdRef.current = null;
+    setIsValidating(true);
+    setValidationStages({
+      syntax: { status: "pending" },
+      lint: { status: "pending" },
+      transpile: { status: "pending" },
+      runtime: { status: "pending" },
+    });
+    appWorker?.postMessage({ type: "validate", source });
+  }, [source]);
+
+  // Mode change
+  const handleModeChange = useCallback(
+    (newMode: AppMode) => {
+      setMode(newMode);
+      const encoded = encodeSource(source);
+      if (newMode === "playground") {
+        window.history.replaceState(null, "", `#code=${encoded}`);
+      } else {
+        window.history.replaceState(
+          null,
+          "",
+          `#mode=${newMode}&code=${encoded}`,
+        );
+      }
+    },
+    [source],
+  );
 
   // Sample selection
   const handleSelectSample = useCallback((sample: Sample) => {
@@ -101,40 +240,29 @@ function App() {
   // Share
   const handleShare = useCallback(() => {
     const encoded = encodeSource(source);
-    const url = `${window.location.origin}${window.location.pathname}#code=${encoded}`;
+    const modeParam = mode === "validator" ? `mode=${mode}&` : "";
+    const url = `${window.location.origin}${window.location.pathname}#${modeParam}code=${encoded}`;
     if (url.length > 2000) {
       alert("Warning: URL is very long and may not work in all browsers.");
     }
-    window.history.replaceState(null, "", `#code=${encoded}`);
+    const hash = `#${modeParam}code=${encoded}`;
+    window.history.replaceState(null, "", hash);
     navigator.clipboard.writeText(url).then(
       () => alert("URL copied to clipboard!"),
       () => alert("URL updated in address bar."),
     );
-  }, [source]);
-
-  // Sandbox callbacks
-  const handleOutput = useCallback((text: string) => {
-    setOutput((prev) => [...prev, text]);
-  }, []);
-
-  const handleError = useCallback((message: string) => {
-    setError(message);
-    setIsRunning(false);
-  }, []);
-
-  const handleDone = useCallback(() => {
-    setIsRunning(false);
-  }, []);
+  }, [source, mode]);
 
   return (
     <div className="h-screen flex flex-col bg-gray-900 text-gray-100">
-      <header className="flex items-center px-4 py-2 bg-gray-800 border-b border-gray-700">
-        <h1 className="text-lg font-bold tracking-wide">ABAP Dojo</h1>
-      </header>
+      <ModeHeader mode={mode} onModeChange={handleModeChange} />
 
       <Toolbar
+        mode={mode}
         onRun={handleRun}
+        onValidate={handleValidate}
         isRunning={isRunning}
+        isValidating={isValidating}
         onShare={handleShare}
         onSelectSample={handleSelectSample}
       />
@@ -149,16 +277,23 @@ function App() {
           />
         </div>
 
-        {/* Output */}
+        {/* Output / Validation */}
         <div className="h-1/2 md:h-auto md:w-1/2 min-h-0">
-          <OutputPanel
-            output={output}
-            error={error}
-            lintIssues={lintIssues}
-            isRunning={isRunning}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-          />
+          {mode === "playground" ? (
+            <OutputPanel
+              output={output}
+              error={error}
+              lintIssues={lintIssues}
+              isRunning={isRunning}
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+            />
+          ) : (
+            <ValidationReport
+              stages={validationStages}
+              isValidating={isValidating}
+            />
+          )}
         </div>
       </main>
 
