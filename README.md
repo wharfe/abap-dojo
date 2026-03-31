@@ -1,15 +1,35 @@
 # ABAP Dojo
 
-Browser-based ABAP playground. Write, lint, and execute ABAP code without a SAP system.
+Browser-based ABAP playground & AI validator. Write, lint, and execute ABAP code — no SAP system required.
 
-- **Playground** — Write ABAP, get real-time lint feedback, execute in-browser
-- **AI Validator** — Validate LLM-generated ABAP code with pitfall detection
+**[abapdojo.com](https://abapdojo.com)**
 
-Runs 100% client-side. Your code never leaves your browser.
+## Features
 
-## Tech
+- **Playground** — Write ABAP in Monaco Editor with real-time lint feedback, transpile to JavaScript, and execute in-browser
+- **AI Validator** — Paste LLM-generated ABAP and catch common pitfalls: STRING/CHAR confusion, Python-style loops, hallucinated classes
+- **163 Lint Rules** — Powered by abaplint, covering style, correctness, and best practices
+- **Safe for Client Code** — Runs 100% client-side. Your code never leaves your browser. No server, no data transfer.
 
-Built on the [abaplint](https://abaplint.org/) ecosystem (parser, transpiler, runtime).
+## How It Works
+
+```
+ABAP source → @abaplint/core (parse + lint) → @abaplint/transpiler (ABAP → JS) → sandboxed iframe (execute)
+```
+
+All processing happens in Web Workers to keep the UI responsive. Transpiled code runs in a sandboxed iframe with WRITE output returned via postMessage.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | React 19 + TypeScript (Vite) |
+| Editor | Monaco Editor |
+| ABAP Engine | [@abaplint](https://abaplint.org/) ecosystem (MIT) |
+| Styling | Tailwind CSS |
+| Deploy | Static hosting (Cloudflare Pages) |
+
+### abaplint packages
 
 | Package | Role |
 |---------|------|
@@ -21,15 +41,45 @@ Built on the [abaplint](https://abaplint.org/) ecosystem (parser, transpiler, ru
 
 ```bash
 npm install
-npm run dev
+npm run dev        # Start dev server
 ```
 
-## Build
+## Build & Preview
 
 ```bash
-npm run build    # Production build → dist/
-npm run preview  # Preview production build locally
+npm run build      # Production build → dist/
+npm run preview    # Preview production build locally
 ```
+
+## Other Commands
+
+```bash
+npm run lint       # ESLint
+npx tsc --noEmit   # Type check
+npx vitest run     # Run tests
+```
+
+## Project Structure
+
+```
+src/
+  components/    # React components (EditorPanel, OutputPanel, HeroBanner, etc.)
+  workers/       # Web Workers for abaplint/transpiler
+  rules/         # LLM Pitfall Detector rule definitions
+  samples/       # Sample ABAP code presets
+  types/         # TypeScript type definitions
+  utils/         # Shared utilities
+public/
+  docs/          # Static SEO content pages (guides, pitfall articles)
+```
+
+## Contributing
+
+Contributions are welcome! Areas where help is appreciated:
+
+- **LLM Pitfall rules** — New detection patterns for AI-generated ABAP mistakes (JSON rule definitions in `src/rules/`)
+- **Sample code** — Additional ABAP examples for the Playground
+- **Bug reports** — Issues with transpilation, execution, or lint behavior
 
 ## License
 
