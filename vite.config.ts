@@ -11,4 +11,8 @@ export default defineConfig({
       "@abaplint/runtime",
     ],
   },
+  test: {
+    environment: "jsdom",
+    globals: true,
+  },
 });
