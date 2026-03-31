@@ -2,7 +2,7 @@ const NAV_LINKS = [
   { label: "Guides", href: "/docs/index.html" },
   { label: "AI Pitfalls", href: "/docs/index.html#pitfalls" },
   { label: "About", href: "/docs/about.html" },
-  { label: "GitHub", href: "https://github.com/feathach/abap-dojo", external: true },
+  { label: "GitHub", href: "https://github.com/wharfe/abap-dojo", external: true },
 ] as const;
 
 export function AppFooter() {
