@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>About ABAP Dojo — Free Online ABAP Editor &amp; Playground</title>
+  <meta name="description" content="ABAP Dojo is a free, browser-based ABAP playground. Write, lint, execute, and validate ABAP code without an SAP system. 100% client-side — your code never leaves your browser." />
+  <link rel="canonical" href="https://abapdojo.com/docs/about.html" />
+  <meta property="og:title" content="About ABAP Dojo — Free Online ABAP Editor &amp; Playground" />
+  <meta property="og:description" content="ABAP Dojo is a free, browser-based ABAP playground. Write, lint, execute, and validate ABAP code without an SAP system. 100% client-side — your code never leaves your browser." />
+  <meta property="og:url" content="https://abapdojo.com/docs/about.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.png" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'] } } }
+    }
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-YY1YV51K2X');</script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <!-- Header with breadcrumb -->
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/" class="text-gray-400 hover:text-gray-200 transition-colors">Guides</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">About</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-4">About ABAP Dojo</h1>
+
+    <!-- Intro -->
+    <p class="text-gray-300 mb-4 leading-relaxed">
+      ABAP Dojo is a free, browser-based ABAP playground that lets you write, lint, execute, and validate ABAP code — no SAP system required. Everything runs entirely in your browser using the <a href="https://abaplint.org" class="text-blue-400 hover:text-blue-300 underline">abaplint</a> ecosystem.
+    </p>
+    <p class="text-gray-300 mb-10 leading-relaxed">
+      Whether you're an ABAP consultant wanting to test a snippet, a developer validating LLM-generated code, or someone learning ABAP without access to a SAP system, ABAP Dojo gives you a fast, private, zero-setup environment to get things done.
+    </p>
+
+    <!-- Features -->
+    <section class="mb-10">
+      <h2 class="text-xl font-semibold mb-4 text-gray-200">Features</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-1">Execute ABAP</h3>
+          <p class="text-sm text-gray-400">Transpile and run ABAP code in the browser. WRITE output displayed instantly.</p>
+        </div>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-1">AI Pitfall Detection</h3>
+          <p class="text-sm text-gray-400">Catch patterns LLMs commonly get wrong — STRING vs CHAR, Python-style loops, and more.</p>
+        </div>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-1">163 Lint Rules</h3>
+          <p class="text-sm text-gray-400">Real-time ABAP linting powered by abaplint. Issues highlighted as you type.</p>
+        </div>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-1">Safe for Client Code</h3>
+          <p class="text-sm text-gray-400">100% client-side. Your code never leaves your browser — no server, no logging.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="mb-10">
+      <h2 class="text-xl font-semibold mb-4 text-gray-200">How It Works</h2>
+      <ol class="list-decimal list-inside space-y-2 text-gray-300">
+        <li>You write ABAP code in the Monaco Editor — the same editor that powers VS Code.</li>
+        <li>abaplint parses your code in a Web Worker and reports lint issues in real time.</li>
+        <li>When you click Run, the abaplint transpiler converts your ABAP to JavaScript.</li>
+        <li>The transpiled code executes in a sandboxed iframe and WRITE output is returned to the UI.</li>
+      </ol>
+    </section>
+
+    <!-- Who Is This For? -->
+    <section class="mb-10">
+      <h2 class="text-xl font-semibold mb-4 text-gray-200">Who Is This For?</h2>
+      <ul class="list-disc list-inside space-y-2 text-gray-300">
+        <li><span class="text-gray-100 font-medium">ABAP consultants</span> — test snippets and validate logic outside of client systems.</li>
+        <li><span class="text-gray-100 font-medium">LLM users</span> — verify that AI-generated ABAP code actually works before using it.</li>
+        <li><span class="text-gray-100 font-medium">ABAP learners</span> — practice syntax and explore examples without an SAP license.</li>
+        <li><span class="text-gray-100 font-medium">S/4HANA migration teams</span> — check legacy-to-modern syntax conversions quickly.</li>
+      </ul>
+    </section>
+
+    <!-- Technology -->
+    <section class="mb-10">
+      <h2 class="text-xl font-semibold mb-4 text-gray-200">Technology</h2>
+      <p class="text-gray-300 mb-4 leading-relaxed">
+        ABAP Dojo is built on top of <a href="https://github.com/abaplint/abaplint" class="text-blue-400 hover:text-blue-300 underline">abaplint</a> by Lars Hvam — an open-source ABAP toolchain released under the MIT License. The abaplint ecosystem provides everything needed to parse, lint, transpile, and run ABAP entirely in the browser.
+      </p>
+      <ul class="space-y-1 text-sm font-mono text-gray-400">
+        <li><span class="text-blue-400">@abaplint/core</span> — ABAP parser and 163-rule linter</li>
+        <li><span class="text-blue-400">@abaplint/transpiler</span> — ABAP to JavaScript transpiler</li>
+        <li><span class="text-blue-400">@abaplint/runtime</span> — runtime support for transpiled ABAP</li>
+      </ul>
+      <p class="text-gray-400 text-sm mt-4">
+        The editor is <a href="https://microsoft.github.io/monaco-editor/" class="text-blue-400 hover:text-blue-300 underline">Monaco Editor</a>. The UI is built with React, TypeScript, and Tailwind CSS, bundled with Vite.
+      </p>
+    </section>
+
+    <!-- CTA -->
+    <a href="/" class="inline-block px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition-colors">Open ABAP Dojo →</a>
+  </main>
+
+  <!-- Footer -->
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>
