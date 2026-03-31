@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { EditorPanel } from "./components/EditorPanel";
 import { OutputPanel } from "./components/OutputPanel";
 import { ValidationReport } from "./components/ValidationReport";
+import { HeroBanner } from "./components/HeroBanner";
+import { AppFooter } from "./components/AppFooter";
 import { ModeHeader } from "./components/ModeHeader";
 import { Toolbar } from "./components/Toolbar";
 import {
@@ -70,6 +72,19 @@ function App() {
   const playgroundRequestIdRef = useRef<string>("");
 
   const sandboxRef = useRef<ExecutionSandboxHandle>(null);
+
+  // Hero visibility: hidden if dismissed, or if URL has code parameter
+  const [heroVisible, setHeroVisible] = useState(() => {
+    if (localStorage.getItem("hero-dismissed") === "true") return false;
+    const hash = window.location.hash;
+    if (hash && hash.includes("code=")) return false;
+    return true;
+  });
+
+  const handleDismissHero = useCallback(() => {
+    setHeroVisible(false);
+    localStorage.setItem("hero-dismissed", "true");
+  }, []);
 
   // Initialize worker
   useEffect(() => {
@@ -256,7 +271,7 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-gray-900 text-gray-100">
       <ModeHeader mode={mode} onModeChange={handleModeChange} />
-
+      <HeroBanner visible={heroVisible} onDismiss={handleDismissHero} />
       <Toolbar
         mode={mode}
         onRun={handleRun}
@@ -296,6 +311,8 @@ function App() {
           )}
         </div>
       </main>
+
+      <AppFooter />
 
       <ExecutionSandbox
         ref={sandboxRef}

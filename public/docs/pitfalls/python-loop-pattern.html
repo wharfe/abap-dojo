@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Pitfall: Python-Style Loop Patterns in ABAP — ABAP Dojo</title>
+  <meta name="description" content="When AI writes index-based ABAP loops instead of LOOP AT ... ASSIGNING. Detect and fix this common LLM pattern." />
+  <link rel="canonical" href="https://abapdojo.com/docs/pitfalls/python-loop-pattern.html" />
+  <meta property="og:title" content="LLM Pitfall: Python-Style Loop Patterns in ABAP — ABAP Dojo" />
+  <meta property="og:description" content="When AI writes index-based ABAP loops instead of LOOP AT ... ASSIGNING. Detect and fix this common LLM pattern." />
+  <meta property="og:url" content="https://abapdojo.com/docs/pitfalls/python-loop-pattern.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.png" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'] } } }
+    }
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-YY1YV51K2X');</script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <!-- Header with breadcrumb -->
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/#pitfalls" class="text-gray-400 hover:text-gray-200 transition-colors">LLM Pitfalls</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Python-Style Loop Patterns</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <!-- Title -->
+    <div class="mb-2">
+      <span class="text-xs font-medium uppercase tracking-wide text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">LLM Pitfall</span>
+    </div>
+    <h1 class="text-3xl font-bold mb-3">Python-Style Loop Patterns in ABAP</h1>
+    <p class="text-gray-400 text-lg mb-10 leading-relaxed">
+      LLMs trained on Python tend to generate index-based loops — <code class="text-sm font-mono text-blue-300">for i in range(len(lst))</code> translated into ABAP's <code class="text-sm font-mono text-blue-300">DO</code>/<code class="text-sm font-mono text-blue-300">READ TABLE ... INDEX</code> combo. ABAP has far better tools for this.
+    </p>
+
+    <!-- The Problem -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">The Problem</h2>
+      <p class="text-gray-300 mb-4 leading-relaxed">
+        Python's <code class="text-sm font-mono text-blue-300">for i in range(len(my_list))</code> is a common pattern when you need an index counter alongside the value. LLMs internalize this pattern deeply. When asked to generate ABAP, they reproduce its structure: a counter variable, a loop that increments the counter, and an explicit index-based lookup.
+      </p>
+      <p class="text-gray-300 leading-relaxed">
+        In ABAP, this is almost never the right approach. ABAP's <code class="text-sm font-mono text-blue-300">LOOP AT</code> statement was designed for iterating internal tables — it handles the index transparently via <code class="text-sm font-mono text-blue-300">SY-TABIX</code>, and provides <code class="text-sm font-mono text-blue-300">ASSIGNING</code> and <code class="text-sm font-mono text-blue-300">REFERENCE INTO</code> for direct access without unnecessary copying.
+      </p>
+    </section>
+
+    <!-- What It Looks Like -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">What It Looks Like</h2>
+      <p class="text-gray-300 mb-4 leading-relaxed">
+        Here is the pitfall pattern — a manually managed index counter with <code class="text-sm font-mono text-blue-300">DO ... TIMES</code> and <code class="text-sm font-mono text-blue-300">READ TABLE ... INDEX</code>:
+      </p>
+
+      <div class="mb-1 text-sm font-medium text-red-400">&#9888; Pitfall — LLM-generated code:</div>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto mb-6"><code class="text-sm font-mono text-gray-300">REPORT ztest_pitfall2.
+TYPES: BEGIN OF ty_item,
+         name TYPE string,
+         qty  TYPE i,
+       END OF ty_item.
+DATA lt_items TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY.
+DATA ls_item TYPE ty_item.
+
+" Populate table
+ls_item-name = 'Widget A'. ls_item-qty = 10. APPEND ls_item TO lt_items.
+ls_item-name = 'Widget B'. ls_item-qty = 5.  APPEND ls_item TO lt_items.
+ls_item-name = 'Widget C'. ls_item-qty = 20. APPEND ls_item TO lt_items.
+
+" Python-style: manual index loop
+DATA lv_index TYPE i.
+lv_index = 1.
+DO LINES( lt_items ) TIMES.
+  READ TABLE lt_items INTO ls_item INDEX lv_index.
+  WRITE: / ls_item-name, ls_item-qty.
+  lv_index = lv_index + 1.
+ENDDO.</code></pre>
+
+      <p class="text-gray-400 text-sm leading-relaxed">
+        This actually works — but it is the ABAP equivalent of writing Python as if it were C. The intent of the code is obscured by the ceremony of managing an index manually.
+      </p>
+    </section>
+
+    <!-- Why It's Bad -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">Why It's a Problem</h2>
+      <div class="flex flex-col gap-3">
+        <div class="flex gap-3 p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <div class="text-red-400 font-bold mt-0.5">1</div>
+          <div>
+            <h3 class="font-semibold text-gray-100 mb-1">Verbose and harder to read</h3>
+            <p class="text-sm text-gray-400">Four lines of loop scaffolding replace what should be a single <code class="font-mono text-xs text-blue-300">LOOP AT</code> statement. The intent — "iterate over all items" — is buried under the mechanics.</p>
+          </div>
+        </div>
+        <div class="flex gap-3 p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <div class="text-red-400 font-bold mt-0.5">2</div>
+          <div>
+            <h3 class="font-semibold text-gray-100 mb-1">Off-by-one risk</h3>
+            <p class="text-sm text-gray-400">Manually managed index counters are a classic source of off-by-one bugs. Starting at 0 instead of 1 (Python vs ABAP convention) is an error LLMs sometimes make here.</p>
+          </div>
+        </div>
+        <div class="flex gap-3 p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <div class="text-red-400 font-bold mt-0.5">3</div>
+          <div>
+            <h3 class="font-semibold text-gray-100 mb-1">Unnecessary data copy</h3>
+            <p class="text-sm text-gray-400"><code class="font-mono text-xs text-blue-300">READ TABLE ... INTO ls_item</code> copies the row every iteration. <code class="font-mono text-xs text-blue-300">LOOP AT ... ASSIGNING FIELD-SYMBOL</code> gives you a direct reference — no copy, and in-place modification is possible.</p>
+          </div>
+        </div>
+        <div class="flex gap-3 p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <div class="text-red-400 font-bold mt-0.5">4</div>
+          <div>
+            <h3 class="font-semibold text-gray-100 mb-1">Misses ABAP idioms entirely</h3>
+            <p class="text-sm text-gray-400">ABAP's loop system supports inline filtering (<code class="font-mono text-xs text-blue-300">WHERE</code>), group-by (<code class="font-mono text-xs text-blue-300">GROUP BY</code>), and early exit (<code class="font-mono text-xs text-blue-300">EXIT</code>/<code class="font-mono text-xs text-blue-300">CHECK</code>). The index-based pattern forfeits all of these.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- The Fix -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">The Fix</h2>
+      <p class="text-gray-300 mb-6 leading-relaxed">
+        Use <code class="text-sm font-mono text-blue-300">LOOP AT ... INTO</code> for read-only access with a work area copy, or <code class="text-sm font-mono text-blue-300">LOOP AT ... ASSIGNING FIELD-SYMBOL</code> for direct reference (preferred for modification or performance-sensitive loops).
+      </p>
+
+      <div class="mb-1 text-sm font-medium text-emerald-400">&#10003; Correct — idiomatic ABAP:</div>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto mb-6"><code class="text-sm font-mono text-gray-300">REPORT ztest_correct2.
+TYPES: BEGIN OF ty_item,
+         name TYPE string,
+         qty  TYPE i,
+       END OF ty_item.
+DATA lt_items TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY.
+
+" Populate table
+lt_items = VALUE #(
+  ( name = 'Widget A' qty = 10 )
+  ( name = 'Widget B' qty = 5  )
+  ( name = 'Widget C' qty = 20 )
+).
+
+" Option 1: LOOP INTO work area (copy per row)
+DATA ls_item TYPE ty_item.
+LOOP AT lt_items INTO ls_item.
+  WRITE: / ls_item-name, ls_item-qty.
+ENDLOOP.
+
+" Option 2: LOOP ASSIGNING field-symbol (direct reference, no copy)
+FIELD-SYMBOLS: &lt;ls_item&gt; TYPE ty_item.
+LOOP AT lt_items ASSIGNING &lt;ls_item&gt;.
+  WRITE: / &lt;ls_item&gt;-name, &lt;ls_item&gt;-qty.
+ENDLOOP.
+
+" Option 3: inline DATA declaration (ABAP 7.40+)
+LOOP AT lt_items INTO DATA(ls_inline).
+  WRITE: / ls_inline-name, ls_inline-qty.
+ENDLOOP.</code></pre>
+
+      <div class="p-4 bg-blue-900/30 border border-blue-700/50 rounded-lg mb-6">
+        <p class="text-sm text-blue-200 leading-relaxed">
+          <strong class="text-blue-100">When do you actually need the index?</strong> If you genuinely need the row number, <code class="font-mono text-xs">SY-TABIX</code> is available inside any <code class="font-mono text-xs">LOOP AT</code> automatically. You never need to manage a counter variable manually.
+        </p>
+      </div>
+    </section>
+
+    <!-- Side-by-side comparison -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">Side-by-Side Comparison</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <div class="mb-1 text-sm font-medium text-red-400">&#9888; LLM / Python-style</div>
+          <pre class="bg-gray-950 border border-red-900/50 rounded-lg p-3 overflow-x-auto h-full"><code class="text-xs font-mono text-gray-300">DATA lv_index TYPE i.
+lv_index = 1.
+DO LINES( lt_items ) TIMES.
+  READ TABLE lt_items
+    INTO ls_item
+    INDEX lv_index.
+  " ... process ls_item ...
+  lv_index = lv_index + 1.
+ENDDO.</code></pre>
+        </div>
+        <div>
+          <div class="mb-1 text-sm font-medium text-emerald-400">&#10003; Idiomatic ABAP</div>
+          <pre class="bg-gray-950 border border-emerald-900/50 rounded-lg p-3 overflow-x-auto h-full"><code class="text-xs font-mono text-gray-300">LOOP AT lt_items
+  ASSIGNING FIELD-SYMBOL(&lt;item&gt;).
+  " ... process &lt;item&gt; ...
+  " SY-TABIX = current index
+  " (available automatically)
+ENDLOOP.</code></pre>
+        </div>
+      </div>
+      <p class="text-sm text-gray-500 mt-3">Same result. The idiomatic version is shorter, clearer, and avoids copying each row.</p>
+    </section>
+
+    <!-- Bonus: when ASSIGNING vs INTO -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">ASSIGNING vs INTO — Which to Use?</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="border-b border-gray-700">
+              <th class="pb-2 pr-4 text-gray-400 font-medium">Situation</th>
+              <th class="pb-2 pr-4 text-gray-400 font-medium">Use</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800">
+            <tr>
+              <td class="py-2 pr-4 text-gray-300">Read-only iteration, small rows</td>
+              <td class="py-2 pr-4 font-mono text-blue-300">LOOP AT ... INTO DATA(ls)</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4 text-gray-300">Modifying rows in-place</td>
+              <td class="py-2 pr-4 font-mono text-blue-300">LOOP AT ... ASSIGNING &lt;fs&gt;</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4 text-gray-300">Large rows, performance matters</td>
+              <td class="py-2 pr-4 font-mono text-blue-300">LOOP AT ... ASSIGNING &lt;fs&gt;</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4 text-gray-300">Need a ref for later use outside the loop</td>
+              <td class="py-2 pr-4 font-mono text-blue-300">LOOP AT ... REFERENCE INTO DATA(lr)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <div class="text-center mt-10">
+      <p class="text-gray-400 text-sm mb-4">Run the pitfall code in ABAP Dojo's AI Validator to see the pattern detected live.</p>
+      <a href="/#mode=validator&code=eJyFkVFPgzAUhd/5FedtOreqeyTZQxc6bGQtoTXbnhaSsUnCYEo14q8XBnQkmshTe8+9p989RCyUkca3SUqzO6fmEGfZjDhjBMEKYXt3EVbmtcinpamyBGm+T76QFcXZ0duQKRcL5nMBuYSpdqlJThMH/ZfHpwRNG0rznubHgfRmKrRSaqtMeAMf4nhUU2TmcivbZqWp8GjkQdNFwAbdWHP9BI8t6Uug8cy2/XjZypdp69xVpxfAOUbrdH9MzOgqNHhzPD4Qh4Zhw2V9pCX6bePHf9rM/rEZg+elSeI9igMCKUNQDUIIqFLcF1z4E3yUdX5Q22m9ON+43XKfe/a/tEHW7/aFmr0OQCLggqmba4i30HzFFKkjjxjtY7QyFw1Yx8iFxzb2jWZkHXHNXNxjuPgEg22brgGEPd41PHUAniQ/b1S/KA==" class="inline-block px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors">
+        Validate this code in ABAP Dojo &#8594;
+      </a>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500 mt-10">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">&#8592; Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>

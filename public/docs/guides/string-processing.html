@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ABAP String Processing — CONCATENATE, &amp;&amp; Operator, STRLEN</title>
+  <meta name="description" content="ABAP string handling from legacy to modern syntax. CONCATENATE, &amp;&amp; operator, STRLEN, TRANSLATE — with live examples." />
+  <link rel="canonical" href="https://abapdojo.com/docs/guides/string-processing.html" />
+  <meta property="og:title" content="ABAP String Processing — CONCATENATE, &amp;&amp; Operator, STRLEN" />
+  <meta property="og:description" content="ABAP string handling from legacy to modern syntax. CONCATENATE, &amp;&amp; operator, STRLEN, TRANSLATE — with live examples." />
+  <meta property="og:url" content="https://abapdojo.com/docs/guides/string-processing.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.png" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'] } } }
+    }
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-YY1YV51K2X');</script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <!-- Header with breadcrumb -->
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/" class="text-gray-400 hover:text-gray-200 transition-colors">Guides</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">String Processing</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">ABAP String Processing</h1>
+    <p class="text-gray-400 text-lg mb-10">
+      String handling in ABAP has evolved significantly over the years. Understanding the difference between
+      <code class="text-blue-300">STRING</code> and <code class="text-blue-300">CHAR(n)</code> types, and knowing
+      both legacy and modern syntax, is essential for writing correct and maintainable ABAP code.
+      This guide covers the most common string operations with runnable examples.
+    </p>
+
+    <!-- Section: String Types -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">String Types in ABAP</h2>
+      <p class="text-gray-400 mb-4">
+        ABAP has two fundamentally different string types: <code class="text-blue-300">STRING</code> is a dynamic-length
+        heap-allocated string, while <code class="text-blue-300">CHAR(n)</code> is a fixed-length character field stored
+        inline. Using <code class="text-blue-300">STRING</code> where <code class="text-blue-300">CHAR(n)</code> is expected
+        (e.g. a database field) causes implicit conversions and potential truncation bugs.
+        Choose the type that matches your use case and the target field definition.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Fixed-length: trailing spaces are significant, padded to length
+DATA lv_char TYPE c LENGTH 20.      " or: CHAR20 / char20
+lv_char = 'Hello'.                  " stored as 'Hello               '
+
+" Dynamic-length: no padding, heap-allocated
+DATA lv_string TYPE string.
+lv_string = 'Hello'.                " stored as 'Hello' (5 chars)</code></pre>
+    </section>
+
+    <!-- Section: Concatenation with && -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Concatenation with &amp;&amp;</h2>
+      <p class="text-gray-400 mb-4">
+        Since ABAP 7.02, you can use the <code class="text-blue-300">&amp;&amp;</code> operator to concatenate strings inline,
+        just like <code class="text-blue-300">+</code> in Python or Java. This is much more readable than the legacy
+        <code class="text-blue-300">CONCATENATE</code> statement and works naturally in assignments and expressions.
+        String templates with <code class="text-blue-300">|...|</code> syntax are even more powerful for complex formatting.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA: lv_first  TYPE string VALUE 'John',
+      lv_last   TYPE string VALUE 'Doe',
+      lv_result TYPE string.
+
+" Using && operator (modern, recommended)
+lv_result = lv_first &amp;&amp; ' ' &amp;&amp; lv_last.
+WRITE: / lv_result.  " John Doe
+
+" Using string template (even more powerful)
+lv_result = |{ lv_first } { lv_last }|.
+WRITE: / lv_result.  " John Doe</code></pre>
+    </section>
+
+    <!-- Section: CONCATENATE Statement -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">CONCATENATE Statement (Legacy)</h2>
+      <p class="text-gray-400 mb-4">
+        The legacy <code class="text-blue-300">CONCATENATE</code> statement joins multiple strings into a target variable
+        and optionally inserts a separator with <code class="text-blue-300">SEPARATED BY</code>.
+        You will encounter this pattern frequently in existing ABAP codebases, so knowing how to read it is important.
+        For new code, prefer the <code class="text-blue-300">&amp;&amp;</code> operator or string templates instead.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA: lv_city    TYPE string VALUE 'Tokyo',
+      lv_country TYPE string VALUE 'Japan',
+      lv_result  TYPE string.
+
+" Legacy style (still valid, commonly found in older systems)
+CONCATENATE lv_city ', ' lv_country INTO lv_result.
+WRITE: / lv_result.  " Tokyo, Japan
+
+" With SEPARATED BY
+CONCATENATE lv_city lv_country INTO lv_result SEPARATED BY ', '.
+WRITE: / lv_result.  " Tokyo, Japan</code></pre>
+    </section>
+
+    <!-- Section: String Length -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">String Length with STRLEN()</h2>
+      <p class="text-gray-400 mb-4">
+        <code class="text-blue-300">STRLEN()</code> returns the number of characters in a string, not counting trailing
+        spaces for <code class="text-blue-300">CHAR</code> fields. It is the standard function for getting string length
+        in ABAP and works on both <code class="text-blue-300">STRING</code> and <code class="text-blue-300">CHAR(n)</code> types.
+        Use it for validation, substring operations, and any length-dependent logic.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA: lv_text   TYPE string VALUE 'Hello, ABAP!',
+      lv_length TYPE i.
+
+lv_length = STRLEN( lv_text ).
+WRITE: / 'Length:', lv_length.  " Length: 12
+
+" Useful for conditional checks
+IF STRLEN( lv_text ) > 10.
+  WRITE: / 'String is longer than 10 characters.'.
+ENDIF.</code></pre>
+    </section>
+
+    <!-- Section: Case Conversion -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Case Conversion with TRANSLATE</h2>
+      <p class="text-gray-400 mb-4">
+        The <code class="text-blue-300">TRANSLATE</code> statement converts a string to upper or lower case in place.
+        It modifies the variable directly rather than returning a new value, which is a common gotcha for developers
+        coming from other languages. For read-only conversions without side effects, use the
+        <code class="text-blue-300">to_upper</code> / <code class="text-blue-300">to_lower</code> string functions available in ABAP 7.40+.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA lv_text TYPE string VALUE 'Hello World'.
+
+" TRANSLATE modifies the variable in place
+TRANSLATE lv_text TO UPPER CASE.
+WRITE: / lv_text.  " HELLO WORLD
+
+TRANSLATE lv_text TO LOWER CASE.
+WRITE: / lv_text.  " hello world
+
+" Modern alternative (ABAP 7.40+): expression-style, no side effects
+DATA lv_upper TYPE string.
+lv_upper = to_upper( lv_text ).
+WRITE: / lv_upper.  " HELLO WORLD
+WRITE: / lv_text.   " hello world (unchanged)</code></pre>
+    </section>
+
+    <!-- Full Example -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Full Example</h2>
+      <p class="text-gray-400 mb-4">
+        This complete example combines all the string operations covered in this guide.
+        Paste it into ABAP Dojo and click Run to see each technique in action.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">REPORT zstring_processing.
+
+DATA: lv_first   TYPE string VALUE 'John',
+      lv_last    TYPE string VALUE 'Doe',
+      lv_full    TYPE string,
+      lv_length  TYPE i,
+      lv_upper   TYPE string.
+
+" Concatenation with &&
+lv_full = lv_first &amp;&amp; ' ' &amp;&amp; lv_last.
+WRITE: / 'Full name:', lv_full.
+
+" String template
+WRITE: / |Hello, { lv_full }!|.
+
+" Length
+lv_length = STRLEN( lv_full ).
+WRITE: / 'Name length:', lv_length.
+
+" Upper case
+lv_upper = lv_full.
+TRANSLATE lv_upper TO UPPER CASE.
+WRITE: / 'Upper case:', lv_upper.
+
+" Legacy CONCATENATE with SEPARATED BY
+DATA: lv_city TYPE string VALUE 'Berlin',
+      lv_country TYPE string VALUE 'Germany',
+      lv_location TYPE string.
+CONCATENATE lv_city lv_country INTO lv_location SEPARATED BY ', '.
+WRITE: / 'Location:', lv_location.</code></pre>
+    </section>
+
+    <!-- CTA -->
+    <div class="text-center mt-10">
+      <a href="/#code=eJx1j9FqwyAUhu99inMVtzGy+8IuXCq0IEkwZqFXJXSuDVgt6lrY0+9sWRtXOkQE/fz+/0heV1LBZ9QhrkP0g93mhMyZYmCO6/fBhwhqVXMY3+CViZYDXWhjHM0voOmRuwV2zpu3BPQ6fJg/Sox7gMLZTR+17ePgLJyGuIMsIxP/PLXJMqC48PjNzUknl4pP9tFYlQVTvMSNQejeaxtJensxnvsvS1UlHRteM4ngHF5WQB+BnoOerqKacWKj7TbuRmaGEBU/FzP82igpeHmXyO/Hkn3QsHH2qH3AwYmSrGwES4cB7NTWNZdQsIbnib49HLT/tqdt/jGIqrthEO50bfgCn4Skyw==" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Try this code in ABAP Dojo →
+      </a>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>

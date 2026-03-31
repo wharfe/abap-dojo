@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ABAP Guides &amp; Resources — ABAP Dojo</title>
+  <meta name="description" content="Learn ABAP with interactive guides and understand common LLM pitfalls. Try every example live in ABAP Dojo." />
+  <link rel="canonical" href="https://abapdojo.com/docs/" />
+  <meta property="og:title" content="ABAP Guides &amp; Resources — ABAP Dojo" />
+  <meta property="og:description" content="Learn ABAP with interactive guides and understand common LLM pitfalls. Try every example live in ABAP Dojo." />
+  <meta property="og:url" content="https://abapdojo.com/docs/" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.png" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'] } } }
+    }
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-YY1YV51K2X');</script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <!-- Header with breadcrumb -->
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Guides &amp; Resources</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">ABAP Guides &amp; Resources</h1>
+    <p class="text-gray-400 text-lg mb-10">Interactive tutorials and AI pitfall guides. Every example runs live in ABAP Dojo.</p>
+
+    <!-- Guides section -->
+    <section class="mb-10">
+      <h2 class="text-xl font-semibold mb-4 text-gray-200">Guides</h2>
+      <div class="flex flex-col gap-3">
+        <a href="/docs/guides/internal-tables.html" class="block p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-500 transition-colors">
+          <h3 class="font-semibold text-gray-100 mb-1">Internal Tables</h3>
+          <p class="text-sm text-gray-400">Master ABAP internal table operations with live examples.</p>
+        </a>
+        <a href="/docs/guides/string-processing.html" class="block p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-500 transition-colors">
+          <h3 class="font-semibold text-gray-100 mb-1">String Processing</h3>
+          <p class="text-sm text-gray-400">String handling techniques from legacy to modern ABAP.</p>
+        </a>
+        <a href="/docs/guides/modern-syntax.html" class="block p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-500 transition-colors">
+          <h3 class="font-semibold text-gray-100 mb-1">Modern ABAP Syntax</h3>
+          <p class="text-sm text-gray-400">ABAP 7.40+ features that make your code concise and readable.</p>
+        </a>
+      </div>
+    </section>
+
+    <!-- LLM Pitfalls section -->
+    <section id="pitfalls" class="mb-10">
+      <h2 class="text-xl font-semibold mb-4 text-gray-200">LLM Pitfalls</h2>
+      <div class="flex flex-col gap-3">
+        <a href="/docs/pitfalls/string-char-confusion.html" class="block p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-emerald-500 transition-colors">
+          <h3 class="font-semibold text-gray-100 mb-1">STRING vs CHAR Confusion</h3>
+          <p class="text-sm text-gray-400">Why LLMs default to STRING when CHAR(n) is expected.</p>
+        </a>
+        <a href="/docs/pitfalls/python-loop-pattern.html" class="block p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-emerald-500 transition-colors">
+          <h3 class="font-semibold text-gray-100 mb-1">Python-Style Loop Patterns</h3>
+          <p class="text-sm text-gray-400">When LLMs write index-based loops instead of LOOP AT ... ASSIGNING.</p>
+        </a>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <a href="/" class="inline-block px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition-colors">← Back to ABAP Dojo</a>
+  </main>
+
+  <!-- Footer -->
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Pitfall: STRING vs CHAR Confusion in ABAP — ABAP Dojo</title>
+  <meta name="description" content="Why AI-generated ABAP often uses STRING when CHAR(n) is expected. Understand the difference and catch this common LLM mistake." />
+  <link rel="canonical" href="https://abapdojo.com/docs/pitfalls/string-char-confusion.html" />
+  <meta property="og:title" content="LLM Pitfall: STRING vs CHAR Confusion in ABAP — ABAP Dojo" />
+  <meta property="og:description" content="Why AI-generated ABAP often uses STRING when CHAR(n) is expected. Understand the difference and catch this common LLM mistake." />
+  <meta property="og:url" content="https://abapdojo.com/docs/pitfalls/string-char-confusion.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.png" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'] } } }
+    }
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-YY1YV51K2X');</script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <!-- Header with breadcrumb -->
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/#pitfalls" class="text-gray-400 hover:text-gray-200 transition-colors">LLM Pitfalls</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">STRING vs CHAR Confusion</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <!-- Title -->
+    <div class="mb-2">
+      <span class="text-xs font-medium uppercase tracking-wide text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">LLM Pitfall</span>
+    </div>
+    <h1 class="text-3xl font-bold mb-3">STRING vs CHAR Confusion in ABAP</h1>
+    <p class="text-gray-400 text-lg mb-10 leading-relaxed">
+      LLMs default to <code class="text-sm font-mono text-blue-300">TYPE string</code> for almost every text variable. In ABAP, this is often wrong — and interfacing with DDIC structures will silently behave differently than you expect.
+    </p>
+
+    <!-- The Problem -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">The Problem</h2>
+      <p class="text-gray-300 mb-4 leading-relaxed">
+        Python has one string type. JavaScript has one string type. LLMs are trained heavily on both. When they write ABAP, they carry this "one string type" assumption into the code and reach for <code class="text-sm font-mono text-blue-300">TYPE string</code> everywhere.
+      </p>
+      <p class="text-gray-300 leading-relaxed">
+        ABAP has two fundamentally different text types: <strong class="text-gray-100">STRING</strong> (dynamic length, heap-allocated) and <strong class="text-gray-100">CHAR(n) / C(n)</strong> (fixed length, value semantics). They look similar in a WRITE statement but behave very differently in real SAP scenarios.
+      </p>
+    </section>
+
+    <!-- Why It Matters -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">Why It Matters</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-2">Trailing spaces</h3>
+          <p class="text-sm text-gray-400">
+            <code class="font-mono text-blue-300">CHAR(10)</code> is always exactly 10 characters, padded with spaces. <code class="font-mono text-blue-300">STRING</code> contains only what you assign. Comparisons like <code class="font-mono text-blue-300">IF lv_char = 'ABC'</code> behave differently depending on type.
+          </p>
+        </div>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-2">DDIC compatibility</h3>
+          <p class="text-sm text-gray-400">
+            DDIC domains and table fields are almost always typed as <code class="font-mono text-blue-300">CHAR</code>. Assigning a <code class="font-mono text-blue-300">STRING</code> to a structure field that expects <code class="font-mono text-blue-300">CHAR</code> triggers an implicit conversion — or a runtime error in strict contexts.
+          </p>
+        </div>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-2">Database field mapping</h3>
+          <p class="text-sm text-gray-400">
+            SAP database tables store text as fixed-length <code class="font-mono text-blue-300">CHAR</code>. If your work area field is <code class="font-mono text-blue-300">TYPE string</code> instead of matching the DDIC type, you'll hit type mismatch issues at the database layer.
+          </p>
+        </div>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-2">Performance</h3>
+          <p class="text-sm text-gray-400">
+            <code class="font-mono text-blue-300">STRING</code> variables are heap-allocated references. In tight loops over large internal tables, using <code class="font-mono text-blue-300">STRING</code> where <code class="font-mono text-blue-300">CHAR</code> would suffice wastes memory and increases GC pressure.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- How to Spot It -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">How to Spot It</h2>
+      <p class="text-gray-300 mb-4 leading-relaxed">
+        Look for these patterns in LLM-generated code that are likely to cause problems:
+      </p>
+      <ul class="list-disc list-inside space-y-2 text-gray-300 mb-4">
+        <li><code class="text-sm font-mono text-blue-300">DATA lv_xxx TYPE string</code> — when the variable will be moved into a DDIC structure or used in a <code class="font-mono text-blue-300">SELECT</code> WHERE clause</li>
+        <li><code class="text-sm font-mono text-blue-300">DATA ls_header TYPE string</code> — using STRING for a variable that is clearly meant to be a short code or key (e.g., material number, company code)</li>
+        <li>Structure fields typed <code class="text-sm font-mono text-blue-300">TYPE string</code> in a locally defined structure meant to mirror a database table row</li>
+      </ul>
+      <p class="text-gray-300 leading-relaxed">
+        The AI Validator in ABAP Dojo flags these patterns automatically using the <code class="text-sm font-mono text-blue-300">llm-string-char-confusion</code> rule.
+      </p>
+    </section>
+
+    <!-- The Fix: Code Examples -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">The Fix</h2>
+      <p class="text-gray-300 mb-6 leading-relaxed">
+        Use <code class="text-sm font-mono text-blue-300">TYPE string</code> when you genuinely need a dynamic-length text buffer — free-form text, concatenated messages, long descriptions. Use <code class="text-sm font-mono text-blue-300">TYPE char<em>n</em></code> (or a DDIC reference like <code class="font-mono text-blue-300">TYPE matnr</code>) when you're working with codes, keys, or fields that map to database columns.
+      </p>
+
+      <div class="mb-1 text-sm font-medium text-red-400">&#9888; Pitfall — LLM-generated code:</div>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto mb-6"><code class="text-sm font-mono text-gray-300">REPORT ztest_pitfall1.
+* LLM Pitfall: Using STRING where CHAR is expected
+DATA lv_name TYPE string VALUE 'ABAP Dojo'.
+DATA lv_code TYPE string VALUE '001'.
+* In real SAP, lv_code might need to be TYPE char3
+* to match a DDIC domain.
+WRITE: 'Name:', lv_name.
+WRITE: / 'Code:', lv_code.</code></pre>
+
+      <div class="mb-1 text-sm font-medium text-emerald-400">&#10003; Correct — idiomatic ABAP:</div>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto mb-6"><code class="text-sm font-mono text-gray-300">REPORT ztest_correct1.
+* Use CHAR(n) for fixed-length fields (codes, keys, DDIC-mapped fields)
+* Use STRING only for variable-length text content
+DATA lv_name TYPE string VALUE 'ABAP Dojo'.   " OK: display text, no DDIC constraint
+DATA lv_code TYPE char3  VALUE '001'.         " Correct: fixed 3-char code
+DATA lv_matnr TYPE matnr.                     " Best: use DDIC domain directly
+lv_matnr = '000000000000100042'.
+WRITE: 'Name:', lv_name.
+WRITE: / 'Code:', lv_code.
+WRITE: / 'Matnr:', lv_matnr.</code></pre>
+
+      <div class="p-4 bg-blue-900/30 border border-blue-700/50 rounded-lg">
+        <p class="text-sm text-blue-200 leading-relaxed">
+          <strong class="text-blue-100">Rule of thumb:</strong> If the value goes into a structure, a SELECT statement, or anything that touches the DDIC, match the DDIC type. Reserve <code class="font-mono text-xs">TYPE string</code> for pure in-memory text manipulation — user messages, output strings, dynamic content you build at runtime.
+        </p>
+      </div>
+    </section>
+
+    <!-- Quick Reference -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4 text-gray-100">Quick Reference</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="border-b border-gray-700">
+              <th class="pb-2 pr-4 text-gray-400 font-medium">Scenario</th>
+              <th class="pb-2 pr-4 text-gray-400 font-medium">Use</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800">
+            <tr>
+              <td class="py-2 pr-4 text-gray-300">Company code, plant, material number</td>
+              <td class="py-2 pr-4 font-mono text-blue-300">TYPE bukrs / werks / matnr</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4 text-gray-300">Short fixed-length code with no DDIC type</td>
+              <td class="py-2 pr-4 font-mono text-blue-300">TYPE char&lt;n&gt;</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4 text-gray-300">Long description, free-form text</td>
+              <td class="py-2 pr-4 font-mono text-blue-300">TYPE string</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4 text-gray-300">Concatenated messages, output strings</td>
+              <td class="py-2 pr-4 font-mono text-blue-300">TYPE string</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4 text-gray-300">Structure field mirroring a DB table column</td>
+              <td class="py-2 pr-4 font-mono text-blue-300">TYPE &lt;ddic_type&gt;</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <div class="text-center mt-10">
+      <p class="text-gray-400 text-sm mb-4">Try the pitfall code in ABAP Dojo's AI Validator to see the rule fire in real time.</p>
+      <a href="/#mode=validator&code=eJxtjztvgzAUhff8irNZqiKaqBubA6hFoikipFWnyMGX4ApsZFvp49fXNAlTx3seV9+psvKlqvHjyfnDqHwr+n4dLe5QFM8oL3eMvVP6hF1d5dtHfHZkCckTr6Ac6GukxpNcpLzm6M8HLQZC/V5mcN5OtVde7DMwvuElUvNhWDRnGyP/za5WazZB5BqWRI8dL5dzflCnzkMTSXiD4/VB0wn7ECpBGoRvOgikaZ5AmkEoHd3ghZYX9CN14kyhIFXbhkHa999QGo0ZRmGVM9r9hdMNzEhWeBWUaPFW5XUWg23Dypgtb4Nn4x4sCZBXa+KNfgEKbW/J" class="inline-block px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors">
+        Validate this code in ABAP Dojo &#8594;
+      </a>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500 mt-10">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">&#8592; Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>
