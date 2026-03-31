@@ -24,6 +24,14 @@ function getInitialCode(): string {
   return DEFAULT_CODE;
 }
 
+// Module-level worker reference and debounced lint function.
+// Kept outside the component to satisfy react-hooks/refs (no ref reads during render).
+let appWorker: Worker | null = null;
+
+const debouncedLint = debounce((code: string) => {
+  appWorker?.postMessage({ type: "lint", source: code });
+}, 400);
+
 type OutputTab = "output" | "lint";
 
 function App() {
@@ -34,13 +42,12 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [activeTab, setActiveTab] = useState<OutputTab>("output");
 
-  const workerRef = useRef<Worker | null>(null);
   const sandboxRef = useRef<ExecutionSandboxHandle>(null);
 
   // Initialize worker
   useEffect(() => {
     const worker = new AbaplintWorker();
-    workerRef.current = worker;
+    appWorker = worker;
 
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const data = event.data;
@@ -58,28 +65,20 @@ function App() {
       }
     };
 
-    return () => worker.terminate();
+    return () => {
+      worker.terminate();
+      appWorker = null;
+    };
   }, []);
 
-  // Debounced lint
-  const requestLint = useCallback(
-    debounce((code: string) => {
-      workerRef.current?.postMessage({ type: "lint", source: code });
-    }, 400),
-    [],
-  );
-
-  const handleChange = useCallback(
-    (value: string) => {
-      setSource(value);
-      requestLint(value);
-    },
-    [requestLint],
-  );
+  const handleChange = useCallback((value: string) => {
+    setSource(value);
+    debouncedLint(value);
+  }, []);
 
   // Initial lint
   useEffect(() => {
-    requestLint(source);
+    debouncedLint(source);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run
@@ -88,7 +87,7 @@ function App() {
     setError(null);
     setIsRunning(true);
     setActiveTab("output");
-    workerRef.current?.postMessage({ type: "transpile", source });
+    appWorker?.postMessage({ type: "transpile", source });
   }, [source]);
 
   // Sample selection
@@ -96,8 +95,8 @@ function App() {
     setSource(sample.code);
     setOutput([]);
     setError(null);
-    requestLint(sample.code);
-  }, [requestLint]);
+    debouncedLint(sample.code);
+  }, []);
 
   // Share
   const handleShare = useCallback(() => {

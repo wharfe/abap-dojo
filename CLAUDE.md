@@ -19,7 +19,7 @@ Runs entirely client-side using the abaplint ecosystem (MIT License).
 - `npm run build` - production build
 - `npm run preview` - preview production build
 - `npm run lint` - run ESLint
-- `npm run typecheck` - run TypeScript type checking
+- `npx tsc --noEmit` - run TypeScript type checking (no dedicated script; `tsc -b` runs as part of `npm run build`)
 
 ## Code Style
 
