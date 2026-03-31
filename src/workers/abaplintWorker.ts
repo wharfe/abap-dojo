@@ -1,6 +1,9 @@
+// src/workers/abaplintWorker.ts
 import { Registry, MemoryFile, Config, Issue } from "@abaplint/core";
 import { Transpiler, config as transpilerConfig } from "@abaplint/transpiler";
 import type { WorkerRequest, WorkerResponse, LintIssue } from "../types/messages";
+import type { StageResult, ValidationStage } from "../types/validation";
+import { detectPitfalls } from "../rules/detector";
 
 const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
 
@@ -68,19 +71,91 @@ async function handleTranspile(source: string): Promise<WorkerResponse> {
   }
 }
 
-const workerSelf = self as unknown as { onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null; postMessage: (data: WorkerResponse) => void };
+function postProgress(stage: ValidationStage, status: "running" | "skipped"): void {
+  self.postMessage({ type: "validate-progress", stage, status });
+}
 
-workerSelf.onmessage = async (event: MessageEvent<WorkerRequest>) => {
-  const request = event.data;
-  let response: WorkerResponse;
+function postStageResult(stage: ValidationStage, result: StageResult): void {
+  self.postMessage({ type: "validate-stage-result", stage, result });
+}
 
-  if (request.type === "lint") {
-    response = await handleLint(request.source);
-  } else if (request.type === "transpile") {
-    response = await handleTranspile(request.source);
-  } else {
+async function handleValidate(source: string): Promise<void> {
+  const reg = new Registry(abaplintConfig);
+  reg.addFile(new MemoryFile("ztest.prog.abap", source));
+
+  // Stage 1: Syntax
+  postProgress("syntax", "running");
+  await reg.parseAsync();
+  const allIssues = reg.findIssues();
+  const syntaxErrors = allIssues.filter(
+    (i) => i.getSeverity().toString() === "Error",
+  );
+  const hasSyntaxErrors = syntaxErrors.length > 0;
+
+  postStageResult("syntax", {
+    status: hasSyntaxErrors ? "fail" : "pass",
+    error: hasSyntaxErrors ? syntaxErrors[0].getMessage() : undefined,
+  });
+
+  // Stage 2: Lint + LLM Pitfalls
+  postProgress("lint", "running");
+  const lintIssues = allIssues.map(issueToLintIssue);
+  const pitfalls = detectPitfalls(reg, lintIssues);
+
+  const hasLintWarnings = lintIssues.some((i) => i.severity === "warning");
+  const hasLintErrors = lintIssues.some((i) => i.severity === "error");
+  const hasPitfallErrors = pitfalls.some((p) => p.severity === "error");
+
+  let lintStatus: StageResult["status"] = "pass";
+  if (hasLintErrors || hasPitfallErrors) lintStatus = "fail";
+  else if (hasLintWarnings || pitfalls.length > 0) lintStatus = "warn";
+
+  postStageResult("lint", {
+    status: lintStatus,
+    issues: lintIssues,
+    pitfalls,
+  });
+
+  // Stage 3: Transpile (skip if syntax errors)
+  if (hasSyntaxErrors) {
+    postProgress("transpile", "skipped");
+    postStageResult("transpile", { status: "skipped" });
+    // Also skip runtime
+    postProgress("runtime", "skipped");
+    postStageResult("runtime", { status: "skipped" });
     return;
   }
 
-  workerSelf.postMessage(response);
+  postProgress("transpile", "running");
+  try {
+    const transpiler = new Transpiler({ ignoreSourceMap: true });
+    const output = await transpiler.run(reg);
+    const jsChunks = output.objects.map((o) => o.chunk.getCode());
+    const js = [
+      ...jsChunks,
+      output.initializationScript,
+      output.initializationScript2,
+    ].join("\n");
+
+    postStageResult("transpile", { status: "pass", js });
+    // Runtime will be handled by main thread
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    postStageResult("transpile", { status: "fail", error: msg });
+    // Skip runtime
+    postProgress("runtime", "skipped");
+    postStageResult("runtime", { status: "skipped" });
+  }
+}
+
+self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
+  const request = event.data;
+
+  if (request.type === "lint") {
+    self.postMessage(await handleLint(request.source));
+  } else if (request.type === "transpile") {
+    self.postMessage(await handleTranspile(request.source));
+  } else if (request.type === "validate") {
+    await handleValidate(request.source);
+  }
 };
