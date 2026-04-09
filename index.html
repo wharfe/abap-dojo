@@ -13,7 +13,7 @@
     <meta property="og:title" content="ABAP Dojo — Browser-based ABAP Playground & AI Validator" />
     <meta property="og:description" content="Write, lint, and execute ABAP code in your browser. No SAP system required. Validate LLM-generated ABAP with AI pitfall detection." />
     <meta property="og:url" content="https://abapdojo.com/" />
-    <meta property="og:image" content="https://abapdojo.com/og-image.png" />
+    <meta property="og:image" content="https://abapdojo.com/og-image.svg" />
     <meta property="og:site_name" content="ABAP Dojo" />
     <meta property="og:locale" content="en_US" />
 
@@ -21,7 +21,7 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="ABAP Dojo — Browser-based ABAP Playground & AI Validator" />
     <meta name="twitter:description" content="Write, lint, and execute ABAP code in your browser. No SAP system required." />
-    <meta name="twitter:image" content="https://abapdojo.com/og-image.png" />
+    <meta name="twitter:image" content="https://abapdojo.com/og-image.svg" />
 
     <!-- Theme & Icons -->
     <meta name="theme-color" content="#111827" />
@@ -89,7 +89,59 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- SEO / no-JS fallback. Replaced by React on mount. -->
+      <div style="min-height:100vh;background:#111827;color:#f1f5f9;font-family:system-ui,-apple-system,sans-serif;padding:2rem 1.5rem;">
+        <header style="max-width:960px;margin:0 auto 2rem;display:flex;align-items:center;gap:0.75rem;">
+          <strong style="font-size:1.25rem;">ABAP Dojo</strong>
+          <span style="color:#64748b;font-size:0.875rem;">Browser-based ABAP Playground</span>
+        </header>
+        <main style="max-width:960px;margin:0 auto;">
+          <h1 style="font-size:2.25rem;line-height:1.2;margin:0 0 1rem;">
+            Write, Lint &amp; Run ABAP — In Your Browser
+          </h1>
+          <p style="font-size:1.125rem;color:#94a3b8;margin:0 0 1.5rem;max-width:640px;">
+            ABAP Dojo is a free, 100% client-side ABAP playground. Write, lint, execute,
+            and validate ABAP code without an SAP system — your code never leaves your browser.
+          </p>
+          <p style="color:#64748b;margin:0 0 2rem;">Loading the editor…</p>
+
+          <section style="margin-bottom:2rem;">
+            <h2 style="font-size:1.25rem;margin:0 0 0.75rem;color:#e2e8f0;">Features</h2>
+            <ul style="color:#94a3b8;line-height:1.8;padding-left:1.25rem;margin:0;">
+              <li>Real-time linting powered by <a href="https://abaplint.org" style="color:#60a5fa;">abaplint</a> (163 rules)</li>
+              <li>Execute ABAP code in the browser via the abaplint transpiler</li>
+              <li>AI Validator — detect pitfalls in LLM-generated ABAP code</li>
+              <li>No SAP system, no BTP trial, no Docker — just open the page</li>
+              <li>Your code is never sent to any server (100% client-side)</li>
+            </ul>
+          </section>
+
+          <section style="margin-bottom:2rem;">
+            <h2 style="font-size:1.25rem;margin:0 0 0.75rem;color:#e2e8f0;">Learn ABAP</h2>
+            <ul style="color:#94a3b8;line-height:1.8;padding-left:1.25rem;margin:0;">
+              <li><a href="/docs/guides/internal-tables.html" style="color:#60a5fa;">ABAP Internal Tables — LOOP, APPEND, READ TABLE</a></li>
+              <li><a href="/docs/guides/string-processing.html" style="color:#60a5fa;">String Processing — CONCATENATE, &amp;&amp; operator, STRLEN</a></li>
+              <li><a href="/docs/guides/modern-syntax.html" style="color:#60a5fa;">Modern ABAP Syntax — inline declarations, VALUE, NEW (7.40+)</a></li>
+            </ul>
+          </section>
+
+          <section style="margin-bottom:2rem;">
+            <h2 style="font-size:1.25rem;margin:0 0 0.75rem;color:#e2e8f0;">LLM Pitfalls in ABAP</h2>
+            <ul style="color:#94a3b8;line-height:1.8;padding-left:1.25rem;margin:0;">
+              <li><a href="/docs/pitfalls/string-char-confusion.html" style="color:#34d399;">STRING vs CHAR Confusion — why AI defaults to STRING</a></li>
+              <li><a href="/docs/pitfalls/python-loop-pattern.html" style="color:#34d399;">Python-Style Loop Patterns — index-based loops vs LOOP AT ASSIGNING</a></li>
+            </ul>
+          </section>
+
+          <p style="color:#64748b;font-size:0.875rem;">
+            <a href="/docs/" style="color:#94a3b8;">All guides &amp; resources →</a>
+            &nbsp;·&nbsp;
+            <a href="/docs/about.html" style="color:#94a3b8;">About ABAP Dojo</a>
+          </p>
+        </main>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
