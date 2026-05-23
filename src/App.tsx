@@ -266,6 +266,19 @@ function App() {
 
   // Share
   const handleShare = useCallback(() => {
+    // Warn once per browser before encoding source into the URL.
+    const acknowledged =
+      localStorage.getItem("share-warning-acknowledged") === "true";
+    if (!acknowledged) {
+      const proceed = window.confirm(
+        "Your source code will be encoded into the URL and copied to your clipboard.\n\n" +
+          "Don't share URLs that contain secrets, API keys, or anything sensitive — " +
+          "the URL will end up in browser history and anywhere the link is pasted.",
+      );
+      if (!proceed) return;
+      localStorage.setItem("share-warning-acknowledged", "true");
+    }
+
     const encoded = encodeSource(source);
     const modeParam = mode === "validator" ? `mode=${mode}&` : "";
     const url = `${window.location.origin}${window.location.pathname}#${modeParam}code=${encoded}`;
