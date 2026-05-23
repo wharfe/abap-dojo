@@ -3,6 +3,7 @@ import { EditorPanel } from "./components/EditorPanel";
 import { OutputPanel } from "./components/OutputPanel";
 import { ValidationReport } from "./components/ValidationReport";
 import { HeroBanner } from "./components/HeroBanner";
+import { SharedCodeBanner } from "./components/SharedCodeBanner";
 import { AppFooter } from "./components/AppFooter";
 import { ModeHeader } from "./components/ModeHeader";
 import { Toolbar } from "./components/Toolbar";
@@ -81,9 +82,20 @@ function App() {
     return true;
   });
 
+  // Shared-code banner: shown when the source was decoded from the URL hash.
+  // Session-only (no localStorage) — every shared URL is a fresh threat.
+  const [sharedCodeBannerVisible, setSharedCodeBannerVisible] = useState(() => {
+    const hash = window.location.hash;
+    return Boolean(hash && hash.includes("code="));
+  });
+
   const handleDismissHero = useCallback(() => {
     setHeroVisible(false);
     localStorage.setItem("hero-dismissed", "true");
+  }, []);
+
+  const handleDismissSharedCodeBanner = useCallback(() => {
+    setSharedCodeBannerVisible(false);
   }, []);
 
   // Initialize worker
@@ -254,6 +266,19 @@ function App() {
 
   // Share
   const handleShare = useCallback(() => {
+    // Warn once per browser before encoding source into the URL.
+    const acknowledged =
+      localStorage.getItem("share-warning-acknowledged") === "true";
+    if (!acknowledged) {
+      const proceed = window.confirm(
+        "Your source code will be encoded into the URL and copied to your clipboard.\n\n" +
+          "Don't share URLs that contain secrets, API keys, or anything sensitive — " +
+          "the URL will end up in browser history and anywhere the link is pasted.",
+      );
+      if (!proceed) return;
+      localStorage.setItem("share-warning-acknowledged", "true");
+    }
+
     const encoded = encodeSource(source);
     const modeParam = mode === "validator" ? `mode=${mode}&` : "";
     const url = `${window.location.origin}${window.location.pathname}#${modeParam}code=${encoded}`;
@@ -272,6 +297,10 @@ function App() {
     <div className="h-screen flex flex-col bg-gray-900 text-gray-100">
       <ModeHeader mode={mode} onModeChange={handleModeChange} />
       <HeroBanner visible={heroVisible} onDismiss={handleDismissHero} />
+      <SharedCodeBanner
+        visible={sharedCodeBannerVisible}
+        onDismiss={handleDismissSharedCodeBanner}
+      />
       <Toolbar
         mode={mode}
         onRun={handleRun}

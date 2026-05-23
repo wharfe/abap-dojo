@@ -1,5 +1,7 @@
 /* Source CSS for the /docs static pages. Compiled by Tailwind CLI to
-   public/docs/style.css and linked from each docs HTML file. */
-@import "tailwindcss";
+   public/docs/style.css and linked from each docs HTML file.
+   source(none) disables auto-detection so the docs bundle stays scoped
+   to docs HTML classes only — main-app component classes don't leak in. */
+@import "tailwindcss" source(none);
 
 @source "../public/docs/**/*.html";
