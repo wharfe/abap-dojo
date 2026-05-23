@@ -1,0 +1,5 @@
+/* Source CSS for the /docs static pages. Compiled by Tailwind CLI to
+   public/docs/style.css and linked from each docs HTML file. */
+@import "tailwindcss";
+
+@source "../public/docs/**/*.html";

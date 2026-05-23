@@ -21,6 +21,19 @@ describe("urlShare", () => {
   it("returns null for invalid input", () => {
     expect(decodeSource("not-valid-base64%%%")).toBeNull();
   });
+
+  it("returns null when encoded input exceeds length cap", () => {
+    const oversize = "A".repeat(33 * 1024);
+    expect(decodeSource(oversize)).toBeNull();
+  });
+
+  it("returns null when decompressed output exceeds size cap (decompression bomb)", () => {
+    // 2 MB of zeros compresses to a few KB — small encoded payload, huge inflated size.
+    const bomb = "0".repeat(2 * 1024 * 1024);
+    const encoded = encodeSource(bomb);
+    expect(encoded.length).toBeLessThan(32 * 1024);
+    expect(decodeSource(encoded)).toBeNull();
+  });
 });
 
 describe("urlShare with validator mode", () => {
