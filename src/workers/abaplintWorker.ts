@@ -1,4 +1,9 @@
 // src/workers/abaplintWorker.ts
+import { Buffer } from "buffer";
+// @abaplint/core uses Buffer.from(...) for built-in constant initialization;
+// supply a polyfill before any abaplint import sees a missing global.
+(globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
+
 import { Registry, MemoryFile, Config, Issue } from "@abaplint/core";
 import { Transpiler, config as transpilerConfig } from "@abaplint/transpiler";
 import type { WorkerRequest, WorkerResponse, LintIssue } from "../types/messages";
