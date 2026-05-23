@@ -62,6 +62,8 @@ export const ExecutionSandbox = forwardRef<
       ) {
         return;
       }
+      // Defense-in-depth: sandboxed iframe (allow-scripts only) has opaque "null" origin.
+      if (event.origin !== "null") return;
 
       const data = event.data;
       if (data.type === "output") {
@@ -144,7 +146,9 @@ ${runtimeBundle}
 // Sandbox execution context for transpiled ABAP-to-JS code.
 // iframe sandbox="allow-scripts" only (no allow-same-origin) provides isolation.
 
-// Custom console that captures WRITE output and sends it to the parent
+// Custom console that captures WRITE output and sends it to the parent.
+// Output is capped at MAX_OUTPUT_BYTES to defend against runaway WRITE loops.
+var MAX_OUTPUT_BYTES = 1024 * 1024;
 var PostMessageConsole = (function() {
   function PostMessageConsole() {
     this.data = "";
@@ -154,7 +158,13 @@ var PostMessageConsole = (function() {
     this.data = "";
   };
   PostMessageConsole.prototype.add = function(text) {
-    this.data = this.data + text;
+    if (this.data.length >= MAX_OUTPUT_BYTES) return;
+    var remaining = MAX_OUTPUT_BYTES - this.data.length;
+    if (text.length > remaining) {
+      this.data = this.data + text.slice(0, remaining) + "\\n[output truncated]";
+    } else {
+      this.data = this.data + text;
+    }
     this.empty = false;
   };
   PostMessageConsole.prototype.get = function() {
@@ -170,7 +180,10 @@ var PostMessageConsole = (function() {
 })();
 
 window.addEventListener("message", async function(event) {
+  // Only accept the single execute message from our parent.
+  if (event.source !== window.parent) return;
   if (!event.data || event.data.type !== "execute") return;
+  if (typeof event.data.js !== "string" || typeof event.data.requestId !== "string") return;
   var requestId = event.data.requestId;
   try {
     // Create runtime with custom console for WRITE capture
@@ -200,15 +213,21 @@ window.addEventListener("message", async function(event) {
     var fn = new AsyncFunction("abap", js);
     await fn(abap);
 
-    // After execution, send all captured output
+    // After execution, send all captured output. Line count is capped to
+    // avoid flooding the parent with postMessages from pathological loops.
     var output = customConsole.get();
     if (output) {
-      // Split by newlines and send each line
       var lines = output.split("\\n");
-      for (var i = 0; i < lines.length; i++) {
-        if (lines[i] !== "" || i < lines.length - 1) {
+      var MAX_LINES = 10000;
+      var totalLines = lines.length;
+      var emitCount = totalLines > MAX_LINES ? MAX_LINES : totalLines;
+      for (var i = 0; i < emitCount; i++) {
+        if (lines[i] !== "" || i < emitCount - 1) {
           window.parent.postMessage({ type: "output", text: lines[i], requestId: requestId }, "*");
         }
+      }
+      if (totalLines > MAX_LINES) {
+        window.parent.postMessage({ type: "output", text: "[output truncated: " + (totalLines - MAX_LINES) + " more lines]", requestId: requestId }, "*");
       }
     }
 
