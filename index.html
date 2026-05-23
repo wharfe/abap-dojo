@@ -85,7 +85,8 @@
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
       gtag('js', new Date());
-      gtag('config', 'G-YY1YV51K2X');
+      // page_location is explicit to prevent #code=... hash from being sent to GA
+      gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
     </script>
   </head>
   <body>
