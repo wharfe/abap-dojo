@@ -57,11 +57,13 @@ src/
 
 ## Known Gotchas
 
-- abaplint packages may assume Node.js APIs; check Vite polyfill config if bundling fails
-- Monaco Editor chunks are large; use lazy loading
-- Web Worker imports use Vite's `?worker` suffix
-- Transpiler input is ABAP 7.02 syntax base; higher syntax needs downport rules first
-- DB operations (SELECT etc.) require in-memory DB simulation in browser
+- abaplint packages assume Node.js APIs. `@abaplint/core` calls `Buffer.from(..., "hex")` during built-in symbol init — polyfill via `import { Buffer } from "buffer"; globalThis.Buffer = Buffer` in `src/main.tsx` and `src/workers/abaplintWorker.ts`.
+- Vite 8's rolldown minifier collapses class names to single letters by default. abaplint identifies its 166 statement handlers via `handler.constructor.name`, so without `keepNames: true` in `vite.config.ts` (both `build.rolldownOptions` and `worker.rolldownOptions`), the worker dies on boot with `syntax.ts duplicate statement syntax handler`.
+- `@monaco-editor/react` defaults to fetching Monaco from `cdn.jsdelivr.net`, which is blocked by our CSP. `src/main.tsx` calls `loader.config({ monaco })` with a locally imported `monaco-editor/esm/vs/editor/editor.api.js` to short-circuit the CDN fetch. The `.api.js` entry skips TS/CSS/HTML/JSON language workers (~10 MB of unused chunks).
+- Web Worker imports use Vite's `?worker` suffix.
+- Transpiler input is ABAP 7.02 syntax base; higher syntax needs downport rules first.
+- DB operations (SELECT etc.) require in-memory DB simulation in browser.
+- Security headers (CSP, HSTS, etc.) live in `public/_headers` — Cloudflare Pages-specific format. `vite preview` does NOT apply them, so CSP-related breakage only shows in production. Test with Playwright + production build before claiming a deploy is safe.
 
 ## Git Workflow
 
