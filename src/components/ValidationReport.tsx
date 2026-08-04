@@ -7,28 +7,11 @@ import type {
   PitfallMatch,
   ValidationStage,
 } from "../types/validation";
+import { computeSummary } from "../utils/validationSummary";
 
 interface ValidationReportProps {
   stages: Record<ValidationStage, StageResult>;
   isValidating: boolean;
-}
-
-function computeSummary(
-  stages: Record<ValidationStage, StageResult>,
-): { overall: "pass" | "warn" | "fail"; totalIssues: number } {
-  let totalIssues = 0;
-  let hasError = false;
-  let hasWarning = false;
-
-  for (const result of Object.values(stages)) {
-    if (result.status === "fail") hasError = true;
-    if (result.status === "warn") hasWarning = true;
-    totalIssues += (result.issues?.length ?? 0) + (result.pitfalls?.length ?? 0);
-    if (result.error) totalIssues++;
-  }
-
-  const overall = hasError ? "fail" : hasWarning ? "warn" : "pass";
-  return { overall, totalIssues };
 }
 
 const STATUS_ICON: Record<StageStatus, string> = {

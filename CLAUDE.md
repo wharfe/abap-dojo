@@ -60,6 +60,49 @@ src/
 2. **AI Validator** (Phase 2) - LLM-generated code validation with pitfall detection rules
 3. **Modernizer** (Phase 2) - Legacy -> modern ABAP syntax conversion with diff view
 
+## Analytics
+
+Product-usage events live in `src/utils/analytics.ts`. Two rules:
+
+1. **Never send source code.** `sanitizeParams` is a per-event allowlist: it reads
+   only the keys an event declares in `EVENT_PARAMS` and drops any value that
+   does not match the declared shape. Passing an extra property cannot widen what
+   is sent. Do not add free-string parameters — abaplint and transpiler error
+   messages embed the user's own source verbatim on a single line, so "it has no
+   newline" proves nothing. Use a `count` or an `enum`.
+2. **gtag loads on `abapdojo.com` only** — the host gate is duplicated in
+   `index.html` and in all 7 `public/docs/*.html` pages. Local dev, `vite preview`
+   and Pages previews leave `window.gtag` undefined so `track()` no-ops there.
+   Trade-off: if the custom domain is ever detached and the site is served from
+   `*.pages.dev`, measurement silently drops to zero.
+
+`url_code_open` counts page loads whose `#code=` parameter *decoded*, not
+shared-link arrivals — the app writes `#code=` into the user's own URL on share
+and on mode switch, so a reload is indistinguishable. It also differs from the
+shared-code banner, which only string-matches `code=` and so shows for links
+that failed to decode.
+
+### GA4 custom definitions must be registered before a release ships
+
+GA4 shows event **counts** immediately, but event **parameters** are invisible in
+reports until registered in Admin > Data display > Custom definitions — and
+registration is **not retroactive**. Data collected before it is registered is
+unrecoverable (no BigQuery export is configured). Register these when adding or
+renaming a parameter:
+
+| Register as custom **dimension** (text) | Register as custom **metric** (number) |
+|---|---|
+| `outcome`, `sample_id`, `mode`, `to_mode` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
+
+Do not register `duration_ms` as a dimension — it is near-unique per event and
+makes the report unusable. Note `outcome` is shared by `run_result`
+(`success`/`transpile_error`/`runtime_error`) and `validate_result`
+(`pass`/`warn`/`fail`), so always filter by `event_name` when reading it.
+
+Also keep Enhanced Measurement's **browser-history / hash-routing** options OFF
+for this property. The URL hash carries user source, and those options can make
+GA4 treat a fragment change as a page view.
+
 ## Known Gotchas
 
 - abaplint packages assume Node.js APIs. `@abaplint/core` calls `Buffer.from(..., "hex")` during built-in symbol init — polyfill via `import { Buffer } from "buffer"; globalThis.Buffer = Buffer` in `src/main.tsx` and `src/workers/abaplintWorker.ts`.

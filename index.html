@@ -79,14 +79,24 @@
     }
     </script>
 
-    <!-- Google Analytics 4 -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X"></script>
+    <!-- Google Analytics 4 — loaded on the production host only. npm run dev,
+         vite preview and Cloudflare Pages previews all leave window.gtag
+         undefined, which is what makes track() a no-op there (see
+         src/utils/analytics.ts). Without this, local clicking would land in the
+         live property indistinguishably from real users. -->
     <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      // page_location is explicit to prevent #code=... hash from being sent to GA
-      gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
+      (function () {
+        if (['abapdojo.com', 'www.abapdojo.com'].indexOf(location.hostname) === -1) return;
+        var tag = document.createElement('script');
+        tag.async = true;
+        tag.src = 'https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X';
+        document.head.appendChild(tag);
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function(){ dataLayer.push(arguments); };
+        gtag('js', new Date());
+        // page_location is explicit to prevent #code=... hash from being sent to GA
+        gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
+      })();
     </script>
   </head>
   <body>
