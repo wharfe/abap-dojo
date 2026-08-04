@@ -7,19 +7,35 @@ import pako from "pako";
 const MAX_ENCODED_LEN = 32 * 1024;
 const MAX_DECOMPRESSED_BYTES = 1024 * 1024;
 
+/**
+ * Encode as base64url, not standard base64.
+ *
+ * The payload rides in the URL fragment as `#code=...` and is read back with
+ * `URLSearchParams`, which decodes "+" as a space. Standard base64 emits "+"
+ * often enough that every one of the six sample presets lost its code on
+ * share, falling back to the default snippet with no error shown.
+ */
 export function encodeSource(source: string): string {
   const compressed = pako.deflate(new TextEncoder().encode(source));
   let binary = "";
   for (let i = 0; i < compressed.length; i++) {
     binary += String.fromCharCode(compressed[i]);
   }
-  return btoa(binary);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_");
 }
 
 export function decodeSource(encoded: string): string | null {
   if (encoded.length > MAX_ENCODED_LEN) return null;
   try {
-    const binary = atob(encoded);
+    // Accept base64url and the standard base64 that links shared before the
+    // base64url switch still carry. A space can only be a "+" that
+    // URLSearchParams already mangled, so restoring it repairs those links
+    // rather than dropping them.
+    const normalized = encoded
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .replace(/ /g, "+");
+    const binary = atob(normalized);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
