@@ -1,5 +1,5 @@
 {
-  "name": "abap-dojo-temp",
+  "name": "abap-dojo",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -8,6 +8,9 @@
     "build:docs-css": "tailwindcss -i ./src/docs.css -o ./public/docs/style.css --minify",
     "build": "tsc -b && npm run build:docs-css && vite build",
     "lint": "eslint .",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "preview": "vite preview"
   },
   "dependencies": {
