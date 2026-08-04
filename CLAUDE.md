@@ -19,7 +19,12 @@ Runs entirely client-side using the abaplint ecosystem (MIT License).
 - `npm run build` - production build
 - `npm run preview` - preview production build
 - `npm run lint` - run ESLint
-- `npx tsc --noEmit` - run TypeScript type checking (no dedicated script; `tsc -b` runs as part of `npm run build`)
+- `npm run typecheck` - run TypeScript type checking (`tsc -b --noEmit`)
+- `npm test` - run the Vitest suite once (`npm run test:watch` for watch mode)
+
+CI (`.github/workflows/ci.yml`) runs `lint` + `typecheck` + `test` on every PR and on
+pushes to `main`. The production build is verified separately by the Cloudflare Pages
+preview deployment, which is the only place CSP/`_headers` breakage surfaces.
 
 ## Code Style
 
