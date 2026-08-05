@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ABAP Variables and Conditions — DATA, IF, CASE Examples</title>
   <meta name="description" content="How DATA declarations, types, IF/ELSEIF and CASE work in ABAP, with runnable examples. Includes the fixed-length gotcha that surprises everyone once." />
-  <link rel="canonical" href="https://abapdojo.com/docs/guides/variables-conditions.html" />
+  <link rel="canonical" href="https://abapdojo.com/docs/guides/variables-conditions" />
   <meta property="og:title" content="ABAP Variables and Conditions — DATA, IF, CASE Examples" />
   <meta property="og:description" content="DATA declarations, types, IF/ELSEIF and CASE in ABAP, with runnable examples." />
-  <meta property="og:url" content="https://abapdojo.com/docs/guides/variables-conditions.html" />
+  <meta property="og:url" content="https://abapdojo.com/docs/guides/variables-conditions" />
   <meta property="og:image" content="https://abapdojo.com/og-image.svg" />
   <meta name="theme-color" content="#111827" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -84,14 +84,14 @@ WRITE lv_text.           " prints ABAP</code></pre>
         This is also why <code class="text-blue-300">DATA lv_x.</code> with no type at all is a trap: it means
         <code class="text-blue-300">TYPE c LENGTH 1</code>, so <code class="text-blue-300">lv_x = 150</code> leaves you
         with <code class="text-blue-300">1</code>. See
-        <a href="/docs/pitfalls/dynamic-typing.html" class="text-blue-400 hover:text-blue-300">untyped declarations</a>.
+        <a href="/docs/pitfalls/dynamic-typing" class="text-blue-400 hover:text-blue-300">untyped declarations</a>.
       </p>
       <p class="text-gray-400 mt-4">
         Which to use: <code class="text-blue-300">string</code> for text of unknown length, fixed
         <code class="text-blue-300">c LENGTH n</code> when the field has a defined width in the data model
         (country codes, document numbers, flags) — that is what a DDIC field will expect. Both matter; picking
         the wrong one is a common source of AI-generated bugs, covered in
-        <a href="/docs/pitfalls/string-char-confusion.html" class="text-blue-400 hover:text-blue-300">STRING vs CHAR</a>.
+        <a href="/docs/pitfalls/string-char-confusion" class="text-blue-400 hover:text-blue-300">STRING vs CHAR</a>.
       </p>
     </section>
 
@@ -148,7 +148,7 @@ ENDCASE.</code></pre>
       <p class="text-gray-400 mt-4">
         When all you want is a value rather than statements, the <code class="text-blue-300">COND</code> and
         <code class="text-blue-300">SWITCH</code> expressions say it in one line — see
-        <a href="/docs/guides/modern-syntax.html" class="text-blue-400 hover:text-blue-300">modern ABAP syntax</a>.
+        <a href="/docs/guides/modern-syntax" class="text-blue-400 hover:text-blue-300">modern ABAP syntax</a>.
       </p>
     </section>
 
@@ -191,8 +191,8 @@ ENDCASE.</code></pre>
         Try this code in ABAP Dojo →
       </a>
       <p class="text-gray-500 text-sm mt-3">
-        Next: <a href="/docs/guides/internal-tables.html" class="text-gray-400 hover:text-gray-200">internal tables</a>
-        · <a href="/docs/guides/oo-basics.html" class="text-gray-400 hover:text-gray-200">classes and methods</a>
+        Next: <a href="/docs/guides/internal-tables" class="text-gray-400 hover:text-gray-200">internal tables</a>
+        · <a href="/docs/guides/oo-basics" class="text-gray-400 hover:text-gray-200">classes and methods</a>
       </p>
     </div>
   </main>
@@ -200,7 +200,7 @@ ENDCASE.</code></pre>
   <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
     <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
       <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
-      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/docs/about" class="text-gray-400 hover:text-gray-200">About</a>
       <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
     </nav>
     <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
