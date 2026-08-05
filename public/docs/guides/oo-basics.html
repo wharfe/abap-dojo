@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ABAP Classes and Methods — Local Class Examples You Can Run</title>
+  <meta name="description" content="ABAP object orientation: CLASS DEFINITION and IMPLEMENTATION, method parameters, CREATE OBJECT vs NEW, constructors and interfaces — with runnable examples." />
+  <link rel="canonical" href="https://abapdojo.com/docs/guides/oo-basics.html" />
+  <meta property="og:title" content="ABAP Classes and Methods — Local Class Examples You Can Run" />
+  <meta property="og:description" content="CLASS DEFINITION and IMPLEMENTATION, method parameters, CREATE OBJECT vs NEW, constructors and interfaces — with runnable examples." />
+  <meta property="og:url" content="https://abapdojo.com/docs/guides/oo-basics.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.svg" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/docs/style.css" />
+  <!-- GA4 — production host only (mirrors index.html). -->
+  <script>
+    (function () {
+      if (['abapdojo.com', 'www.abapdojo.com'].indexOf(location.hostname) === -1) return;
+      var tag = document.createElement('script');
+      tag.async = true;
+      tag.src = 'https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X';
+      document.head.appendChild(tag);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function(){ dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
+    })();
+  </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/" class="text-gray-400 hover:text-gray-200 transition-colors">Guides</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Classes &amp; Methods</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">ABAP Classes and Methods</h1>
+    <p class="text-gray-400 text-lg mb-10">
+      ABAP's object orientation is close enough to Java or C# to feel familiar and different enough to trip you up.
+      The two differences that matter immediately: a class is split into a <em>definition</em> and an
+      <em>implementation</em>, and method parameters are named and directional rather than positional.
+      Local classes need no repository, so everything here runs in a browser.
+    </p>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Definition and implementation</h2>
+      <p class="text-gray-400 mb-4">
+        <code class="text-blue-300">CLASS ... DEFINITION</code> declares what exists; the matching
+        <code class="text-blue-300">CLASS ... IMPLEMENTATION</code> supplies the bodies. A class starting with
+        <code class="text-blue-300">lcl_</code> is a local class, visible only inside this program — which is why it
+        works without an SAP system.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">CLASS lcl_calculator DEFINITION.
+  PUBLIC SECTION.
+    METHODS add
+      IMPORTING iv_a TYPE i
+                iv_b TYPE i
+      RETURNING VALUE(rv_result) TYPE i.
+ENDCLASS.
+
+CLASS lcl_calculator IMPLEMENTATION.
+  METHOD add.
+    rv_result = iv_a + iv_b.
+  ENDMETHOD.
+ENDCLASS.</code></pre>
+      <p class="text-gray-400 mt-4">
+        <code class="text-blue-300">PUBLIC SECTION</code>, <code class="text-blue-300">PROTECTED SECTION</code> and
+        <code class="text-blue-300">PRIVATE SECTION</code> group members by visibility instead of marking each one,
+        and they must appear in that order.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Method parameters are named and directional</h2>
+      <p class="text-gray-400 mb-4">
+        This is the part with no real equivalent in most languages. Every parameter has a direction:
+      </p>
+      <ul class="text-gray-400 space-y-2 list-disc list-inside mb-4">
+        <li><code class="text-blue-300">IMPORTING</code> — comes in, read-only inside the method</li>
+        <li><code class="text-blue-300">EXPORTING</code> — goes out, cleared on entry</li>
+        <li><code class="text-blue-300">CHANGING</code> — comes in and goes out</li>
+        <li><code class="text-blue-300">RETURNING VALUE(...)</code> — a single return value, and the only form that lets the call be used as an expression</li>
+        <li><code class="text-blue-300">RAISING</code> — the exceptions it may raise</li>
+      </ul>
+      <p class="text-gray-400 mb-4">
+        Prefer <code class="text-blue-300">RETURNING</code> for a single result: it is what makes
+        <code class="text-blue-300">lv_x = lo_calc-&gt;add( ... )</code> and method chaining possible.
+        A method can have <code class="text-blue-300">RETURNING</code> or <code class="text-blue-300">EXPORTING</code>,
+        not both.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Named arguments at the call site
+lv_sum = lo_calc-&gt;add( iv_a = 10 iv_b = 20 ).
+
+" With exactly one importing parameter, the name may be omitted
+lv_text = lo_greeter-&gt;greet( 'ABAP' ).</code></pre>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Creating objects: CREATE OBJECT and NEW</h2>
+      <p class="text-gray-400 mb-4">
+        A reference variable is <code class="text-blue-300">TYPE REF TO</code> the class. Classic ABAP creates the
+        instance with <code class="text-blue-300">CREATE OBJECT</code>; since 7.40 the
+        <code class="text-blue-300">NEW</code> operator does the same in an expression, which is what modern code uses.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Classic
+DATA lo_calc TYPE REF TO lcl_calculator.
+CREATE OBJECT lo_calc.
+
+" Modern — declaration and creation in one line
+DATA(lo_calc2) = NEW lcl_calculator( ).
+
+" A reference starts unbound; calling a method on it dumps
+IF lo_calc IS BOUND.
+  WRITE / 'safe to call'.
+ENDIF.</code></pre>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Constructors and instance state</h2>
+      <p class="text-gray-400 mb-4">
+        The constructor is a method literally named <code class="text-blue-300">constructor</code>. Its
+        <code class="text-blue-300">IMPORTING</code> parameters are passed when the object is created.
+        Attributes declared under <code class="text-blue-300">DATA</code> inside the class are instance state;
+        keeping them private and exposing behaviour instead is the usual convention.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">CLASS lcl_counter DEFINITION.
+  PUBLIC SECTION.
+    METHODS constructor IMPORTING iv_start TYPE i.
+    METHODS increment RETURNING VALUE(rv_value) TYPE i.
+  PRIVATE SECTION.
+    DATA mv_value TYPE i.
+ENDCLASS.
+
+CLASS lcl_counter IMPLEMENTATION.
+  METHOD constructor.
+    mv_value = iv_start.
+  ENDMETHOD.
+  METHOD increment.
+    mv_value = mv_value + 1.
+    rv_value = mv_value.
+  ENDMETHOD.
+ENDCLASS.
+
+DATA(lo_counter) = NEW lcl_counter( iv_start = 10 ).
+WRITE / lo_counter-&gt;increment( ).   " 11</code></pre>
+      <p class="text-gray-500 text-sm mt-3">
+        The <code class="text-blue-300">mv_</code> prefix for member variables and <code class="text-blue-300">iv_</code>
+        for importing parameters are conventions, not rules — but they are near-universal in ABAP code, and following
+        them makes your code readable to the next person.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Interfaces and inheritance</h2>
+      <p class="text-gray-400 mb-4">
+        Interfaces are declared separately and implemented with <code class="text-blue-300">INTERFACES</code>.
+        Note that the method is then referred to with a tilde: <code class="text-blue-300">if_name~method</code>.
+        Inheritance uses <code class="text-blue-300">INHERITING FROM</code>, and an overriding method must say
+        <code class="text-blue-300">REDEFINITION</code> — ABAP will not let you override by accident.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">INTERFACE lif_shape.
+  METHODS area RETURNING VALUE(rv_area) TYPE f.
+ENDINTERFACE.
+
+CLASS lcl_square DEFINITION.
+  PUBLIC SECTION.
+    INTERFACES lif_shape.
+    METHODS constructor IMPORTING iv_side TYPE f.
+  PRIVATE SECTION.
+    DATA mv_side TYPE f.
+ENDCLASS.
+
+CLASS lcl_square IMPLEMENTATION.
+  METHOD constructor.
+    mv_side = iv_side.
+  ENDMETHOD.
+  METHOD lif_shape~area.
+    rv_area = mv_side * mv_side.
+  ENDMETHOD.
+ENDCLASS.
+
+DATA li_shape TYPE REF TO lif_shape.
+li_shape = NEW lcl_square( iv_side = '3.0' ).
+WRITE / li_shape-&gt;area( ).</code></pre>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Full example</h2>
+      <p class="text-gray-400 mb-4">
+        A complete program with two methods, both using <code class="text-blue-300">RETURNING</code>.
+        Run it, then add a <code class="text-blue-300">subtract</code> method of your own.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">REPORT ztest_oo.
+
+CLASS lcl_calculator DEFINITION.
+  PUBLIC SECTION.
+    METHODS add
+      IMPORTING iv_a TYPE i
+                iv_b TYPE i
+      RETURNING VALUE(rv_result) TYPE i.
+    METHODS multiply
+      IMPORTING iv_a TYPE i
+                iv_b TYPE i
+      RETURNING VALUE(rv_result) TYPE i.
+ENDCLASS.
+
+CLASS lcl_calculator IMPLEMENTATION.
+  METHOD add.
+    rv_result = iv_a + iv_b.
+  ENDMETHOD.
+  METHOD multiply.
+    rv_result = iv_a * iv_b.
+  ENDMETHOD.
+ENDCLASS.
+
+DATA lo_calc TYPE REF TO lcl_calculator.
+
+CREATE OBJECT lo_calc.
+
+DATA lv_sum TYPE i.
+DATA lv_product TYPE i.
+
+lv_sum = lo_calc-&gt;add( iv_a = 10 iv_b = 20 ).
+lv_product = lo_calc-&gt;multiply( iv_a = 5 iv_b = 6 ).
+
+WRITE: 'Sum:', lv_sum.
+WRITE: / 'Product:', lv_product.</code></pre>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Why local classes are the right tool for prototyping</h2>
+      <p class="text-gray-400">
+        A local class exists because you defined it, so it needs no repository, no transport and no system.
+        That also makes it the fix for one of the most common AI-generated ABAP failures: code that calls a
+        plausible-sounding standard class which
+        <a href="/docs/pitfalls/hallucinated-class.html" class="text-blue-400 hover:text-blue-300">does not actually exist</a>.
+        Model the behaviour locally, verify the logic, and swap in the real class once you can confirm its name.
+      </p>
+    </section>
+
+    <div class="text-center mt-10">
+      <a href="/#code=eJy1UctOhEAQvM9X9I1dH7ia6GETTFjo1TG8MgwaTwRhDyRD2PBK9OsFhkHWuEe5TVdXdVXBMPAZh6_mUDdxWeqEWI4ZhiBSEaeJSFuRNGUFNu6pRzn1PZ0ABNHOoRaEaKkJgIv82bdDSLJsfANQd5Cm3hPkXZwAfw8Q8gn7-Xrs4xRjyCPmDbxX04lwVXVxdahb0aynvdODRY_kR_H5_1fRs8dyzpXUn3bQRY-bqhbpcehEep5FwZD2LkcnA9iLy-0FT0U7Q774i7wwaZvcBFGOFmUIhnvg_i_fQxyGJkfwdy_9L1WUWaGL67aYW1CzY1VmbdrMczLtGYp__djnXkmrBtxuZOkG3G1grZOFwoKhEs-0e8V6GEjkjVGOW9DCtthqV5M1XY1vQAuk5gROF3TyDWpr0nU=" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Try this code in ABAP Dojo →
+      </a>
+      <p class="text-gray-500 text-sm mt-3">
+        Next: <a href="/docs/guides/modern-syntax.html" class="text-gray-400 hover:text-gray-200">modern ABAP syntax</a>
+        · <a href="/docs/guides/internal-tables.html" class="text-gray-400 hover:text-gray-200">internal tables</a>
+      </p>
+    </div>
+  </main>
+
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>

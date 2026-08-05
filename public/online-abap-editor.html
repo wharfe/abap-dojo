@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Online ABAP Editor — Syntax Highlighting and Live abaplint Checks</title>
+  <meta name="description" content="A free online ABAP editor with syntax highlighting, real-time abaplint checking and shareable links. Runs entirely in the browser — no SAP system or install needed." />
+  <link rel="canonical" href="https://abapdojo.com/online-abap-editor.html" />
+  <meta property="og:title" content="Online ABAP Editor — Syntax Highlighting and Live abaplint Checks" />
+  <meta property="og:description" content="A free online ABAP editor with syntax highlighting, real-time abaplint checking and shareable links. No SAP system needed." />
+  <meta property="og:url" content="https://abapdojo.com/online-abap-editor.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.svg" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/docs/style.css" />
+  <!-- GA4 — production host only (mirrors index.html). -->
+  <script>
+    (function () {
+      if (['abapdojo.com', 'www.abapdojo.com'].indexOf(location.hostname) === -1) return;
+      var tag = document.createElement('script');
+      tag.async = true;
+      tag.src = 'https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X';
+      document.head.appendChild(tag);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function(){ dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
+    })();
+  </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Online ABAP Editor</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">Online ABAP Editor</h1>
+    <p class="text-gray-400 text-lg mb-6">
+      A real code editor for ABAP that opens in a browser tab: syntax highlighting, mistakes underlined as you type,
+      and a link you can send someone. No SAP GUI, no Eclipse, no install.
+    </p>
+
+    <div class="text-center mb-12">
+      <a href="/#code=eJxlkE1rg0AQhu_-ihd6WAMm_SIUQi2sdSMLWxV325BTkGqLYNyg5pD--q6xGkPnNjPPzDO7CYujROEnz4pW17ss3-uFZaltzOQKHgt4iGiN9rT7LNqTY2GIKt3n6DA0bV1U35PWQR_Qt4qxykJ_sscYfKooyrZLi7zpcUU9wa6xC-Hig4p3hhvb7LR7vwsSH6ucXLwunpZ3XWB2hW3Sssx0_UUG7H75H5KpRpweS00G6OHxbxlm5hgRRTGompxNpeRByMMAa86EP5fbNy8S9nPZnB_wYqaATcIVW-EWY3neGZ1JbnQLy_xRZzCicYK8nj0r4kDwkEl74ja7fwHFnXoq" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Open this code in the editor →
+      </a>
+    </div>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">What the editor gives you</h2>
+      <ul class="text-gray-400 space-y-3">
+        <li>
+          <strong class="text-gray-200">ABAP syntax highlighting.</strong>
+          The editor is Monaco — the same engine as VS Code — with an ABAP tokenizer, so keywords, types,
+          strings and comments are coloured the way you expect.
+        </li>
+        <li>
+          <strong class="text-gray-200">Real-time checking as you type.</strong>
+          <a href="https://abaplint.org" class="text-blue-400 hover:text-blue-300">abaplint</a> runs in a background
+          worker a moment after you stop typing, and its findings appear as underlines in the code and as a list
+          in the Lint tab. This is the same linter many ABAP teams run in CI.
+        </li>
+        <li>
+          <strong class="text-gray-200">Run, not just edit.</strong>
+          Press Run and the code is transpiled to JavaScript and executed in a sandboxed iframe, with
+          <code class="text-blue-300">WRITE</code> output shown next to the editor. See
+          <a href="/abap-online-compiler.html" class="text-blue-400 hover:text-blue-300">what compiles and what does not</a>.
+        </li>
+        <li>
+          <strong class="text-gray-200">Shareable links.</strong>
+          Share compresses your code into the URL fragment. Anyone opening that link sees the same code —
+          no account, nothing stored on a server. The code is in the link itself, so treat those links like the code.
+        </li>
+        <li>
+          <strong class="text-gray-200">Presets to start from.</strong>
+          The Samples dropdown loads working examples: internal tables, string handling, local classes, modern syntax.
+        </li>
+      </ul>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Editing shortcuts worth knowing</h2>
+      <p class="text-gray-400 mb-4">
+        Monaco's keybindings apply, so most things you already do in VS Code work here.
+      </p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left border border-gray-700 rounded-lg">
+          <thead class="bg-gray-800 text-gray-300">
+            <tr>
+              <th class="px-4 py-2 border-b border-gray-700">Shortcut</th>
+              <th class="px-4 py-2 border-b border-gray-700">Does</th>
+            </tr>
+          </thead>
+          <tbody class="text-gray-400">
+            <tr><td class="px-4 py-2 border-b border-gray-800"><kbd>Alt</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd></td><td class="px-4 py-2 border-b border-gray-800">Move the current line up or down</td></tr>
+            <tr><td class="px-4 py-2 border-b border-gray-800"><kbd>Ctrl</kbd> + <kbd>D</kbd></td><td class="px-4 py-2 border-b border-gray-800">Select the next occurrence of the selection</td></tr>
+            <tr><td class="px-4 py-2 border-b border-gray-800"><kbd>Ctrl</kbd> + <kbd>/</kbd></td><td class="px-4 py-2 border-b border-gray-800">Toggle a comment</td></tr>
+            <tr><td class="px-4 py-2 border-b border-gray-800"><kbd>Alt</kbd> + click</td><td class="px-4 py-2 border-b border-gray-800">Add another cursor</td></tr>
+            <tr><td class="px-4 py-2"><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td class="px-4 py-2">Find and replace</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-gray-500 text-sm mt-3">On macOS use <kbd>Cmd</kbd> in place of <kbd>Ctrl</kbd>.</p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">How this compares to the alternatives</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left border border-gray-700 rounded-lg">
+          <thead class="bg-gray-800 text-gray-300">
+            <tr>
+              <th class="px-4 py-2 border-b border-gray-700">Option</th>
+              <th class="px-4 py-2 border-b border-gray-700">Edit</th>
+              <th class="px-4 py-2 border-b border-gray-700">Lint</th>
+              <th class="px-4 py-2 border-b border-gray-700">Run</th>
+              <th class="px-4 py-2 border-b border-gray-700">Needs</th>
+            </tr>
+          </thead>
+          <tbody class="text-gray-400">
+            <tr>
+              <td class="px-4 py-2 border-b border-gray-800 text-gray-200">ABAP Dojo</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">A browser</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-2 border-b border-gray-800">ADT in Eclipse</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">An SAP system + install</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-2 border-b border-gray-800">SE80 / SE38</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">An SAP system + SAP GUI</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-2 border-b border-gray-800">abaplint playground</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">Yes</td>
+              <td class="px-4 py-2 border-b border-gray-800">No</td>
+              <td class="px-4 py-2 border-b border-gray-800">A browser</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-2">A plain text editor</td>
+              <td class="px-4 py-2">Yes</td>
+              <td class="px-4 py-2">No</td>
+              <td class="px-4 py-2">No</td>
+              <td class="px-4 py-2">Nothing</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-gray-500 text-sm mt-3">
+        ADT and SE80 remain the right tools for real development. This is for the case where you do not have a system
+        in front of you and want to check something now.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">A note on privacy</h2>
+      <p class="text-gray-400">
+        Editing, linting and running all happen locally in the tab. There is no backend that could receive your code,
+        which is the point if what you are pasting came from a customer system. The one place code does travel is the
+        Share link, and that is your decision to make each time.
+      </p>
+    </section>
+
+    <div class="text-center mt-10">
+      <a href="/" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Open the editor →
+      </a>
+      <p class="text-gray-500 text-sm mt-3">
+        Next: <a href="/abap-online-compiler.html" class="text-gray-400 hover:text-gray-200">what the compiler supports</a>
+        · <a href="/practice-abap-without-sap.html" class="text-gray-400 hover:text-gray-200">a practice path without an SAP system</a>
+      </p>
+    </div>
+  </main>
+
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>

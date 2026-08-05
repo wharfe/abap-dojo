@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ABAP Online Compiler — Run ABAP in Your Browser, No SAP System</title>
+  <meta name="description" content="Compile and run ABAP online for free. Transpiles to JavaScript in your browser — no SAP system, no login, no install. See exactly what works and what does not." />
+  <link rel="canonical" href="https://abapdojo.com/abap-online-compiler.html" />
+  <meta property="og:title" content="ABAP Online Compiler — Run ABAP in Your Browser, No SAP System" />
+  <meta property="og:description" content="Compile and run ABAP online for free. Transpiles to JavaScript in your browser — no SAP system, no login, no install." />
+  <meta property="og:url" content="https://abapdojo.com/abap-online-compiler.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.svg" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/docs/style.css" />
+  <!-- GA4 — production host only (mirrors index.html). -->
+  <script>
+    (function () {
+      if (['abapdojo.com', 'www.abapdojo.com'].indexOf(location.hostname) === -1) return;
+      var tag = document.createElement('script');
+      tag.async = true;
+      tag.src = 'https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X';
+      document.head.appendChild(tag);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function(){ dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
+    })();
+  </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">ABAP Online Compiler</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">ABAP Online Compiler</h1>
+    <p class="text-gray-400 text-lg mb-6">
+      Paste ABAP, press Run, and see the output — in your browser, with no SAP system, no login and nothing to install.
+      This page explains how that is possible, what it can and cannot compile, and where the limits are.
+    </p>
+
+    <div class="text-center mb-12">
+      <a href="/#code=eJxVjUELgjAYhu_7Fe9th9yig5fAQNgOHkrRQXSSaBoD3aI0ql-fzdC6vd_zvg9fLrM0V3idXHsxTVXqqnWcEBGrGM29NFCHTMLwiXSuOzYTJSJFCJVsZcEJRiPC7cmM1dXji0YlmuPCDz_tPk-UXGMJGmtt7JkGvgpA2QbX3tqBwUtj4yMncidEOnyfdcYY5T930bdwNVach4j-3Dc2F0Xy" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Compile and run this example →
+      </a>
+    </div>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">What "compiling ABAP online" actually means here</h2>
+      <p class="text-gray-400 mb-4">
+        ABAP normally runs inside a SAP NetWeaver or S/4HANA application server. There is no such server here.
+        Instead, ABAP Dojo parses your code and <strong class="text-gray-200">transpiles it to JavaScript</strong>,
+        then runs that JavaScript in a sandboxed iframe in your own browser. Output from
+        <code class="text-blue-300">WRITE</code> is sent back and shown in the output panel.
+      </p>
+      <p class="text-gray-400 mb-4">
+        Both the parser and the transpiler come from the
+        <a href="https://abaplint.org" class="text-blue-400 hover:text-blue-300">abaplint</a> project
+        (<code class="text-blue-300">@abaplint/core</code> and <code class="text-blue-300">@abaplint/transpiler</code>, MIT licensed).
+        Nothing is uploaded: your code never leaves the browser tab, which matters if what you are testing
+        came out of a client's system.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">your ABAP  →  abaplint parser  →  transpiler  →  JavaScript  →  sandboxed iframe  →  output</code></pre>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">What compiles today</h2>
+      <ul class="text-gray-400 space-y-2 list-disc list-inside">
+        <li>Variables, constants, and the numeric, character and string types</li>
+        <li>Control flow: <code class="text-blue-300">IF</code> / <code class="text-blue-300">CASE</code> / <code class="text-blue-300">DO</code> / <code class="text-blue-300">WHILE</code> / <code class="text-blue-300">LOOP</code></li>
+        <li>Internal tables — <code class="text-blue-300">APPEND</code>, <code class="text-blue-300">READ TABLE</code>, <code class="text-blue-300">LOOP AT ... ASSIGNING</code>, <code class="text-blue-300">LINES()</code></li>
+        <li>String handling — <code class="text-blue-300">CONCATENATE</code>, <code class="text-blue-300">&amp;&amp;</code>, string templates, <code class="text-blue-300">STRLEN</code>, <code class="text-blue-300">CONDENSE</code></li>
+        <li>Local classes and interfaces: <code class="text-blue-300">CLASS ... DEFINITION</code>, methods, inheritance, polymorphism</li>
+        <li>Modern expressions — <code class="text-blue-300">VALUE</code>, <code class="text-blue-300">FOR</code>, <code class="text-blue-300">REDUCE</code>, <code class="text-blue-300">COND</code>, <code class="text-blue-300">SWITCH</code>, inline <code class="text-blue-300">DATA(...)</code></li>
+      </ul>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">What does not compile — and why</h2>
+      <p class="text-gray-400 mb-4">
+        These are honest limits, not bugs. A browser has no SAP system behind it, so anything that depends on one
+        cannot run here. Knowing which is which saves you from debugging the wrong thing.
+      </p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left border border-gray-700 rounded-lg">
+          <thead class="bg-gray-800 text-gray-300">
+            <tr>
+              <th class="px-4 py-2 border-b border-gray-700">Not supported</th>
+              <th class="px-4 py-2 border-b border-gray-700">Why</th>
+            </tr>
+          </thead>
+          <tbody class="text-gray-400">
+            <tr>
+              <td class="px-4 py-2 border-b border-gray-800"><code class="text-blue-300">SELECT</code> and other Open SQL</td>
+              <td class="px-4 py-2 border-b border-gray-800">There is no database and no DDIC. This needs an in-memory database simulation, which is not wired up yet.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-2 border-b border-gray-800">DDIC types and structures</td>
+              <td class="px-4 py-2 border-b border-gray-800">Types like <code class="text-blue-300">MARA</code> or <code class="text-blue-300">BAPIRET2</code> live in the data dictionary of a real system.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-2 border-b border-gray-800">Most <code class="text-blue-300">CL_*</code> standard classes</td>
+              <td class="px-4 py-2 border-b border-gray-800">Only what open-abap-core reimplements exists. Define a local class instead when you just want to test logic.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-2 border-b border-gray-800">Function modules, BAPIs, RFC</td>
+              <td class="px-4 py-2 border-b border-gray-800">These are server-side repository objects.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-2 border-b border-gray-800">Dynpro, ALV, screens</td>
+              <td class="px-4 py-2 border-b border-gray-800">UI technology tied to the SAP GUI runtime.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-2"><code class="text-blue-300">AUTHORITY-CHECK</code>, locks, updates</td>
+              <td class="px-4 py-2">Depend on a system, its users and its transaction handling.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-gray-500 text-sm mt-3">
+        The transpiler targets <strong class="text-gray-300">ABAP 7.02 syntax</strong> as its base. Newer syntax generally works,
+        but if something very recent fails to transpile, that is usually why.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Errors you will see, and what they mean</h2>
+      <ul class="text-gray-400 space-y-3">
+        <li>
+          <strong class="text-gray-200">Syntax error on line N</strong> — the parser could not read your code.
+          Usually a missing period, or a statement the 7.02 base does not know.
+        </li>
+        <li>
+          <strong class="text-gray-200">Transpile error</strong> — the code parsed, but there is no JavaScript equivalent.
+          This is what you get for <code class="text-blue-300">SELECT</code> or an unknown standard class.
+        </li>
+        <li>
+          <strong class="text-gray-200">Runtime error</strong> — it compiled and ran, then failed while executing,
+          exactly as it would in a real system: division by zero, an unbound reference, a failed
+          <code class="text-blue-300">READ TABLE</code>.
+        </li>
+      </ul>
+      <p class="text-gray-400 mt-4">
+        The distinction is useful on its own: a runtime error means your ABAP is valid and the logic is wrong,
+        which is a very different fix from the first two.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Frequently asked</h2>
+      <div class="space-y-4 text-gray-400">
+        <div>
+          <p class="text-gray-200 font-medium">Is it really free, and do I need an account?</p>
+          <p>Free, and no account. There is no backend to sign into.</p>
+        </div>
+        <div>
+          <p class="text-gray-200 font-medium">Does my code get uploaded anywhere?</p>
+          <p>No. Parsing, transpiling and execution all happen in your browser. The one exception is deliberate:
+             the Share button encodes your code into the URL, so only share those links where you would paste the code itself.</p>
+        </div>
+        <div>
+          <p class="text-gray-200 font-medium">Can I use this to check code an AI wrote for me?</p>
+          <p>Yes — that is what the <a href="/#mode=validator" class="text-blue-400 hover:text-blue-300">AI Validator</a> mode is for.
+             It runs syntax, lint, transpile and runtime checks in one pass and flags
+             <a href="/docs/#pitfalls" class="text-blue-400 hover:text-blue-300">mistakes LLMs make specifically in ABAP</a>.</p>
+        </div>
+        <div>
+          <p class="text-gray-200 font-medium">Will it behave exactly like my SAP system?</p>
+          <p>For language semantics, largely yes. For anything touching the database, DDIC or standard classes, no —
+             see the table above. Treat it as a fast first check, not a substitute for testing on a real system.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="text-center mt-10">
+      <a href="/" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Open the ABAP compiler →
+      </a>
+      <p class="text-gray-500 text-sm mt-3">
+        Also worth reading: <a href="/online-abap-editor.html" class="text-gray-400 hover:text-gray-200">the online ABAP editor</a>
+        and <a href="/practice-abap-without-sap.html" class="text-gray-400 hover:text-gray-200">how to practise ABAP without an SAP system</a>.
+      </p>
+    </div>
+  </main>
+
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>

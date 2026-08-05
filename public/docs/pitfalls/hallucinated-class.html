@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Pitfall: Hallucinated SAP Class Names — ABAP Dojo</title>
+  <meta name="description" content="Why AI invents plausible CL_* class and function module names that do not exist, how to spot one before you waste an afternoon, and what to do instead." />
+  <link rel="canonical" href="https://abapdojo.com/docs/pitfalls/hallucinated-class.html" />
+  <meta property="og:title" content="LLM Pitfall: Hallucinated SAP Class Names — ABAP Dojo" />
+  <meta property="og:description" content="Why AI invents plausible CL_* names that do not exist, and how to spot one quickly." />
+  <meta property="og:url" content="https://abapdojo.com/docs/pitfalls/hallucinated-class.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.svg" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/docs/style.css" />
+  <!-- GA4 — production host only (mirrors index.html). -->
+  <script>
+    (function () {
+      if (['abapdojo.com', 'www.abapdojo.com'].indexOf(location.hostname) === -1) return;
+      var tag = document.createElement('script');
+      tag.async = true;
+      tag.src = 'https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X';
+      document.head.appendChild(tag);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function(){ dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
+    })();
+  </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/#pitfalls" class="text-gray-400 hover:text-gray-200 transition-colors">LLM Pitfalls</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Hallucinated Class Names</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">Hallucinated Class Names</h1>
+    <p class="text-gray-400 text-lg mb-4">
+      Ask an AI to convert a currency and it may reach for <code class="text-blue-300">CL_CURRENCY_CONVERTER</code>.
+      The name follows SAP's conventions exactly, the method signature looks reasonable, and the class does not exist.
+      This is the single most expensive AI mistake in ABAP, because you cannot tell by reading.
+    </p>
+    <div class="border-l-2 border-red-500 bg-red-950/20 px-4 py-3 mb-10">
+      <p class="text-red-300 text-sm font-medium">Detected as: <code>llm-hallucinated-class</code> · severity error</p>
+      <p class="text-gray-400 text-sm mt-1">Possibly hallucinated class or interface name</p>
+    </div>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Why ABAP gets this worse than other languages</h2>
+      <p class="text-gray-400 mb-4">
+        A language model generates the most plausible next token. SAP's naming is extremely regular —
+        <code class="text-blue-300">CL_</code> for classes, <code class="text-blue-300">IF_</code> for interfaces,
+        <code class="text-blue-300">ABAP</code> in the middle of utility classes — so producing a
+        <em>convincing</em> name is easy. Producing a <em>real</em> one requires having memorised a repository of
+        hundreds of thousands of objects, most of which never appear in public code.
+      </p>
+      <p class="text-gray-400">
+        Python has the opposite situation: its standard library is small, universally documented and everywhere in
+        training data. ABAP is a low-resource language for these models, and this is where that shows up most sharply.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Real, or invented?</h2>
+      <p class="text-gray-400 mb-4">
+        Worth trying before you scroll: which of these exist?
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">CL_ABAP_TYPEDESCR
+CL_ABAP_STRING_UTILITIES
+CL_STRING_HELPER
+CL_ABAP_UNIT_ASSERT
+CL_JSON_SERIALIZER
+CL_ABAP_CONV_OUT_CE</code></pre>
+      <p class="text-gray-400 mt-4">
+        The third and fifth are inventions of the sort models produce; the rest are real SAP classes.
+        If you had to think about it, that is the point — plausibility is not evidence, and no amount of
+        code review catches this. Only a system, or a documented list, can answer it.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">How to check, in order of cost</h2>
+      <ol class="text-gray-400 space-y-2 list-decimal list-inside">
+        <li><strong class="text-gray-200">On a system:</strong> open it in SE24 or ADT. Definitive, and takes seconds.</li>
+        <li><strong class="text-gray-200">Without one:</strong> search SAP's official ABAP keyword documentation or the class in
+            <a href="https://github.com/open-abap/open-abap-core" class="text-blue-400 hover:text-blue-300">open-abap-core</a>,
+            which reimplements the commonly used ones.</li>
+        <li><strong class="text-gray-200">Here:</strong> paste the code into the
+            <a href="/#mode=validator" class="text-blue-400 hover:text-blue-300">AI Validator</a>. Unresolvable
+            <code class="text-blue-300">CL_</code>, <code class="text-blue-300">IF_</code>, <code class="text-blue-300">ZCL_</code>
+            and <code class="text-blue-300">ZIF_</code> names are flagged.</li>
+      </ol>
+      <p class="text-gray-500 text-sm mt-3">
+        Note the direction of the check here: a flag means "this could not be resolved", which for a
+        <code class="text-blue-300">Z</code>-class from your own system is expected and fine. Treat it as a
+        prompt to verify, not a verdict.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">What to do instead while prototyping</h2>
+      <p class="text-gray-400 mb-4">
+        If what you are actually testing is your own logic, do not depend on a standard class at all.
+        A local class always exists, because you define it in the same program — so it runs anywhere,
+        including in a browser.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Instead of a CL_* you are not sure about
+CLASS lcl_greeter DEFINITION.
+  PUBLIC SECTION.
+    METHODS greet
+      IMPORTING iv_name        TYPE string
+      RETURNING VALUE(rv_text) TYPE string.
+ENDCLASS.
+
+CLASS lcl_greeter IMPLEMENTATION.
+  METHOD greet.
+    rv_text = |Hello, { iv_name }!|.
+  ENDMETHOD.
+ENDCLASS.</code></pre>
+      <p class="text-gray-400 mt-4">
+        Then swap in the real standard class once you are on a system and have confirmed its name and signature.
+        Wrapping the dependency behind your own interface makes that swap a one-line change — and makes the
+        logic testable with ABAP Unit either way.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">A prompting habit that helps</h2>
+      <p class="text-gray-400">
+        Ask for the standard-class dependency to be named and isolated rather than sprinkled through the code:
+        "use only local classes, and list separately any SAP standard class you would normally call".
+        You get code that runs, plus an explicit list of things to verify — instead of a single blob where the
+        two are indistinguishable.
+      </p>
+    </section>
+
+    <div class="text-center mt-10">
+      <a href="/#code=eJxlkFFPwjAUhd_3K46-AAnOX4BJYUVqxrZsncanZc4rLqmQrAVB8b_bdUBm7FNzeu49X0_KkziV-DKkTaE2VamKSpVa-553DQanwCko1Wd50KB9rY0e44WqcqsJh80Wr_RWrwm1wTs15HuzkGUZVKWKVUNkqEHA5yISUsSR7wFJPg3FDBmfnRVgyeUiDjK4CacAYtnSiege9a5Ylx-E05HPCYc2Tb1enawpl3katdZHFuZ82OwKQ3sz6lt9j0eBY7Pf-89o00K-5JFkZ6qOqUPqKE9rMcFxQUptxvi-sP1cHVuTzejm_sQFTLZ1XsIcVsrnkHEfwnaXciY54umDbac3YXc8pcK-3PbEmzt3GV4YJhiwKUsGGPneL5zqj0U=" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Run the local-class version →
+      </a>
+      <p class="text-gray-500 text-sm mt-3">
+        Related: <a href="/docs/pitfalls/string-char-confusion.html" class="text-gray-400 hover:text-gray-200">STRING vs CHAR</a>
+        · <a href="/docs/pitfalls/dynamic-typing.html" class="text-gray-400 hover:text-gray-200">untyped declarations</a>
+        · <a href="/docs/guides/oo-basics.html" class="text-gray-400 hover:text-gray-200">classes and methods</a>
+      </p>
+    </div>
+  </main>
+
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>
