@@ -280,16 +280,19 @@ Playgroundモードで選択できるプリセットサンプル。ABAP学習と
 
 最小限で価値を出せるスコープ:
 
+**Phase 1 は完了し、abapdojo.com で稼働中。** Phase 2 は AI Validator のみ実装済みで、
+Modernizer は未着手（このドキュメントの Mode 3 は設計のみ）。
+
 ### 含む
-- [ ] Monaco Editor with ABAP syntax highlighting
-- [ ] abaplint integration (リアルタイムリント)
-- [ ] ▶ Run (transpile + execute + output display)
-- [ ] 5-10個のサンプルコードプリセット
-- [ ] URL hash sharing
-- [ ] レスポンシブデザイン（モバイル閲覧可能）
+- [x] Monaco Editor with ABAP syntax highlighting
+- [x] abaplint integration (リアルタイムリント)
+- [x] ▶ Run (transpile + execute + output display)
+- [x] 5-10個のサンプルコードプリセット（6個）
+- [x] URL hash sharing
+- [x] レスポンシブデザイン（モバイル閲覧可能）
 
 ### Phase 2
-- [ ] AI Validator モード（LLM Pitfall Detector）
+- [x] AI Validator モード（LLM Pitfall Detector — ルール4件）
 - [ ] Modernizer モード（diff view付き）
 - [ ] PWA + オフライン対応
 - [ ] サンプルコード拡充（20-30個）

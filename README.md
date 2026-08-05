@@ -55,9 +55,11 @@ npm run preview    # Preview production build locally
 
 ```bash
 npm run lint       # ESLint
-npx tsc --noEmit   # Type check
-npx vitest run     # Run tests
+npm run typecheck  # Type check
+npm test           # Run tests once (npm run test:watch to watch)
 ```
+
+CI runs all three on every pull request.
 
 ## Project Structure
 
@@ -70,8 +72,13 @@ src/
   types/         # TypeScript type definitions
   utils/         # Shared utilities
 public/
-  docs/          # Static SEO content pages (guides, pitfall articles)
+  *.html         # Landing pages for search (online compiler, editor, practice)
+  docs/          # Static content pages (guides, pitfall articles)
 ```
+
+Static pages are plain HTML served straight from `public/`, so they do not go
+through the Vite build. Cloudflare Pages serves them at their extensionless
+path — `/docs/guides/oo-basics`, not `/docs/guides/oo-basics.html`.
 
 ## Contributing
 
