@@ -13,6 +13,8 @@ import {
 } from "./components/ExecutionSandbox";
 import { debounce } from "./utils/debounce";
 import { encodeSource, decodeSource } from "./utils/urlShare";
+import { track, lineCount } from "./utils/analytics";
+import { computeSummary } from "./utils/validationSummary";
 import type { LintIssue, WorkerResponse } from "./types/messages";
 import type { Sample } from "./samples";
 import type { AppMode, StageResult, ValidationStage } from "./types/validation";
@@ -32,9 +34,18 @@ function parseHash(): { mode: AppMode; code: string | null } {
   return { mode, code };
 }
 
-function getInitialState(): { mode: AppMode; code: string } {
+function getInitialState(): {
+  mode: AppMode;
+  code: string;
+  /** True only when the URL carried a code parameter that actually decoded. */
+  decodedFromUrl: boolean;
+} {
   const { mode, code } = parseHash();
-  return { mode, code: code ?? DEFAULT_CODE };
+  return {
+    mode,
+    code: code ?? DEFAULT_CODE,
+    decodedFromUrl: code !== null,
+  };
 }
 
 // Module-level worker reference and debounced lint function.
@@ -54,7 +65,9 @@ const INITIAL_STAGES: Record<ValidationStage, StageResult> = {
 };
 
 function App() {
-  const initial = getInitialState();
+  // Lazy initializer: getInitialState() inflates the hash, so it must run once
+  // on mount rather than on every render.
+  const [initial] = useState(getInitialState);
   const [mode, setMode] = useState<AppMode>(initial.mode);
   const [source, setSource] = useState(initial.code);
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
@@ -71,6 +84,14 @@ function App() {
   // Track which requestId belongs to each execution context
   const validationRequestIdRef = useRef<string | null>(null);
   const playgroundRequestIdRef = useRef<string>("");
+
+  // Analytics: measure how long a run/validation took and how much it produced.
+  // Counts only — never the code or the output text itself.
+  const runStartRef = useRef(0);
+  const runOutputCountRef = useRef(0);
+  const validateStartRef = useRef(0);
+  const validateLineCountRef = useRef(0);
+  const wasValidatingRef = useRef(false);
 
   const sandboxRef = useRef<ExecutionSandboxHandle>(null);
 
@@ -118,6 +139,10 @@ function App() {
             : `Transpile error: ${data.message}`,
         );
         setIsRunning(false);
+        track("run_result", {
+          outcome: "transpile_error",
+          duration_ms: Math.round(performance.now() - runStartRef.current),
+        });
       }
 
       // Validation messages
@@ -175,6 +200,7 @@ function App() {
       // Validation runtime output — we only care about success/failure, not output
       return;
     }
+    runOutputCountRef.current += 1;
     setOutput((prev) => [...prev, text]);
   }, []);
 
@@ -190,6 +216,11 @@ function App() {
     }
     setError(message);
     setIsRunning(false);
+    track("run_result", {
+      outcome: "runtime_error",
+      duration_ms: Math.round(performance.now() - runStartRef.current),
+      output_lines: runOutputCountRef.current,
+    });
   }, []);
 
   const handleDone = useCallback((requestId: string) => {
@@ -203,6 +234,11 @@ function App() {
       return;
     }
     setIsRunning(false);
+    track("run_result", {
+      outcome: "success",
+      duration_ms: Math.round(performance.now() - runStartRef.current),
+      output_lines: runOutputCountRef.current,
+    });
   }, []);
 
   const handleChange = useCallback((value: string) => {
@@ -215,6 +251,46 @@ function App() {
     debouncedLint(source);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Report once when the page loaded with code in the URL that actually decoded.
+  //
+  // This deliberately does NOT claim to count shared-link arrivals. handleShare
+  // and handleModeChange both write "#code=..." into the URL, so any later
+  // reload of the user's own tab looks identical to opening someone else's
+  // link. Requiring a successful decode is the part we can be honest about;
+  // naming it after the URL rather than after sharing is the rest.
+  useEffect(() => {
+    if (initial.decodedFromUrl) {
+      track("url_code_open", { line_count: lineCount(initial.code), mode });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Validation finishes at several different points (transpile fail, runtime
+  // skip, runtime pass/fail). Rather than instrumenting each of them, watch the
+  // isValidating -> false transition.
+  //
+  // `wasValidatingRef` is the only thing keeping this to one event per run: the
+  // worker delivers stage results as separate postMessages, so this effect can
+  // and does re-run afterwards, and on the syntax-error and transpile-fail
+  // paths it fires while the trailing `runtime` stage is still "pending".
+  // That is currently harmless — a pending stage counts as neither fail nor
+  // warn in computeSummary, and the stage that decides the verdict is always
+  // already in — but it is a real coupling to the worker's message order. If a
+  // future exit path only reveals fail/warn in its LAST message, the outcome
+  // sent here will be wrong while the UI (which gates on allDone) stays right.
+  useEffect(() => {
+    if (wasValidatingRef.current && !isValidating) {
+      const summary = computeSummary(validationStages);
+      track("validate_result", {
+        outcome: summary.overall,
+        duration_ms: Math.round(performance.now() - validateStartRef.current),
+        lint_issues: summary.lintIssues,
+        pitfalls: summary.pitfalls,
+        line_count: validateLineCountRef.current,
+      });
+    }
+    wasValidatingRef.current = isValidating;
+  }, [isValidating, validationStages]);
+
   // Run (Playground mode)
   const handleRun = useCallback(() => {
     setOutput([]);
@@ -222,6 +298,9 @@ function App() {
     setIsRunning(true);
     setActiveTab("output");
     playgroundRequestIdRef.current = crypto.randomUUID();
+    runStartRef.current = performance.now();
+    runOutputCountRef.current = 0;
+    track("run_click", { line_count: lineCount(source) });
     appWorker?.postMessage({ type: "transpile", source });
   }, [source]);
 
@@ -229,6 +308,9 @@ function App() {
   const handleValidate = useCallback(() => {
     validationRequestIdRef.current = null;
     setIsValidating(true);
+    validateStartRef.current = performance.now();
+    validateLineCountRef.current = lineCount(source);
+    track("validate_click", { line_count: validateLineCountRef.current });
     setValidationStages({
       syntax: { status: "pending" },
       lint: { status: "pending" },
@@ -241,7 +323,12 @@ function App() {
   // Mode change
   const handleModeChange = useCallback(
     (newMode: AppMode) => {
+      // The header buttons are always clickable, including the active one.
+      // Without this guard a same-mode click would report a switch that never
+      // happened and inflate the denominator of "users who tried the other mode".
+      if (newMode === mode) return;
       setMode(newMode);
+      track("mode_switch", { to_mode: newMode });
       const encoded = encodeSource(source);
       if (newMode === "playground") {
         window.history.replaceState(null, "", `#code=${encoded}`);
@@ -253,11 +340,12 @@ function App() {
         );
       }
     },
-    [source],
+    [source, mode],
   );
 
   // Sample selection
   const handleSelectSample = useCallback((sample: Sample) => {
+    track("sample_select", { sample_id: sample.id });
     setSource(sample.code);
     setOutput([]);
     setError(null);
@@ -285,6 +373,10 @@ function App() {
     if (url.length > 2000) {
       alert("Warning: URL is very long and may not work in all browsers.");
     }
+    track("share_click", {
+      url_length: url.length,
+      line_count: lineCount(source),
+    });
     const hash = `#${modeParam}code=${encoded}`;
     window.history.replaceState(null, "", hash);
     navigator.clipboard.writeText(url).then(
