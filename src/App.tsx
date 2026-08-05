@@ -14,6 +14,7 @@ import {
 import { debounce } from "./utils/debounce";
 import { encodeSource, decodeSource } from "./utils/urlShare";
 import { track, lineCount } from "./utils/analytics";
+import { scheduleIdle } from "./utils/scheduleIdle";
 import { computeSummary } from "./utils/validationSummary";
 import type { LintIssue, WorkerResponse } from "./types/messages";
 import type { Sample } from "./samples";
@@ -93,6 +94,12 @@ function App() {
   const validateLineCountRef = useRef(0);
   const wasValidatingRef = useRef(false);
 
+  // The worker boots after an idle callback, by which point `source` may already
+  // have changed. This ref carries the current value into that callback without
+  // making the boot effect depend on every keystroke. Mirrored from state below
+  // rather than written at each setSource, so the two cannot drift apart.
+  const sourceRef = useRef(initial.code);
+
   const sandboxRef = useRef<ExecutionSandboxHandle>(null);
 
   // Hero visibility: hidden if dismissed, or if URL has code parameter
@@ -119,11 +126,11 @@ function App() {
     setSharedCodeBannerVisible(false);
   }, []);
 
-  // Initialize worker
   useEffect(() => {
-    const worker = new AbaplintWorker();
-    appWorker = worker;
+    sourceRef.current = source;
+  }, [source]);
 
+  const attachWorkerHandlers = useCallback((worker: Worker) => {
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const data = event.data;
 
@@ -187,12 +194,29 @@ function App() {
         }
       }
     };
+  }, []);
+
+  // Boot the abaplint worker once the browser is idle. Creating it during mount
+  // meant parsing 1.8 MB of JavaScript before the page could respond to input,
+  // and nothing needs the worker until the first lint result appears.
+  useEffect(() => {
+    let worker: Worker | null = null;
+
+    const cancel = scheduleIdle(() => {
+      worker = new AbaplintWorker();
+      appWorker = worker;
+      attachWorkerHandlers(worker);
+      // Lint whatever is on screen now: the mount-time lint had no worker to
+      // post to, so without this the first result would wait for a keystroke.
+      debouncedLint(sourceRef.current);
+    });
 
     return () => {
-      worker.terminate();
-      appWorker = null;
+      cancel();
+      worker?.terminate();
+      if (appWorker === worker) appWorker = null;
     };
-  }, []);
+  }, [attachWorkerHandlers]);
 
   // Sandbox callbacks — requestId disambiguates playground vs validation
   const handleOutput = useCallback((text: string, requestId: string) => {
@@ -246,10 +270,8 @@ function App() {
     debouncedLint(value);
   }, []);
 
-  // Initial lint
-  useEffect(() => {
-    debouncedLint(source);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // The initial lint is kicked off by the worker-boot effect instead, since
+  // posting before the worker exists would drop the message.
 
   // Report once when the page loaded with code in the URL that actually decoded.
   //
