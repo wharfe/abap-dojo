@@ -6,17 +6,17 @@
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/practice-abap-without-sap.html</loc>
+    <loc>https://abapdojo.com/practice-abap-without-sap</loc>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/abap-online-compiler.html</loc>
+    <loc>https://abapdojo.com/abap-online-compiler</loc>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/online-abap-editor.html</loc>
+    <loc>https://abapdojo.com/online-abap-editor</loc>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
@@ -26,52 +26,52 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/about.html</loc>
+    <loc>https://abapdojo.com/docs/about</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/guides/variables-conditions.html</loc>
+    <loc>https://abapdojo.com/docs/guides/variables-conditions</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/guides/internal-tables.html</loc>
+    <loc>https://abapdojo.com/docs/guides/internal-tables</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/guides/string-processing.html</loc>
+    <loc>https://abapdojo.com/docs/guides/string-processing</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/guides/oo-basics.html</loc>
+    <loc>https://abapdojo.com/docs/guides/oo-basics</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/guides/modern-syntax.html</loc>
+    <loc>https://abapdojo.com/docs/guides/modern-syntax</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/pitfalls/string-char-confusion.html</loc>
+    <loc>https://abapdojo.com/docs/pitfalls/string-char-confusion</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/pitfalls/python-loop-pattern.html</loc>
+    <loc>https://abapdojo.com/docs/pitfalls/python-loop-pattern</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/pitfalls/dynamic-typing.html</loc>
+    <loc>https://abapdojo.com/docs/pitfalls/dynamic-typing</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://abapdojo.com/docs/pitfalls/hallucinated-class.html</loc>
+    <loc>https://abapdojo.com/docs/pitfalls/hallucinated-class</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
