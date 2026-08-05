@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How to Practice ABAP Without an SAP System — A Working Path</title>
+  <meta name="description" content="Learn most of the ABAP language with no SAP system. A practice path in the browser: what you can drill today, what needs a real system, and in what order." />
+  <link rel="canonical" href="https://abapdojo.com/practice-abap-without-sap.html" />
+  <meta property="og:title" content="How to Practice ABAP Without an SAP System — A Working Path" />
+  <meta property="og:description" content="Learn most of the ABAP language with no SAP system. What you can drill in a browser, what needs a system, and in what order." />
+  <meta property="og:url" content="https://abapdojo.com/practice-abap-without-sap.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.svg" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/docs/style.css" />
+  <!-- GA4 — production host only (mirrors index.html). -->
+  <script>
+    (function () {
+      if (['abapdojo.com', 'www.abapdojo.com'].indexOf(location.hostname) === -1) return;
+      var tag = document.createElement('script');
+      tag.async = true;
+      tag.src = 'https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X';
+      document.head.appendChild(tag);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function(){ dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
+    })();
+  </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Practising ABAP Without SAP</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">How to Practice ABAP Without an SAP System</h1>
+    <p class="text-gray-400 text-lg mb-6">
+      The usual answer is "you can't, you need a system". That is only half true. Most of what makes ABAP
+      unfamiliar is <em>the language</em> — internal tables, work areas, field symbols, its own OO dialect —
+      and the language you can drill in a browser tab. This page is a path through it, plus an honest list of
+      what really does need a system.
+    </p>
+
+    <div class="text-center mb-12">
+      <a href="/#code=eJxlkE1Pg0AQhu_8ijdeuNQ1bb1ovGCgStIPQlHjqVlhsKuw0-wujdX63wVUYuJpDjPzPPNOGiWrNMN7qYx1G-toZ4XnnWAssJYHWK7JbZV-9h7SOItwBv-WqopRGq4RXAcJQn5h4fdLE4GQ8koagtQFGttW7KVR8qkiLwyyANV-o2VNyB6TCNaZFo37YH4XwS9oTxXvyLSwX9txqXKCY9REDgduRvgYGJ_i2GunAgv52rkKypVVrAfXlhvz7VI_mgvhxbOhdYXxRHjAkO6GuUDNRreHdami-Tr6PyBLR0Yz635kGcaz_pBzgZR2JN2fv4UrTJHFi2g9YC47TmJk7rpwhhtd-CPYw6nSBb31wHAlvC-s6npf" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Start with these four lines →
+      </a>
+    </div>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">First, the honest split</h2>
+      <div class="grid gap-4 md:grid-cols-2">
+        <div class="border border-gray-700 rounded-lg p-4">
+          <p class="text-green-400 font-medium mb-2">Practise in a browser</p>
+          <ul class="text-gray-400 text-sm space-y-1 list-disc list-inside">
+            <li>Declarations and ABAP's type system</li>
+            <li>IF / CASE / DO / WHILE / LOOP</li>
+            <li>Internal tables and work areas</li>
+            <li>Field symbols and references</li>
+            <li>String handling and templates</li>
+            <li>Local classes, interfaces, inheritance</li>
+            <li>Modern syntax: VALUE, FOR, REDUCE, COND</li>
+            <li>Reading and fixing lint findings</li>
+          </ul>
+        </div>
+        <div class="border border-gray-700 rounded-lg p-4">
+          <p class="text-yellow-400 font-medium mb-2">Needs a real system</p>
+          <ul class="text-gray-400 text-sm space-y-1 list-disc list-inside">
+            <li>Open SQL against actual tables</li>
+            <li>DDIC types, domains, search helps</li>
+            <li>Standard classes, function modules, BAPIs</li>
+            <li>ALV, Dynpro, SAP GUI behaviour</li>
+            <li>Authorisation checks and locking</li>
+            <li>Transports and package structure</li>
+            <li>Performance on real data volumes</li>
+            <li>RAP, CDS, ABAP Cloud restrictions</li>
+          </ul>
+        </div>
+      </div>
+      <p class="text-gray-400 mt-4">
+        The left column is most of a beginner's first three months. The right column is what you learn on a project —
+        and it goes much faster when the language itself is no longer in your way.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">A practice path</h2>
+      <p class="text-gray-400 mb-4">
+        Work through these in order. Each links to a guide with runnable code; open it, run it, then change something
+        and run it again. Changing working code and seeing what breaks teaches faster than reading.
+      </p>
+      <ol class="space-y-4 text-gray-400">
+        <li class="border-l-2 border-blue-600 pl-4">
+          <p class="text-gray-200 font-medium">1. Output and variables</p>
+          <p>Get something on screen, declare variables, watch how ABAP's fixed-length types behave.
+             → <a href="/docs/guides/variables-conditions.html" class="text-blue-400 hover:text-blue-300">Variables, IF and CASE</a></p>
+        </li>
+        <li class="border-l-2 border-blue-600 pl-4">
+          <p class="text-gray-200 font-medium">2. Internal tables</p>
+          <p>The heart of ABAP. Build a table, loop it, read a row, count rows. If you learn one thing, learn this.
+             → <a href="/docs/guides/internal-tables.html" class="text-blue-400 hover:text-blue-300">Internal tables</a></p>
+        </li>
+        <li class="border-l-2 border-blue-600 pl-4">
+          <p class="text-gray-200 font-medium">3. Strings</p>
+          <p>CONCATENATE versus <code class="text-blue-300">&amp;&amp;</code>, templates, CONDENSE, STRLEN.
+             → <a href="/docs/guides/string-processing.html" class="text-blue-400 hover:text-blue-300">String processing</a></p>
+        </li>
+        <li class="border-l-2 border-blue-600 pl-4">
+          <p class="text-gray-200 font-medium">4. Local classes</p>
+          <p>ABAP's OO is its own dialect. Local classes need no repository, so you can practise all of it here.
+             → <a href="/docs/guides/oo-basics.html" class="text-blue-400 hover:text-blue-300">Classes and methods</a></p>
+        </li>
+        <li class="border-l-2 border-blue-600 pl-4">
+          <p class="text-gray-200 font-medium">5. Modern syntax</p>
+          <p>Inline declarations, VALUE, FOR, REDUCE. What a 7.40+ codebase actually looks like.
+             → <a href="/docs/guides/modern-syntax.html" class="text-blue-400 hover:text-blue-300">Modern ABAP syntax</a></p>
+        </li>
+        <li class="border-l-2 border-blue-600 pl-4">
+          <p class="text-gray-200 font-medium">6. Read the linter</p>
+          <p>Turn on the Lint tab and fix what abaplint flags. This is how you pick up conventions without a mentor —
+             it is the same linter many ABAP teams run in CI.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">If you are learning ABAP through an AI assistant</h2>
+      <p class="text-gray-400 mb-4">
+        This is now how a lot of people start, and it has a specific failure mode: ABAP is a low-resource language
+        for LLMs, so generated code is confident and often subtly wrong. Two habits help.
+      </p>
+      <p class="text-gray-400 mb-4">
+        <strong class="text-gray-200">Run everything it gives you.</strong> Not "does it look right" — run it.
+        Half of what breaks, breaks immediately.
+      </p>
+      <p class="text-gray-400">
+        <strong class="text-gray-200">Know the patterns it gets wrong.</strong> There are recurring ones:
+        <a href="/docs/pitfalls/string-char-confusion.html" class="text-blue-400 hover:text-blue-300">STRING where CHAR belongs</a>,
+        <a href="/docs/pitfalls/python-loop-pattern.html" class="text-blue-400 hover:text-blue-300">Python-style index loops</a>,
+        <a href="/docs/pitfalls/dynamic-typing.html" class="text-blue-400 hover:text-blue-300">declarations with no type</a>,
+        <a href="/docs/pitfalls/hallucinated-class.html" class="text-blue-400 hover:text-blue-300">class names that do not exist</a>.
+        The <a href="/#mode=validator" class="text-blue-400 hover:text-blue-300">AI Validator</a> checks for these in one pass.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">When you do need a system</h2>
+      <p class="text-gray-400 mb-4">
+        At some point you will. The realistic options, cheapest first:
+      </p>
+      <ul class="text-gray-400 space-y-2 list-disc list-inside">
+        <li><strong class="text-gray-200">An employer or client system</strong> — by far the most common route into real ABAP.</li>
+        <li><strong class="text-gray-200">SAP BTP ABAP environment trial</strong> — free tier, time-limited, ABAP Cloud only (so no classic Dynpro or ALV).</li>
+        <li><strong class="text-gray-200">The ABAP Platform developer edition in Docker</strong> — a full local system, but it wants serious RAM and disk.</li>
+      </ul>
+      <p class="text-gray-400 mt-4">
+        None of them is a prerequisite for the six steps above. Do those first; the system will make more sense when you get one.
+      </p>
+    </section>
+
+    <div class="text-center mt-10">
+      <a href="/" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Start practising →
+      </a>
+      <p class="text-gray-500 text-sm mt-3">
+        See also: <a href="/abap-online-compiler.html" class="text-gray-400 hover:text-gray-200">the online compiler and its limits</a>
+        · <a href="/online-abap-editor.html" class="text-gray-400 hover:text-gray-200">the editor</a>
+      </p>
+    </div>
+  </main>
+
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Pitfall: Untyped Declarations in ABAP — ABAP Dojo</title>
+  <meta name="description" content="Why AI-generated ABAP omits TYPE on DATA and FIELD-SYMBOLS declarations, what ABAP does with an untyped declaration, and how to fix it." />
+  <link rel="canonical" href="https://abapdojo.com/docs/pitfalls/dynamic-typing.html" />
+  <meta property="og:title" content="LLM Pitfall: Untyped Declarations in ABAP — ABAP Dojo" />
+  <meta property="og:description" content="Why AI-generated ABAP omits TYPE on declarations, and what ABAP actually does with them." />
+  <meta property="og:url" content="https://abapdojo.com/docs/pitfalls/dynamic-typing.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.svg" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/docs/style.css" />
+  <!-- GA4 — production host only (mirrors index.html). -->
+  <script>
+    (function () {
+      if (['abapdojo.com', 'www.abapdojo.com'].indexOf(location.hostname) === -1) return;
+      var tag = document.createElement('script');
+      tag.async = true;
+      tag.src = 'https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X';
+      document.head.appendChild(tag);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function(){ dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
+    })();
+  </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/#pitfalls" class="text-gray-400 hover:text-gray-200 transition-colors">LLM Pitfalls</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Untyped Declarations</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">Untyped Declarations</h1>
+    <p class="text-gray-400 text-lg mb-4">
+      An LLM trained mostly on Python and JavaScript writes <code class="text-blue-300">DATA lv_x.</code> and moves on,
+      because in those languages a variable does not need a declared type. ABAP accepts that line — and gives you
+      something you almost certainly did not want.
+    </p>
+    <div class="border-l-2 border-yellow-500 bg-yellow-950/20 px-4 py-3 mb-10">
+      <p class="text-yellow-300 text-sm font-medium">Detected as: <code>llm-dynamic-typing</code> · severity warning</p>
+      <p class="text-gray-400 text-sm mt-1">Declaration without explicit type</p>
+    </div>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">What ABAP does with an untyped DATA</h2>
+      <p class="text-gray-400 mb-4">
+        <code class="text-blue-300">DATA lv_x.</code> is legal. It does not mean "any type" — it is shorthand for
+        <code class="text-blue-300">TYPE c LENGTH 1</code>. A single character. Assign <code class="text-blue-300">42</code>
+        to it and you keep the <code class="text-blue-300">4</code>. Assign <code class="text-blue-300">'Hello'</code>
+        and you keep the <code class="text-blue-300">H</code>. Nothing raises an exception; the value is simply truncated.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" What the AI wrote
+DATA lv_total.
+lv_total = 150.
+WRITE lv_total.        " prints 1 — not 150
+
+" What it meant
+DATA lv_total TYPE i.
+lv_total = 150.
+WRITE lv_total.        " prints 150</code></pre>
+      <p class="text-gray-400 mt-4">
+        This is the worst kind of bug: it compiles, it runs, and it produces a plausible wrong answer.
+        A truncated <code class="text-blue-300">c LENGTH 1</code> total looks like a data problem, not a
+        declaration problem, so it is easy to spend an afternoon looking in the wrong place.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">The same mistake with field symbols</h2>
+      <p class="text-gray-400 mb-4">
+        <code class="text-blue-300">FIELD-SYMBOLS &lt;fs&gt; TYPE any.</code> is the field-symbol version. It is
+        occasionally the right tool — genuinely generic code does need it — but as a default it turns compile-time
+        errors into runtime ones, and the compiler can no longer help you.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Generic: mistakes surface at runtime, if at all
+FIELD-SYMBOLS &lt;ls_row&gt; TYPE any.
+
+" Typed: the compiler checks every field access
+FIELD-SYMBOLS &lt;ls_row&gt; TYPE ty_employee.
+
+" Best where possible — inline, type inferred from the table
+LOOP AT lt_employees ASSIGNING FIELD-SYMBOL(&lt;ls_row&gt;).
+  WRITE / &lt;ls_row&gt;-name.
+ENDLOOP.</code></pre>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Inline declarations are not untyped</h2>
+      <p class="text-gray-400 mb-4">
+        Worth being clear, because it looks similar: <code class="text-blue-300">DATA(lv_x) = ...</code> has no
+        <code class="text-blue-300">TYPE</code> either, and it is perfectly good ABAP. The difference is that the
+        type is <em>inferred from the right-hand side</em> at compile time, not left unspecified. Modern ABAP prefers it.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA(lv_count) = LINES( lt_employees ).   " typed i, inferred
+DATA(lv_name)  = |Alice|.                 " typed string, inferred
+DATA lv_bad.                              " c LENGTH 1 — almost never intended</code></pre>
+      <p class="text-gray-500 text-sm mt-3">
+        So the rule is not "always write TYPE". It is "never leave the type to chance".
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">How to fix it</h2>
+      <ul class="text-gray-400 space-y-2 list-disc list-inside">
+        <li>Give every <code class="text-blue-300">DATA</code> an explicit <code class="text-blue-300">TYPE</code>, or use inline <code class="text-blue-300">DATA(...)</code> so the type is inferred.</li>
+        <li>Pick the type deliberately: <code class="text-blue-300">i</code> for counters, <code class="text-blue-300">p LENGTH n DECIMALS m</code> for money, <code class="text-blue-300">string</code> for genuinely variable text, <code class="text-blue-300">char40</code> and friends for fixed fields.</li>
+        <li>Prefer <code class="text-blue-300">TYPE REF TO &lt;class&gt;</code> over <code class="text-blue-300">TYPE REF TO object</code>.</li>
+        <li>Reserve <code class="text-blue-300">TYPE any</code> for code that is deliberately generic — and say why in a comment.</li>
+      </ul>
+    </section>
+
+    <div class="text-center mt-10">
+      <a href="/#code=eJxNUM1Og0AYvO9TTLygxmLUizTpAVuiJFUJkjSemg1sYZNlIcuntp58CJ_QJ3G7pYXrzDc_36RR8ppm-CbR0Zp2rdSlz9gZom2rZC5J7WBRUeDv5xdfFSeED2ECsW1FTh1bhFkI9bnOmw9NQPaeRJD-Cda8FujhjowzP3K8dhrHtVhGL4_ZE-6xiObxc7h8w63tMTjPcOezwXEGbyWLUpDn0N7LojeBHwQWZKs0zqIpruHFJOqpd3Xs44-o-V7Wcy5oTIb1iD0kuGliraQWKESuuOEkG21_k0rB1unA3V6YQOqNMMYutzFNDaoEjCwrmlRcF-hkIdwS59abGuLqwrY_vXs5jhwaZfvDvpAT-ewfvXeNaw==" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Run the typed version →
+      </a>
+      <p class="text-gray-500 text-sm mt-3">
+        Or paste your AI-generated code into the
+        <a href="/#mode=validator" class="text-gray-400 hover:text-gray-200">AI Validator</a> to have this checked automatically.
+      </p>
+    </div>
+  </main>
+
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>

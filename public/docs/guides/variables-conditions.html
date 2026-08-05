@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ABAP Variables and Conditions — DATA, IF, CASE Examples</title>
+  <meta name="description" content="How DATA declarations, types, IF/ELSEIF and CASE work in ABAP, with runnable examples. Includes the fixed-length gotcha that surprises everyone once." />
+  <link rel="canonical" href="https://abapdojo.com/docs/guides/variables-conditions.html" />
+  <meta property="og:title" content="ABAP Variables and Conditions — DATA, IF, CASE Examples" />
+  <meta property="og:description" content="DATA declarations, types, IF/ELSEIF and CASE in ABAP, with runnable examples." />
+  <meta property="og:url" content="https://abapdojo.com/docs/guides/variables-conditions.html" />
+  <meta property="og:image" content="https://abapdojo.com/og-image.svg" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/docs/style.css" />
+  <!-- GA4 — production host only (mirrors index.html). -->
+  <script>
+    (function () {
+      if (['abapdojo.com', 'www.abapdojo.com'].indexOf(location.hostname) === -1) return;
+      var tag = document.createElement('script');
+      tag.async = true;
+      tag.src = 'https://www.googletagmanager.com/gtag/js?id=G-YY1YV51K2X';
+      document.head.appendChild(tag);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function(){ dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', 'G-YY1YV51K2X', { page_location: location.origin + location.pathname });
+    })();
+  </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+  <header class="px-6 py-4 bg-gray-800 border-b border-gray-700 flex items-center gap-4 flex-wrap">
+    <a href="/" class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors">ABAP Dojo</a>
+    <span class="text-gray-600">›</span>
+    <a href="/docs/" class="text-gray-400 hover:text-gray-200 transition-colors">Guides</a>
+    <span class="text-gray-600">›</span>
+    <span class="text-gray-400">Variables &amp; Conditions</span>
+  </header>
+
+  <main class="flex-1 max-w-3xl mx-auto px-6 py-10 w-full">
+    <h1 class="text-3xl font-bold mb-3">ABAP Variables and Conditions</h1>
+    <p class="text-gray-400 text-lg mb-10">
+      Declaring a variable and branching on it are the first two things you do in any language. ABAP's versions
+      have a few sharp edges that are worth meeting deliberately rather than discovering in a debugger —
+      chiefly that its character types are <em>fixed length</em>.
+    </p>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Declaring variables with DATA</h2>
+      <p class="text-gray-400 mb-4">
+        <code class="text-blue-300">DATA</code> declares a variable, and <code class="text-blue-300">TYPE</code> gives it a type.
+        <code class="text-blue-300">VALUE</code> sets an initial value. Without <code class="text-blue-300">VALUE</code>,
+        a variable starts at its type's initial value — <code class="text-blue-300">0</code> for numbers, blank for characters —
+        never null. ABAP has no null for elementary types.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA lv_score  TYPE i VALUE 85.        " integer
+DATA lv_grade  TYPE c LENGTH 1.        " one character
+DATA lv_name   TYPE string.            " variable-length text
+DATA lv_price  TYPE p LENGTH 8 DECIMALS 2.   " packed decimal — use for money
+DATA lv_active TYPE abap_bool.         " 'X' or space, not true/false</code></pre>
+      <p class="text-gray-400 mt-4">
+        Since 7.40 you can also declare inline, with the type inferred from the right-hand side. This is preferred
+        in modern code because the declaration sits where the value is produced:
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA(lv_total) = 10 + 5.        " typed i
+DATA(lv_label) = |Total|.       " typed string</code></pre>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">The fixed-length surprise</h2>
+      <p class="text-gray-400 mb-4">
+        <code class="text-blue-300">c LENGTH n</code> is exactly n characters — always. Assign something longer and
+        the rest is <strong class="text-gray-200">silently truncated</strong>; assign something shorter and it is
+        padded with blanks. No error, no warning.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">DATA lv_short TYPE c LENGTH 3.
+lv_short = 'ABAP'.
+WRITE lv_short.          " prints ABA — the P is gone
+
+DATA lv_text TYPE string.
+lv_text = 'ABAP'.
+WRITE lv_text.           " prints ABAP</code></pre>
+      <p class="text-gray-400 mt-4">
+        This is also why <code class="text-blue-300">DATA lv_x.</code> with no type at all is a trap: it means
+        <code class="text-blue-300">TYPE c LENGTH 1</code>, so <code class="text-blue-300">lv_x = 150</code> leaves you
+        with <code class="text-blue-300">1</code>. See
+        <a href="/docs/pitfalls/dynamic-typing.html" class="text-blue-400 hover:text-blue-300">untyped declarations</a>.
+      </p>
+      <p class="text-gray-400 mt-4">
+        Which to use: <code class="text-blue-300">string</code> for text of unknown length, fixed
+        <code class="text-blue-300">c LENGTH n</code> when the field has a defined width in the data model
+        (country codes, document numbers, flags) — that is what a DDIC field will expect. Both matter; picking
+        the wrong one is a common source of AI-generated bugs, covered in
+        <a href="/docs/pitfalls/string-char-confusion.html" class="text-blue-400 hover:text-blue-300">STRING vs CHAR</a>.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">IF, ELSEIF, ELSE</h2>
+      <p class="text-gray-400 mb-4">
+        Branching reads almost like prose. Note <code class="text-blue-300">ENDIF</code> — ABAP closes blocks
+        explicitly rather than by indentation or braces — and that comparison uses
+        <code class="text-blue-300">=</code>, not <code class="text-blue-300">==</code>. ABAP also accepts the word
+        forms <code class="text-blue-300">EQ</code>, <code class="text-blue-300">GT</code>,
+        <code class="text-blue-300">LE</code>, which you will meet in older code.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">IF lv_score &gt;= 90.
+  lv_grade = 'A'.
+ELSEIF lv_score &gt;= 80.
+  lv_grade = 'B'.
+ELSEIF lv_score &gt;= 70.
+  lv_grade = 'C'.
+ELSE.
+  lv_grade = 'F'.
+ENDIF.</code></pre>
+      <p class="text-gray-400 mt-4">
+        Two conditions worth knowing early, because they have no direct equivalent elsewhere:
+        <code class="text-blue-300">IS INITIAL</code> (the value equals its type's initial value) and
+        <code class="text-blue-300">IS BOUND</code> (a reference points at an object).
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">IF lv_name IS INITIAL.
+  WRITE / 'No name given'.
+ENDIF.
+
+IF lo_object IS BOUND.
+  WRITE / 'Reference is usable'.
+ENDIF.</code></pre>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">CASE for one value, many outcomes</h2>
+      <p class="text-gray-400 mb-4">
+        <code class="text-blue-300">CASE</code> compares one value against several alternatives.
+        <code class="text-blue-300">WHEN OTHERS</code> catches everything else — always include it, because a
+        <code class="text-blue-300">CASE</code> that silently matches nothing is hard to spot later.
+        There is no fall-through, so no <code class="text-blue-300">break</code> is needed.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">CASE lv_grade.
+  WHEN 'A'.
+    WRITE / 'Excellent!'.
+  WHEN 'B'.
+    WRITE / 'Good job!'.
+  WHEN 'C' OR 'D'.
+    WRITE / 'Passed.'.
+  WHEN OTHERS.
+    WRITE / 'Keep trying!'.
+ENDCASE.</code></pre>
+      <p class="text-gray-400 mt-4">
+        When all you want is a value rather than statements, the <code class="text-blue-300">COND</code> and
+        <code class="text-blue-300">SWITCH</code> expressions say it in one line — see
+        <a href="/docs/guides/modern-syntax.html" class="text-blue-400 hover:text-blue-300">modern ABAP syntax</a>.
+      </p>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-3">Full example</h2>
+      <p class="text-gray-400 mb-4">
+        Everything above in one runnable program: declare, branch, then dispatch on the result.
+        Run it, then change <code class="text-blue-300">lv_score</code> and run it again.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">REPORT ztest_cond.
+
+DATA lv_score TYPE i VALUE 85.
+DATA lv_grade TYPE c LENGTH 1.
+
+IF lv_score &gt;= 90.
+  lv_grade = 'A'.
+ELSEIF lv_score &gt;= 80.
+  lv_grade = 'B'.
+ELSEIF lv_score &gt;= 70.
+  lv_grade = 'C'.
+ELSE.
+  lv_grade = 'F'.
+ENDIF.
+
+WRITE: 'Score:', lv_score.
+WRITE: / 'Grade:', lv_grade.
+
+CASE lv_grade.
+  WHEN 'A'.
+    WRITE / 'Excellent!'.
+  WHEN 'B'.
+    WRITE / 'Good job!'.
+  WHEN OTHERS.
+    WRITE / 'Keep trying!'.
+ENDCASE.</code></pre>
+    </section>
+
+    <div class="text-center mt-10">
+      <a href="/#code=eJxtj01rwkAURffzK66r2ZTRLkqtYGHUlw8MUZKp4kraZBBLyJQYpPrrzWg0Ep3dvHvO5b2I5rNI4VjqXblOTJ4KxiZSSWT79S4xhYZazQlbLGTwRei_iVu8Kb7TOk4QUOgqD6-V7juN_DnER08wNPwQXHLBKIipBfYfwNFz8P0BHNdge-7YeTjxnWqtZeQrGoDHtmbAX26V4hp1wV1r1uG5pRLHMqa7P7D0KLxcgeqdZevSf6KzTOdlhzfUqE25xqT4NT930Ex5FMUtbqr1H8risM03ncsVdg_BTrQQdQ0=" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+        Try this code in ABAP Dojo →
+      </a>
+      <p class="text-gray-500 text-sm mt-3">
+        Next: <a href="/docs/guides/internal-tables.html" class="text-gray-400 hover:text-gray-200">internal tables</a>
+        · <a href="/docs/guides/oo-basics.html" class="text-gray-400 hover:text-gray-200">classes and methods</a>
+      </p>
+    </div>
+  </main>
+
+  <footer class="px-6 py-4 bg-gray-800 border-t border-gray-700 text-center text-xs text-gray-500">
+    <nav class="flex flex-wrap justify-center gap-3 mb-1.5">
+      <a href="/docs/" class="text-gray-400 hover:text-gray-200">Guides</a>
+      <a href="/docs/about.html" class="text-gray-400 hover:text-gray-200">About</a>
+      <a href="/" class="text-gray-400 hover:text-gray-200">← Back to ABAP Dojo</a>
+    </nav>
+    <p>© 2026 ABAP Dojo — Browser-based ABAP Playground. Powered by <a href="https://abaplint.org" class="text-gray-400 hover:text-gray-200">abaplint</a>.</p>
+  </footer>
+</body>
+</html>
