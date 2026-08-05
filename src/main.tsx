@@ -1,25 +1,17 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Buffer } from 'buffer'
-import { loader } from '@monaco-editor/react'
-// Only the editor core API — skip built-in languages (TS/CSS/HTML/JSON) we
-// don't use, since they pull in heavy language workers.
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js'
-import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import './index.css'
 import App from './App.tsx'
 
-// @abaplint/core uses Buffer.from(...) for built-in constants.
+// @abaplint/core uses Buffer.from(...) for built-in constants. It has to be in
+// place before anything imports abaplint, which is why it stays in the entry
+// chunk rather than moving with Monaco.
 ;(globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer
 
-// Bundle Monaco from node_modules instead of @monaco-editor/react's default
-// jsdelivr CDN. CDN load is blocked by our same-origin CSP (script-src 'self').
-self.MonacoEnvironment = {
-  getWorker() {
-    return new editorWorker()
-  },
-}
-loader.config({ monaco })
+// Monaco's setup (loader.config, MonacoEnvironment) moved into
+// components/MonacoEditor.tsx so it ships in that component's lazy chunk
+// instead of blocking the entry chunk. See components/EditorPanel.tsx.
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
