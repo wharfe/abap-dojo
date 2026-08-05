@@ -1,18 +1,30 @@
+// Hrefs are extensionless: Cloudflare Pages 308-redirects /x.html to /x, so
+// linking the .html form costs every visitor a redirect hop and points crawlers
+// at a URL that is not the canonical one. See CLAUDE.md, Known Gotchas.
 const NAV_LINKS = [
-  { label: "Guides", href: "/docs/index.html" },
-  { label: "AI Pitfalls", href: "/docs/index.html#pitfalls" },
-  { label: "About", href: "/docs/about.html" },
+  { label: "What runs here", href: "/abap-online-compiler" },
+  { label: "Editor features", href: "/online-abap-editor" },
+  { label: "Practice without SAP", href: "/practice-abap-without-sap" },
+  { label: "Guides", href: "/docs/" },
+  { label: "AI Pitfalls", href: "/docs/#pitfalls" },
+  { label: "About", href: "/docs/about" },
   { label: "GitHub", href: "https://github.com/wharfe/abap-dojo", external: true },
 ] as const;
 
-// Direct links to individual content pages. Improves crawl discoverability and
-// provides keyword-rich anchor text for SEO.
+// Direct links to every content page. This is the strongest discovery signal we
+// have: "/" holds essentially all of the site's search authority, so a page not
+// linked from here is one a crawler may not find for weeks. Keep it complete
+// whenever a page is added under public/docs.
 const CONTENT_LINKS = [
-  { label: "ABAP Internal Tables", href: "/docs/guides/internal-tables.html" },
-  { label: "String Processing", href: "/docs/guides/string-processing.html" },
-  { label: "Modern ABAP Syntax", href: "/docs/guides/modern-syntax.html" },
-  { label: "STRING vs CHAR Confusion", href: "/docs/pitfalls/string-char-confusion.html" },
-  { label: "Python-Style Loop Patterns", href: "/docs/pitfalls/python-loop-pattern.html" },
+  { label: "Variables & Conditions", href: "/docs/guides/variables-conditions" },
+  { label: "ABAP Internal Tables", href: "/docs/guides/internal-tables" },
+  { label: "String Processing", href: "/docs/guides/string-processing" },
+  { label: "Classes & Methods", href: "/docs/guides/oo-basics" },
+  { label: "Modern ABAP Syntax", href: "/docs/guides/modern-syntax" },
+  { label: "STRING vs CHAR Confusion", href: "/docs/pitfalls/string-char-confusion" },
+  { label: "Python-Style Loop Patterns", href: "/docs/pitfalls/python-loop-pattern" },
+  { label: "Untyped Declarations", href: "/docs/pitfalls/dynamic-typing" },
+  { label: "Hallucinated Class Names", href: "/docs/pitfalls/hallucinated-class" },
 ] as const;
 
 export function AppFooter() {
