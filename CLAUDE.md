@@ -58,6 +58,15 @@ src/
 
 1. **Playground** (MVP) - Monaco editor + real-time lint + Run (transpile+execute)
 2. **AI Validator** (Phase 2) - LLM-generated code validation with pitfall detection rules
+
+The LLM-pitfall rules run in **both** modes. `handleLint` in the worker emits
+them as ordinary `LintIssue`s via `pitfallToLintIssue`, so they appear inline in
+the editor and in the Lint list without a mode switch; `handleValidate` also
+returns them separately, because the Validator report lists them as their own
+stage with the explanation and suggestion spelled out. Keeping them behind the
+mode switch meant 4 people saw them in a month against 780 Run presses. The rule
+id is the issue key, and both renderers print `[key] message`, so a pitfall is
+self-labelling with no UI branch.
 3. **Modernizer** (Phase 2) - Legacy -> modern ABAP syntax conversion with diff view
 
 ## Analytics
