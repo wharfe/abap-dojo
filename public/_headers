@@ -17,11 +17,19 @@
 # a bad first impression, and this audience blocks GA4 at a far higher rate than
 # most, so the two together are the only way to see how much GA4 misses.
 #
-# Checked before allowing it: the beacon reads location.protocol, host and
-# pathname, and never location.href, .hash, .search or document.URL. It cannot
-# carry the "#code=<user source>" fragment off the page, which is the same bar
-# index.html's explicit page_location holds GA4 to. Re-check that if the beacon
-# version in the injected data-cf-beacon tag changes.
+# Checked before allowing it, then again against real traffic. The script reads
+# location.protocol, host and pathname and never .href, .hash, .search or
+# document.URL; loading abapdojo.com/#code=<source> and capturing the POST it
+# makes shows {"location":"https://abapdojo.com/","referrer":""} — origin and
+# pathname only. That is the same bar index.html's explicit page_location holds
+# GA4 to. Re-check if the version in the injected data-cf-beacon tag changes.
+#
+# That POST goes to the site's OWN origin, /cdn-cgi/rum, which 'self' already
+# covers — so connect-src https://cloudflareinsights.com is not what makes the
+# beacon work today. It is the fallback the script uses when the site is not
+# proxied through Cloudflare, i.e. the *.pages.dev case that also silently
+# disables gtag (see CLAUDE.md, Analytics). Kept so measurement survives that,
+# not because the current setup needs it.
 
 /*
   Strict-Transport-Security: max-age=63072000; includeSubDomains
