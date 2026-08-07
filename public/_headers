@@ -8,6 +8,20 @@
 # ABAP market) to region1.google-analytics.com, and a bare host would block
 # those beacons silently — no console error the user would report, just missing
 # data for those users.
+#
+# static.cloudflareinsights.com / cloudflareinsights.com are Cloudflare Web
+# Analytics, which the edge injects into every HTML response because the site
+# has it enabled. Leaving it out of the CSP did not disable it — it broke it,
+# loudly: a violation in every visitor's console on every page load, and zero
+# data collected. For a developer tool, a console full of our own CSP errors is
+# a bad first impression, and this audience blocks GA4 at a far higher rate than
+# most, so the two together are the only way to see how much GA4 misses.
+#
+# Checked before allowing it: the beacon reads location.protocol, host and
+# pathname, and never location.href, .hash, .search or document.URL. It cannot
+# carry the "#code=<user source>" fragment off the page, which is the same bar
+# index.html's explicit page_location holds GA4 to. Re-check that if the beacon
+# version in the injected data-cf-beacon tag changes.
 
 /*
   Strict-Transport-Security: max-age=63072000; includeSubDomains
@@ -15,4 +29,4 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()
   Cross-Origin-Opener-Policy: same-origin
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://cloudflareinsights.com; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'
