@@ -7,7 +7,8 @@ Browser-based ABAP playground & AI validator. Write, lint, and execute ABAP code
 ## Features
 
 - **Playground** — Write ABAP in Monaco Editor with real-time lint feedback, transpile to JavaScript, and execute in-browser
-- **AI Validator** — Paste LLM-generated ABAP and catch common pitfalls: STRING/CHAR confusion, Python-style loops, hallucinated classes
+- **AI Pitfall Detection** — Four rules for mistakes only language models make: STRING/CHAR confusion, Python-style loops, untyped declarations, hallucinated class names. They run inline as you type, no mode switch needed
+- **AI Validator** — Paste LLM-generated ABAP for a staged report: syntax, lint and pitfalls, transpile, execution — each stage explaining what the one before it proved
 - **163 Lint Rules** — Powered by abaplint, covering style, correctness, and best practices
 - **Safe for Client Code** — Runs 100% client-side. Your code never leaves your browser. No server, no data transfer.
 
