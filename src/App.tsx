@@ -13,7 +13,7 @@ import {
 } from "./components/ExecutionSandbox";
 import { debounce } from "./utils/debounce";
 import { encodeSource, decodeSource } from "./utils/urlShare";
-import { track, lineCount } from "./utils/analytics";
+import { track, lineCount, type RunOutcome } from "./utils/analytics";
 import { scheduleIdle } from "./utils/scheduleIdle";
 import { computeSummary } from "./utils/validationSummary";
 import type { LintIssue, WorkerResponse } from "./types/messages";
@@ -23,6 +23,17 @@ import AbaplintWorker from "./workers/abaplintWorker?worker";
 
 const DEFAULT_CODE = `REPORT ztest.
 WRITE 'Hello, ABAP Dojo!'.`;
+
+/**
+ * How long to wait for the abaplint worker before declaring the run stalled.
+ *
+ * Nothing else can end a run while the worker is thinking: a postMessage that
+ * is never answered — the worker died on boot, or Transpiler.run hung — used to
+ * leave the Run button disabled for the rest of the session. Generous on
+ * purpose, since parsing and transpiling a large report on a slow phone is
+ * legitimately slow; this is a deadlock breaker, not a performance budget.
+ */
+const WORKER_TIMEOUT_MS = 20000;
 
 function parseHash(): { mode: AppMode; code: string | null } {
   const hash = window.location.hash;
@@ -102,6 +113,16 @@ function App() {
 
   const sandboxRef = useRef<ExecutionSandboxHandle>(null);
 
+  // Deadlock breaker for the worker round trip. Armed when a run or validation
+  // is posted, disarmed the moment the worker answers or the sandbox takes over
+  // (the sandbox has a watchdog of its own from that point on).
+  const workerWatchdogRef = useRef<number | undefined>(undefined);
+
+  const disarmWorkerWatchdog = useCallback(() => {
+    window.clearTimeout(workerWatchdogRef.current);
+    workerWatchdogRef.current = undefined;
+  }, []);
+
   // Hero visibility: hidden if dismissed, or if URL has code parameter
   const [heroVisible, setHeroVisible] = useState(() => {
     if (localStorage.getItem("hero-dismissed") === "true") return false;
@@ -138,8 +159,11 @@ function App() {
       if (data.type === "lint-result") {
         setLintIssues(data.issues);
       } else if (data.type === "transpile-result") {
+        // The sandbox owns the deadline from here on.
+        disarmWorkerWatchdog();
         sandboxRef.current?.execute(data.js, playgroundRequestIdRef.current);
       } else if (data.type === "transpile-error") {
+        disarmWorkerWatchdog();
         setError(
           data.line
             ? `Transpile error (L${data.line}): ${data.message}`
@@ -173,6 +197,8 @@ function App() {
           data.result.status === "pass" &&
           data.result.js
         ) {
+          // The sandbox owns the deadline from here on.
+          disarmWorkerWatchdog();
           const reqId = crypto.randomUUID();
           validationRequestIdRef.current = reqId;
           setValidationStages((prev) => ({
@@ -187,14 +213,16 @@ function App() {
           data.stage === "transpile" &&
           (data.result.status === "fail" || data.result.status === "skipped")
         ) {
+          disarmWorkerWatchdog();
           setIsValidating(false);
         }
         if (data.stage === "runtime" && data.result.status === "skipped") {
+          disarmWorkerWatchdog();
           setIsValidating(false);
         }
       }
     };
-  }, []);
+  }, [disarmWorkerWatchdog]);
 
   // Boot the abaplint worker once the browser is idle. Creating it during mount
   // meant parsing 1.8 MB of JavaScript before the page could respond to input,
@@ -228,42 +256,80 @@ function App() {
     setOutput((prev) => [...prev, text]);
   }, []);
 
-  const handleError = useCallback((message: string, requestId: string) => {
-    if (requestId === validationRequestIdRef.current) {
-      setValidationStages((prev) => ({
-        ...prev,
-        runtime: { status: "fail", error: message },
-      }));
-      validationRequestIdRef.current = null;
-      setIsValidating(false);
-      return;
-    }
-    setError(message);
+  /**
+   * End the Playground run, whatever the reason. Every exit path goes through
+   * here so that `run_click` and `run_result` reconcile 1:1 — a missing
+   * `run_result` means a run got orphaned, not that a user walked away.
+   */
+  const endRun = useCallback((outcome: RunOutcome, message?: string) => {
+    disarmWorkerWatchdog();
+    if (message !== undefined) setError(message);
     setIsRunning(false);
     track("run_result", {
-      outcome: "runtime_error",
+      outcome,
       duration_ms: Math.round(performance.now() - runStartRef.current),
       output_lines: runOutputCountRef.current,
     });
-  }, []);
+  }, [disarmWorkerWatchdog]);
 
-  const handleDone = useCallback((requestId: string) => {
-    if (requestId === validationRequestIdRef.current) {
-      setValidationStages((prev) => ({
-        ...prev,
-        runtime: { status: "pass" },
-      }));
-      validationRequestIdRef.current = null;
-      setIsValidating(false);
-      return;
-    }
-    setIsRunning(false);
-    track("run_result", {
-      outcome: "success",
-      duration_ms: Math.round(performance.now() - runStartRef.current),
-      output_lines: runOutputCountRef.current,
-    });
-  }, []);
+  /** End the validation, marking its runtime stage with `result`. */
+  const endValidationRuntime = useCallback((result: StageResult) => {
+    disarmWorkerWatchdog();
+    setValidationStages((prev) => ({ ...prev, runtime: result }));
+    validationRequestIdRef.current = null;
+    setIsValidating(false);
+  }, [disarmWorkerWatchdog]);
+
+  const handleError = useCallback(
+    (message: string, requestId: string, kind: "runtime" | "load") => {
+      if (requestId === validationRequestIdRef.current) {
+        endValidationRuntime({ status: "fail", error: message });
+        return;
+      }
+      endRun(kind === "load" ? "load_error" : "runtime_error", message);
+    },
+    [endRun, endValidationRuntime],
+  );
+
+  const handleTimeout = useCallback(
+    (requestId: string) => {
+      const message = "Execution timeout (5s)";
+      if (requestId === validationRequestIdRef.current) {
+        endValidationRuntime({ status: "fail", error: message });
+        return;
+      }
+      endRun("timeout", message);
+    },
+    [endRun, endValidationRuntime],
+  );
+
+  /**
+   * The sandbox was handed to the other mode while this execution was still
+   * running. Nothing is wrong with the user's code — just say so and unlock the
+   * button, rather than leaving it disabled waiting on an iframe that is gone.
+   */
+  const handleCancel = useCallback(
+    (requestId: string) => {
+      const message = "Execution cancelled — another run started.";
+      if (requestId === validationRequestIdRef.current) {
+        endValidationRuntime({ status: "fail", error: message });
+        return;
+      }
+      endRun("cancelled", message);
+    },
+    [endRun, endValidationRuntime],
+  );
+
+  const handleDone = useCallback(
+    (requestId: string) => {
+      if (requestId === validationRequestIdRef.current) {
+        endValidationRuntime({ status: "pass" });
+        return;
+      }
+      endRun("success");
+    },
+    [endRun, endValidationRuntime],
+  );
 
   const handleChange = useCallback((value: string) => {
     setSource(value);
@@ -324,7 +390,13 @@ function App() {
     runOutputCountRef.current = 0;
     track("run_click", { line_count: lineCount(source) });
     appWorker?.postMessage({ type: "transpile", source });
-  }, [source]);
+    // Nothing else can end the run until the worker replies (or the sandbox
+    // takes over), so guarantee an exit even if it never does.
+    disarmWorkerWatchdog();
+    workerWatchdogRef.current = window.setTimeout(() => {
+      endRun("stalled", "The ABAP engine stopped responding. Try running again.");
+    }, WORKER_TIMEOUT_MS);
+  }, [source, endRun, disarmWorkerWatchdog]);
 
   // Validate (Validator mode)
   const handleValidate = useCallback(() => {
@@ -340,7 +412,14 @@ function App() {
       runtime: { status: "pending" },
     });
     appWorker?.postMessage({ type: "validate", source });
-  }, [source]);
+    disarmWorkerWatchdog();
+    workerWatchdogRef.current = window.setTimeout(() => {
+      endValidationRuntime({
+        status: "fail",
+        error: "The ABAP engine stopped responding. Try validating again.",
+      });
+    }, WORKER_TIMEOUT_MS);
+  }, [source, endValidationRuntime, disarmWorkerWatchdog]);
 
   // Mode change
   const handleModeChange = useCallback(
@@ -462,6 +541,8 @@ function App() {
         onOutput={handleOutput}
         onError={handleError}
         onDone={handleDone}
+        onTimeout={handleTimeout}
+        onCancel={handleCancel}
       />
     </div>
   );

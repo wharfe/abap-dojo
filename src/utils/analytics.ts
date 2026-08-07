@@ -32,7 +32,27 @@
  */
 import type { AppMode } from "../types/validation";
 
-export type RunOutcome = "success" | "transpile_error" | "runtime_error";
+/**
+ * Every way a run can end. The set is exhaustive on purpose: `run_click` and
+ * `run_result` are meant to reconcile 1:1, so any path that leaves a run
+ * without one of these is a lifecycle bug, not a user drop-off.
+ *
+ * - `timeout`     the 5s sandbox watchdog fired — nearly always a runaway loop
+ * - `stalled`     the abaplint worker never answered; our pipeline broke, not the code
+ * - `cancelled`   superseded by another run before it could finish
+ * - `load_error`  the ABAP runtime bundle itself could not be fetched
+ *
+ * `timeout` and `stalled` are kept apart deliberately: the first measures what
+ * users write, the second measures whether we are broken.
+ */
+export type RunOutcome =
+  | "success"
+  | "transpile_error"
+  | "runtime_error"
+  | "timeout"
+  | "stalled"
+  | "cancelled"
+  | "load_error";
 
 export type ValidateOutcome = "pass" | "warn" | "fail";
 
@@ -90,6 +110,10 @@ const RUN_OUTCOMES: readonly RunOutcome[] = [
   "success",
   "transpile_error",
   "runtime_error",
+  "timeout",
+  "stalled",
+  "cancelled",
+  "load_error",
 ];
 
 const VALIDATE_OUTCOMES: readonly ValidateOutcome[] = ["pass", "warn", "fail"];
