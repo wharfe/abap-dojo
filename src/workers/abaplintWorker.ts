@@ -9,6 +9,7 @@ import { Transpiler, config as transpilerConfig } from "@abaplint/transpiler";
 import type { WorkerRequest, WorkerResponse, LintIssue } from "../types/messages";
 import type { StageResult, ValidationStage } from "../types/validation";
 import { detectPitfalls } from "../rules/detector";
+import { pitfallToLintIssue } from "../rules/pitfallToLintIssue";
 
 const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
 
@@ -37,7 +38,11 @@ async function handleLint(source: string): Promise<WorkerResponse> {
   reg.addFile(new MemoryFile("ztest.prog.abap", source));
   await reg.parseAsync();
   const issues = reg.findIssues().map(issueToLintIssue);
-  return { type: "lint-result", issues };
+  // The LLM-pitfall rules run here as well as in AI Validator mode: they are
+  // the reason to use this tool over an ordinary linter, and hiding them behind
+  // a mode switch meant almost nobody saw them.
+  const pitfalls = detectPitfalls(reg, issues).map(pitfallToLintIssue);
+  return { type: "lint-result", issues: [...issues, ...pitfalls] };
 }
 
 async function handleTranspile(source: string): Promise<WorkerResponse> {
