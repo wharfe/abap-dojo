@@ -68,6 +68,9 @@ describe("Content-Security-Policy", () => {
     ["script-src", "https://www.googletagmanager.com"],
     // Cloudflare Web Analytics, injected at the edge on every HTML response
     ["script-src", "https://static.cloudflareinsights.com"],
+    // Not the endpoint in use: a proxied site posts to its own /cdn-cgi/rum,
+    // which 'self' covers. This is the unproxied fallback, kept so the beacon
+    // survives the *.pages.dev case. Asserted so it is not dropped by accident.
     ["connect-src", "https://cloudflareinsights.com"],
     // GA4 routes some regions to region1.google-analytics.com, hence the wildcard
     ["connect-src", "https://*.google-analytics.com"],
