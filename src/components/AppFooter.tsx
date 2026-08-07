@@ -4,6 +4,7 @@
 const NAV_LINKS = [
   { label: "What runs here", href: "/abap-online-compiler" },
   { label: "Editor features", href: "/online-abap-editor" },
+  { label: "Check AI output", href: "/validate-ai-generated-abap" },
   { label: "Practice without SAP", href: "/practice-abap-without-sap" },
   { label: "Guides", href: "/docs/" },
   { label: "AI Pitfalls", href: "/docs/#pitfalls" },
