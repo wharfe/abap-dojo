@@ -26,6 +26,11 @@ CI (`.github/workflows/ci.yml`) runs `lint` + `typecheck` + `test` on every PR a
 pushes to `main`. The production build is verified separately by the Cloudflare Pages
 preview deployment, which is the only place CSP/`_headers` breakage surfaces.
 
+- `node scripts/encode-share-url.mjs <file.abap>` — produce the `#code=` hash for a
+  static page's "try it live" CTA. `--fix` rewrites every CTA under `public/` to
+  base64url. Hand-rolling these is how one page shipped with a payload that could
+  not be decoded; `src/staticPages.test.ts` now fails on it either way.
+
 ## Code Style
 
 - 2-space indentation, no tabs
@@ -47,12 +52,25 @@ preview deployment, which is the only place CSP/`_headers` breakage surfaces.
 ```
 src/
   components/     # React components
-  workers/        # Web Worker scripts (lint, transpile)
-  modes/          # Playground, Validator, Modernizer mode logic
-  rules/          # LLM Pitfall Detector rule definitions (JSON)
+  workers/        # Web Worker scripts (lint, transpile, validate)
+  rules/          # LLM Pitfall Detector — definitions.ts, detector.ts, matchers/
+  sandbox/        # The @abaplint/runtime bundle inlined into the execution iframe
   samples/        # Sample ABAP code presets
+  types/          # Shared message and validation types
   utils/          # Shared utility functions
+  App.tsx         # Mode state, worker wiring, run/validation lifecycle
+scripts/          # Dev tools, not part of the build
+public/           # Copied verbatim — static pages, sitemap, _headers
 ```
+
+Mode logic lives in `App.tsx` rather than a `modes/` directory: both modes share
+one editor, one worker and one execution sandbox, and splitting them was what
+let a Playground run and a Validator run orphan each other (#13).
+
+`src/staticPages.test.ts` and `src/securityHeaders.test.ts` sit at the `src/`
+root on purpose — they test `public/`, which nothing else in the toolchain
+reads, and colocating them with their subject would put test files in the
+directory Cloudflare serves.
 
 ## Three Modes
 
