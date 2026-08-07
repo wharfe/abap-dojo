@@ -53,6 +53,7 @@ async function handleTranspile(source: string): Promise<WorkerResponse> {
       const first = errors[0];
       return {
         type: "transpile-error",
+        kind: "syntax",
         message: first.getMessage(),
         line: first.getStart().getRow(),
       };
@@ -72,7 +73,7 @@ async function handleTranspile(source: string): Promise<WorkerResponse> {
     return { type: "transpile-result", js };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { type: "transpile-error", message: msg };
+    return { type: "transpile-error", kind: "transpile", message: msg };
   }
 }
 

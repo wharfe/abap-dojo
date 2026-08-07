@@ -3,6 +3,16 @@ import type { SandboxResponse } from "../types/messages";
 import { getRuntimeBundle } from "../utils/runtimeBundle";
 import runtimeBundleUrl from "../sandbox/runtime-bundle.js?url";
 
+/**
+ * Deadline for a run, enforced from the parent page.
+ *
+ * KNOWN LIMIT (#28): this cannot interrupt a CPU-bound loop. A srcdoc iframe
+ * shares the parent's main thread, so `DO. ENDDO.` blocks the whole tab and
+ * this timer never gets a turn to fire. It only rescues runs that yield.
+ * Fixing that means running the transpiled JS in a Worker *inside* the iframe,
+ * which keeps the opaque origin while freeing the thread — until then, expect
+ * the `timeout` outcome to be rare for reasons that are not good news.
+ */
 const EXECUTION_TIMEOUT_MS = 5000;
 
 export interface ExecutionSandboxHandle {
@@ -21,7 +31,8 @@ interface ExecutionSandboxProps {
     requestId: string,
     kind: "runtime" | "load",
   ) => void;
-  onDone: (requestId: string) => void;
+  /** `outputLines` is what the run produced, before the display cap. */
+  onDone: (requestId: string, outputLines: number) => void;
   /** The run exceeded EXECUTION_TIMEOUT_MS — almost always a runaway loop. */
   onTimeout: (requestId: string) => void;
   /**
@@ -94,7 +105,7 @@ export const ExecutionSandbox = forwardRef<
         onError(data.message, data.requestId, "runtime");
       } else if (data.type === "done") {
         finish();
-        onDone(data.requestId);
+        onDone(data.requestId, data.outputLines);
       }
     },
     [onOutput, onError, onDone, finish],
@@ -280,10 +291,11 @@ window.addEventListener("message", async function(event) {
     // After execution, send all captured output. Line count is capped to
     // avoid flooding the parent with postMessages from pathological loops.
     var output = customConsole.get();
+    var totalLines = 0;
     if (output) {
       var lines = output.split("\\n");
       var MAX_LINES = 10000;
-      var totalLines = lines.length;
+      totalLines = lines.length;
       var emitCount = totalLines > MAX_LINES ? MAX_LINES : totalLines;
       for (var i = 0; i < emitCount; i++) {
         if (lines[i] !== "" || i < emitCount - 1) {
@@ -295,7 +307,9 @@ window.addEventListener("message", async function(event) {
       }
     }
 
-    window.parent.postMessage({ type: "done", requestId: requestId }, "*");
+    // totalLines is what the run produced, not what we posted: display is
+    // capped at MAX_LINES but the measurement must not saturate with it.
+    window.parent.postMessage({ type: "done", requestId: requestId, outputLines: totalLines }, "*");
   } catch (e) {
     window.parent.postMessage({ type: "error", message: e.message || String(e), requestId: requestId }, "*");
   }

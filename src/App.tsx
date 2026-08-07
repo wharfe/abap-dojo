@@ -123,6 +123,42 @@ function App() {
     workerWatchdogRef.current = undefined;
   }, []);
 
+  /**
+   * End the Playground run, whatever the reason. Every exit path goes through
+   * here so that `run_click` and `run_result` reconcile 1:1 — a missing
+   * `run_result` means a run got orphaned, not that a user walked away.
+   *
+   * Declared above the worker handlers on purpose: they list it as a dependency
+   * and a deps array is evaluated eagerly, so a later `const` would be in its
+   * temporal dead zone on the first render.
+   */
+  const endRun = useCallback(
+    (outcome: RunOutcome, message?: string, outputLines?: number) => {
+      disarmWorkerWatchdog();
+      if (message !== undefined) setError(message);
+      setIsRunning(false);
+      track("run_result", {
+        outcome,
+        duration_ms: Math.round(performance.now() - runStartRef.current),
+        // The sandbox reports the true total on success; otherwise all we have
+        // is what we received, which the display cap may have truncated.
+        output_lines: outputLines ?? runOutputCountRef.current,
+      });
+    },
+    [disarmWorkerWatchdog],
+  );
+
+  /** End the validation, marking its runtime stage with `result`. */
+  const endValidationRuntime = useCallback(
+    (result: StageResult) => {
+      disarmWorkerWatchdog();
+      setValidationStages((prev) => ({ ...prev, runtime: result }));
+      validationRequestIdRef.current = null;
+      setIsValidating(false);
+    },
+    [disarmWorkerWatchdog],
+  );
+
   // Hero visibility: hidden if dismissed, or if URL has code parameter
   const [heroVisible, setHeroVisible] = useState(() => {
     if (localStorage.getItem("hero-dismissed") === "true") return false;
@@ -163,17 +199,13 @@ function App() {
         disarmWorkerWatchdog();
         sandboxRef.current?.execute(data.js, playgroundRequestIdRef.current);
       } else if (data.type === "transpile-error") {
-        disarmWorkerWatchdog();
-        setError(
+        const label = data.kind === "syntax" ? "Syntax error" : "Transpile error";
+        endRun(
+          data.kind === "syntax" ? "syntax_error" : "transpile_error",
           data.line
-            ? `Transpile error (L${data.line}): ${data.message}`
-            : `Transpile error: ${data.message}`,
+            ? `${label} (L${data.line}): ${data.message}`
+            : `${label}: ${data.message}`,
         );
-        setIsRunning(false);
-        track("run_result", {
-          outcome: "transpile_error",
-          duration_ms: Math.round(performance.now() - runStartRef.current),
-        });
       }
 
       // Validation messages
@@ -222,7 +254,7 @@ function App() {
         }
       }
     };
-  }, [disarmWorkerWatchdog]);
+  }, [disarmWorkerWatchdog, endRun]);
 
   // Boot the abaplint worker once the browser is idle. Creating it during mount
   // meant parsing 1.8 MB of JavaScript before the page could respond to input,
@@ -255,30 +287,6 @@ function App() {
     runOutputCountRef.current += 1;
     setOutput((prev) => [...prev, text]);
   }, []);
-
-  /**
-   * End the Playground run, whatever the reason. Every exit path goes through
-   * here so that `run_click` and `run_result` reconcile 1:1 — a missing
-   * `run_result` means a run got orphaned, not that a user walked away.
-   */
-  const endRun = useCallback((outcome: RunOutcome, message?: string) => {
-    disarmWorkerWatchdog();
-    if (message !== undefined) setError(message);
-    setIsRunning(false);
-    track("run_result", {
-      outcome,
-      duration_ms: Math.round(performance.now() - runStartRef.current),
-      output_lines: runOutputCountRef.current,
-    });
-  }, [disarmWorkerWatchdog]);
-
-  /** End the validation, marking its runtime stage with `result`. */
-  const endValidationRuntime = useCallback((result: StageResult) => {
-    disarmWorkerWatchdog();
-    setValidationStages((prev) => ({ ...prev, runtime: result }));
-    validationRequestIdRef.current = null;
-    setIsValidating(false);
-  }, [disarmWorkerWatchdog]);
 
   const handleError = useCallback(
     (message: string, requestId: string, kind: "runtime" | "load") => {
@@ -321,12 +329,12 @@ function App() {
   );
 
   const handleDone = useCallback(
-    (requestId: string) => {
+    (requestId: string, outputLines: number) => {
       if (requestId === validationRequestIdRef.current) {
         endValidationRuntime({ status: "pass" });
         return;
       }
-      endRun("success");
+      endRun("success", undefined, outputLines);
     },
     [endRun, endValidationRuntime],
   );
