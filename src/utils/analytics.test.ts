@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { track, sanitizeParams, lineCount, isSendableKey } from "./analytics";
-import type { EventName } from "./analytics";
+import type { EventName, RunOutcome } from "./analytics";
 
 /**
  * Push an object through sanitizeParams for `name` without the compile-time
@@ -136,6 +136,27 @@ describe("sanitizeParams", () => {
     expect(
       sanitizeUnchecked("run_result", { outcome: "pass", duration_ms: 1 }),
     ).toEqual({ duration_ms: 1 });
+  });
+
+  // Every exit path in App.tsx must survive the allowlist, or the run it
+  // reports vanishes and reads as a user drop-off instead.
+  it("accepts every declared run outcome", () => {
+    const outcomes: RunOutcome[] = [
+      "success",
+      "syntax_error",
+      "transpile_error",
+      "runtime_error",
+      "timeout",
+      "stalled",
+      "cancelled",
+      "load_error",
+    ];
+    for (const outcome of outcomes) {
+      expect(sanitizeParams("run_result", { outcome, duration_ms: 1 })).toEqual({
+        outcome,
+        duration_ms: 1,
+      });
+    }
   });
 
   it("drops ids that are not the authored kebab-case shape", () => {

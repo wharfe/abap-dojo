@@ -20,7 +20,19 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { type: "lint-result"; issues: LintIssue[] }
   | { type: "transpile-result"; js: string }
-  | { type: "transpile-error"; message: string; line?: number }
+  /**
+   * `kind` distinguishes the two very different things that stop a run before
+   * any JavaScript exists: `syntax` is the user's own ABAP failing to parse
+   * (the single most common Playground outcome), `transpile` is our transpiler
+   * throwing. Lumping them together made it impossible to tell how often we
+   * are the broken one.
+   */
+  | {
+      type: "transpile-error";
+      kind: "syntax" | "transpile";
+      message: string;
+      line?: number;
+    }
   | { type: "validate-progress"; stage: ValidationStage; status: "running" | "skipped" }
   | { type: "validate-stage-result"; stage: ValidationStage; result: StageResult };
 
@@ -30,4 +42,9 @@ export type SandboxRequest = { type: "execute"; js: string; requestId: string };
 export type SandboxResponse =
   | { type: "output"; text: string; requestId: string }
   | { type: "error"; message: string; requestId: string }
-  | { type: "done"; requestId: string };
+  /**
+   * `outputLines` is the number of lines the run actually produced, which is
+   * not the number of "output" messages that preceded this one: the sandbox
+   * stops posting after MAX_LINES and sends a single truncation notice instead.
+   */
+  | { type: "done"; requestId: string; outputLines: number };

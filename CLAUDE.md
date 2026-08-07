@@ -95,9 +95,40 @@ renaming a parameter:
 | `outcome`, `sample_id`, `mode`, `to_mode` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
 
 Do not register `duration_ms` as a dimension — it is near-unique per event and
-makes the report unusable. Note `outcome` is shared by `run_result`
-(`success`/`transpile_error`/`runtime_error`) and `validate_result`
-(`pass`/`warn`/`fail`), so always filter by `event_name` when reading it.
+makes the report unusable. Note `outcome` is shared by `run_result` and
+`validate_result` (`pass`/`warn`/`fail`), so always filter by `event_name`
+when reading it.
+
+`run_result` reports one of eight outcomes, and `run_click`/`run_result` are
+meant to reconcile 1:1 — a gap between them is an orphaned execution, not a
+user who walked away. Adding a *value* to an already-registered dimension
+needs no GA4 change; only a new *parameter* does.
+
+| Outcome | Means |
+|---|---|
+| `success` | ran to completion |
+| `syntax_error` | the user's ABAP did not parse — the ordinary case |
+| `transpile_error` | our transpiler threw on ABAP that *did* parse |
+| `runtime_error` | the transpiled JS threw |
+| `timeout` | 5s sandbox watchdog — see the caveat below |
+| `stalled` | 20s worker watchdog — the abaplint worker never answered |
+| `cancelled` | superseded by a run started in the other mode |
+| `load_error` | the `@abaplint/runtime` bundle could not be fetched |
+
+The pairs `syntax_error`/`transpile_error` and `timeout`/`stalled` exist so
+that "what users write" stays separable from "whether we are broken". Merging
+either pair makes both questions unanswerable.
+
+**Do not read a low `timeout` count as "users rarely write endless loops"**
+(#28). The sandbox iframe uses `srcdoc`, so it shares the parent's main thread:
+a CPU-bound ABAP loop freezes the whole tab and the watchdog never gets a turn
+to fire — the page dies before it can report anything. `timeout` therefore only
+covers runs that yield. The same freeze also inflates the `run_click` vs
+`run_result` gap, so that gap is not purely drop-off either.
+
+`output_lines` is the count the sandbox reports in its `done` message, not the
+number of `output` messages received: display stops at 10,000 lines, so
+counting messages would report every runaway loop as exactly 10,001.
 
 Also keep Enhanced Measurement's **browser-history / hash-routing** options OFF
 for this property. The URL hash carries user source, and those options can make

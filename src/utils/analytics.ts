@@ -32,7 +32,31 @@
  */
 import type { AppMode } from "../types/validation";
 
-export type RunOutcome = "success" | "transpile_error" | "runtime_error";
+/**
+ * Every way a run can end. The set is exhaustive on purpose: `run_click` and
+ * `run_result` are meant to reconcile 1:1, so any path that leaves a run
+ * without one of these is a lifecycle bug, not a user drop-off.
+ *
+ * - `syntax_error`    the user's ABAP did not parse — the ordinary case
+ * - `transpile_error` our transpiler threw on ABAP that did parse
+ * - `timeout`     the 5s sandbox watchdog fired — nearly always a runaway loop
+ * - `stalled`     the abaplint worker never answered; our pipeline broke, not the code
+ * - `cancelled`   superseded by another run before it could finish
+ * - `load_error`  the ABAP runtime bundle itself could not be fetched
+ *
+ * `syntax_error`/`transpile_error` and `timeout`/`stalled` are each kept apart
+ * for the same reason: one of the pair measures what users write, the other
+ * measures whether we are broken. Merged, both questions become unanswerable.
+ */
+export type RunOutcome =
+  | "success"
+  | "syntax_error"
+  | "transpile_error"
+  | "runtime_error"
+  | "timeout"
+  | "stalled"
+  | "cancelled"
+  | "load_error";
 
 export type ValidateOutcome = "pass" | "warn" | "fail";
 
@@ -50,6 +74,11 @@ export interface EventMap {
   run_result: {
     outcome: RunOutcome;
     duration_ms: number;
+    /**
+     * Lines the run produced. This is the true count, not the number the UI
+     * displays — the sandbox stops posting after 10,000 lines, so counting
+     * received messages would report every runaway loop as exactly 10,001.
+     */
     output_lines?: number;
   };
   /** Validate pressed in AI Validator mode. */
@@ -88,8 +117,13 @@ const MODES: readonly AppMode[] = ["playground", "validator"];
 
 const RUN_OUTCOMES: readonly RunOutcome[] = [
   "success",
+  "syntax_error",
   "transpile_error",
   "runtime_error",
+  "timeout",
+  "stalled",
+  "cancelled",
+  "load_error",
 ];
 
 const VALIDATE_OUTCOMES: readonly ValidateOutcome[] = ["pass", "warn", "fail"];

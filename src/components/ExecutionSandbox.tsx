@@ -1,7 +1,18 @@
 import { useRef, useCallback, useImperativeHandle, forwardRef } from "react";
 import type { SandboxResponse } from "../types/messages";
+import { getRuntimeBundle } from "../utils/runtimeBundle";
 import runtimeBundleUrl from "../sandbox/runtime-bundle.js?url";
 
+/**
+ * Deadline for a run, enforced from the parent page.
+ *
+ * KNOWN LIMIT (#28): this cannot interrupt a CPU-bound loop. A srcdoc iframe
+ * shares the parent's main thread, so `DO. ENDDO.` blocks the whole tab and
+ * this timer never gets a turn to fire. It only rescues runs that yield.
+ * Fixing that means running the transpiled JS in a Worker *inside* the iframe,
+ * which keeps the opaque origin while freeing the thread — until then, expect
+ * the `timeout` outcome to be rare for reasons that are not good news.
+ */
 const EXECUTION_TIMEOUT_MS = 5000;
 
 export interface ExecutionSandboxHandle {
@@ -10,34 +21,49 @@ export interface ExecutionSandboxHandle {
 
 interface ExecutionSandboxProps {
   onOutput: (text: string, requestId: string) => void;
-  onError: (message: string, requestId: string) => void;
-  onDone: (requestId: string) => void;
-}
-
-// Cache for the runtime bundle text (fetched once, reused for all executions)
-let runtimeBundleCache: string | null = null;
-let runtimeBundlePromise: Promise<string> | null = null;
-
-async function getRuntimeBundle(): Promise<string> {
-  if (runtimeBundleCache) return runtimeBundleCache;
-  if (!runtimeBundlePromise) {
-    runtimeBundlePromise = fetch(runtimeBundleUrl)
-      .then((r) => r.text())
-      .then((text) => {
-        runtimeBundleCache = text;
-        return text;
-      });
-  }
-  return runtimeBundlePromise;
+  /**
+   * `kind` separates "the ABAP code threw" from "we could not load the runtime
+   * to run it at all" — the second is our failure, not the user's, and the two
+   * must not be reported as the same thing.
+   */
+  onError: (
+    message: string,
+    requestId: string,
+    kind: "runtime" | "load",
+  ) => void;
+  /** `outputLines` is what the run produced, before the display cap. */
+  onDone: (requestId: string, outputLines: number) => void;
+  /** The run exceeded EXECUTION_TIMEOUT_MS — almost always a runaway loop. */
+  onTimeout: (requestId: string) => void;
+  /**
+   * A still-running execution was torn down to make room for a new one.
+   *
+   * There is one sandbox iframe but two callers (Playground and Validator), and
+   * neither is blocked while the other runs. Without this the superseded caller
+   * would wait forever for a terminal event that can no longer arrive, leaving
+   * its button disabled for the rest of the session.
+   */
+  onCancel: (requestId: string) => void;
 }
 
 export const ExecutionSandbox = forwardRef<
   ExecutionSandboxHandle,
   ExecutionSandboxProps
->(function ExecutionSandbox({ onOutput, onError, onDone }, ref) {
+>(function ExecutionSandbox(
+  { onOutput, onError, onDone, onTimeout, onCancel },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<number | undefined>(undefined);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  /**
+   * The execution the sandbox currently belongs to, or null when idle. Every
+   * path out of a run must clear it, and any async continuation must re-check
+   * it before touching the DOM — by the time an await resolves the sandbox may
+   * already have been handed to a different caller.
+   */
+  const activeRequestIdRef = useRef<string | null>(null);
 
   const handleMessageRef = useRef<((event: MessageEvent) => void) | null>(null);
 
@@ -52,6 +78,12 @@ export const ExecutionSandbox = forwardRef<
       iframeRef.current = null;
     }
   }, []);
+
+  /** Release the sandbox after a terminal event for `requestId`. */
+  const finish = useCallback(() => {
+    activeRequestIdRef.current = null;
+    cleanup();
+  }, [cleanup]);
 
   const handleMessage = useCallback(
     (event: MessageEvent<SandboxResponse>) => {
@@ -69,52 +101,95 @@ export const ExecutionSandbox = forwardRef<
       if (data.type === "output") {
         onOutput(data.text, data.requestId);
       } else if (data.type === "error") {
-        onError(data.message, data.requestId);
-        cleanup();
+        finish();
+        onError(data.message, data.requestId, "runtime");
       } else if (data.type === "done") {
-        onDone(data.requestId);
-        cleanup();
+        finish();
+        onDone(data.requestId, data.outputLines);
       }
     },
-    [onOutput, onError, onDone, cleanup],
+    [onOutput, onError, onDone, finish],
   );
 
   const execute = useCallback(
     async (js: string, requestId: string) => {
-      // Clean up previous execution
+      // Tear down whatever was running and tell its owner, so a Playground run
+      // and a Validator run can never leave each other waiting on an iframe
+      // that no longer exists.
+      const superseded = activeRequestIdRef.current;
       cleanup();
+      activeRequestIdRef.current = requestId;
+      if (superseded !== null && superseded !== requestId) {
+        onCancel(superseded);
+      }
 
-      // Fetch runtime bundle (cached after first load)
-      const runtimeBundle = await getRuntimeBundle();
-
-      // Build srcdoc with runtime inlined
-      const srcdoc = buildSandboxHtml(runtimeBundle);
-
-      // Create fresh iframe with sandbox isolation
-      const iframe = document.createElement("iframe");
-      iframe.sandbox.add("allow-scripts");
-      iframe.style.display = "none";
-      iframe.srcdoc = srcdoc;
-      iframeRef.current = iframe;
-
-      // Listen for messages (store ref for cleanup)
-      handleMessageRef.current = handleMessage;
-      window.addEventListener("message", handleMessage);
-
-      // Set timeout for infinite loop protection
+      // Arm the watchdog BEFORE awaiting the bundle. A fetch that rejects or
+      // never settles is the one case where no iframe is ever created, so a
+      // watchdog armed after the await could not fire at all. The cost is that
+      // the 5s budget covers the fetch too, which only matters on the very
+      // first run of a session (the bundle is same-origin and cached after).
       timeoutRef.current = window.setTimeout(() => {
-        onError("Execution timeout (5s)", requestId);
-        cleanup();
+        finish();
+        onTimeout(requestId);
       }, EXECUTION_TIMEOUT_MS);
 
-      // Append iframe and wait for load, then send execute message
-      iframe.onload = () => {
-        iframe.contentWindow?.postMessage({ type: "execute", js, requestId }, "*");
-      };
+      let runtimeBundle: string;
+      try {
+        runtimeBundle = await getRuntimeBundle(runtimeBundleUrl);
+      } catch {
+        // Superseded or timed out while fetching — that owner has already been
+        // told, and this requestId no longer owns the sandbox.
+        if (activeRequestIdRef.current !== requestId) return;
+        finish();
+        onError(
+          "Could not load the ABAP runtime. Check your connection and try again.",
+          requestId,
+          "load",
+        );
+        return;
+      }
+      if (activeRequestIdRef.current !== requestId) return;
 
-      containerRef.current?.appendChild(iframe);
+      // Anything that throws from here on would otherwise reject a promise that
+      // App.tsx does not await, leaving the run with no terminal event at all —
+      // the same orphaning this whole lifecycle exists to prevent.
+      try {
+        // Build srcdoc with runtime inlined
+        const srcdoc = buildSandboxHtml(runtimeBundle);
+
+        // Create fresh iframe with sandbox isolation. Set as an attribute
+        // rather than via the `sandbox` DOMTokenList, which not every engine
+        // reflects.
+        const iframe = document.createElement("iframe");
+        iframe.setAttribute("sandbox", "allow-scripts");
+        iframe.style.display = "none";
+        iframe.srcdoc = srcdoc;
+        iframeRef.current = iframe;
+
+        // Listen for messages (store ref for cleanup)
+        handleMessageRef.current = handleMessage;
+        window.addEventListener("message", handleMessage);
+
+        // Append iframe and wait for load, then send execute message
+        iframe.onload = () => {
+          iframe.contentWindow?.postMessage(
+            { type: "execute", js, requestId },
+            "*",
+          );
+        };
+
+        containerRef.current?.appendChild(iframe);
+      } catch (cause) {
+        if (activeRequestIdRef.current !== requestId) return;
+        finish();
+        onError(
+          cause instanceof Error ? cause.message : String(cause),
+          requestId,
+          "load",
+        );
+      }
     },
-    [cleanup, handleMessage, onError],
+    [cleanup, finish, handleMessage, onError, onTimeout, onCancel],
   );
 
   useImperativeHandle(ref, () => ({ execute }), [execute]);
@@ -216,10 +291,11 @@ window.addEventListener("message", async function(event) {
     // After execution, send all captured output. Line count is capped to
     // avoid flooding the parent with postMessages from pathological loops.
     var output = customConsole.get();
+    var totalLines = 0;
     if (output) {
       var lines = output.split("\\n");
       var MAX_LINES = 10000;
-      var totalLines = lines.length;
+      totalLines = lines.length;
       var emitCount = totalLines > MAX_LINES ? MAX_LINES : totalLines;
       for (var i = 0; i < emitCount; i++) {
         if (lines[i] !== "" || i < emitCount - 1) {
@@ -231,7 +307,9 @@ window.addEventListener("message", async function(event) {
       }
     }
 
-    window.parent.postMessage({ type: "done", requestId: requestId }, "*");
+    // totalLines is what the run produced, not what we posted: display is
+    // capped at MAX_LINES but the measurement must not saturate with it.
+    window.parent.postMessage({ type: "done", requestId: requestId, outputLines: totalLines }, "*");
   } catch (e) {
     window.parent.postMessage({ type: "error", message: e.message || String(e), requestId: requestId }, "*");
   }
