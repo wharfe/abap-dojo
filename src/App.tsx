@@ -151,6 +151,18 @@ function App() {
    * Declared above the worker handlers on purpose: they list it as a dependency
    * and a deps array is evaluated eagerly, so a later `const` would be in its
    * temporal dead zone on the first render.
+   *
+   * Clearing `playgroundRequestIdRef.current` here (not just on the explicit
+   * Stop path) is what closes #50: without it, a run that ends via the
+   * `stalled` watchdog leaves its requestId current, so a `transpile-result`
+   * that arrives after the watchdog fired still matches the guards in
+   * `attachWorkerHandlers` and hands stale JS to the sandbox to execute,
+   * producing a second `run_result` for one `run_click`. By the time any exit
+   * path reaches `endRun`, this run's own transpile round trip is already
+   * over — the transpile-result/transpile-error handlers either already ran
+   * (their guard, evaluated synchronously before this call, does not need the
+   * ref afterwards) or never will — so clearing here cannot drop a reply that
+   * still deserved to be handled.
    */
   const endRun = useCallback(
     (
@@ -162,6 +174,7 @@ function App() {
       diagnostics?: TranspileDiagnostics,
     ) => {
       disarmPlaygroundWatchdog();
+      playgroundRequestIdRef.current = "";
       if (message !== undefined) {
         // `stopped` is the user's own choice, not a failure — keep it out of
         // the `error` slot OutputPanel renders in red.

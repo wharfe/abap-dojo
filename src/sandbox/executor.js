@@ -106,12 +106,16 @@ OutputStreamer.prototype.add = function (text) {
     if (this.continuation) {
       // The byte cap has already tripped, so the split/push block above (the
       // only place that otherwise consumes `continuation`) is skipped
-      // entirely. A promotion set this flag just before the cap tripped;
-      // with nothing left to consume it, leave it set and the next real
-      // `add` after `clear()` could misinterpret its own first blank piece
-      // as this stale continuation. Not reachable today — once the cap
-      // trips, `add` never sees the promotion path fire again in the same
-      // run — but clear it rather than leave it dangling.
+      // entirely. This flag can be set either by a promotion just before the
+      // cap tripped, or — since the time-based promotion below runs
+      // unconditionally after this if/else and still reads the pre-cap
+      // `this.partial`, which is never touched again once the cap trips —
+      // by a promotion firing again *after* the cap tripped. Either way,
+      // nothing downstream of this branch ever consumes `continuation`, so
+      // leaving it set would only let a later `add()` after `clear()`
+      // misinterpret its own first blank piece as this stale continuation.
+      // Clearing it here is harmless and sufficient: it is reset before it
+      // can affect anything.
       this.continuation = false;
     }
     var combinedAfterCap = this.partialAfterCap + text;

@@ -307,17 +307,19 @@ describe("App — Stop ownership must come from the sandbox, not an inferred tim
     vi.useRealTimers();
   });
 
-  // Reproduction: `workerWatchdogRef` is armed by both handleRun and
-  // handleValidate. Run a Playground program to completion of the transpile
-  // round trip (so the sandbox, not the ref, now owns it) → switch to
-  // Validator and start (and abandon) a validation, which re-arms the same
-  // ref → switch back to Playground → click Stop. Before this fix,
-  // handleStopClick read the (now validation-owned) armed ref as "still in
-  // MY transpile round trip", disarmed the validation's own deadlock
-  // breaker, and ended the Playground run itself — even though the sandbox
-  // was still actually running it. That run finishing later would then emit
-  // a SECOND run_result for the one run_click (CLAUDE.md's definition of an
-  // orphaned execution).
+  // Reproduction (historical): this used to fail because a single shared
+  // `workerWatchdogRef` was armed by both handleRun and handleValidate — that
+  // ref has since been split into `playgroundWatchdogRef` and
+  // `validationWatchdogRef` (see #49), so this scenario no longer applies to
+  // the watchdog at all. Kept here because `handleStopClick`'s requestId
+  // guard is a separate mechanism this test still exercises: run a
+  // Playground program to completion of the transpile round trip (so the
+  // sandbox, not App, now owns it) → switch to Validator and start (and
+  // abandon) a validation → switch back to Playground → click Stop. Before
+  // the original fix, handleStopClick could end the Playground run itself
+  // even though the sandbox was still actually running it. That run
+  // finishing later would then emit a SECOND run_result for the one
+  // run_click (CLAUDE.md's definition of an orphaned execution).
   it("does not end a run the sandbox still owns just because a validation later armed the same watchdog ref", async () => {
     render(<App />);
     act(() => {
@@ -341,7 +343,8 @@ describe("App — Stop ownership must come from the sandbox, not an inferred tim
     trackMock.mockClear();
 
     // Switch to Validator and click Validate — this posts "validate" and
-    // re-arms workerWatchdogRef, which is the same ref handleRun used above.
+    // arms `validationWatchdogRef`, which is separate from the
+    // `playgroundWatchdogRef` handleRun armed above (see #49).
     fireEvent.click(screen.getByRole("button", { name: /AI Validator/i }));
     fireEvent.click(screen.getByRole("button", { name: /Validate/i }));
     expect(worker.postMessage).toHaveBeenCalledWith(
@@ -368,8 +371,9 @@ describe("App — Stop ownership must come from the sandbox, not an inferred tim
   // Mid-transpile case still works after the fix: `stop()` reports `false`
   // (the run never reached the sandbox), so App falls back to ending the run
   // itself. This is the same scenario as the "ends the run once as `stopped`"
-  // test above, phrased for this suite's fix (no more `workerWatchdogRef`
-  // read at all in handleStopClick).
+  // test above, phrased for this suite's fix (`handleStopClick` reads only
+  // `playgroundRequestIdRef` and `playgroundWatchdogRef`, never a shared
+  // watchdog ref).
   it("still ends the run itself when stop() reports it does not own the request", async () => {
     render(<App />);
     act(() => {
@@ -556,5 +560,56 @@ describe("App — Playground and Validator each own their own watchdog (#49)", (
     );
     expect(runResultCalls).toHaveLength(1);
     expect(runResultCalls[0][1]).toMatchObject({ outcome: "stalled" });
+  });
+
+  // #50: requestId correlation alone does not cover this — the stalled id
+  // genuinely IS still "current" when the late reply arrives, because
+  // nothing used to clear it. This is the case the test above stops short
+  // of: it advances past the stalled watchdog but never delivers the late
+  // transpile-result, so the hole went uncaught. Reproduction: start a run,
+  // let the watchdog fire, then deliver a transpile-result carrying that
+  // same (still-current, pre-fix) requestId. Before the fix this passed the
+  // guard in attachWorkerHandlers and handed the stale JS to the sandbox to
+  // execute, which would eventually report `done` and emit a second
+  // `run_result` for the one `run_click`.
+  it("does not execute a transpile-result that arrives after the stalled watchdog already ended the run", async () => {
+    // Guard against mode bleeding in from an earlier test in this suite: mode
+    // is read from `window.location.hash` at mount, and other tests here
+    // switch to Validator via handleModeChange (which writes `#mode=...`)
+    // without switching back.
+    window.location.hash = "";
+    render(<App />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const worker = workerInstances[0];
+
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    const requestId = lastTranspileRequestId(worker);
+
+    // The stalled watchdog fires — this is the run's only terminal event.
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+    const runResultCallsAfterStall = trackMock.mock.calls.filter(
+      ([name]) => name === "run_result",
+    );
+    expect(runResultCallsAfterStall).toHaveLength(1);
+    expect(runResultCallsAfterStall[0][1]).toMatchObject({ outcome: "stalled" });
+
+    // The late reply for the same run arrives afterwards.
+    act(() => {
+      worker.onmessage?.({
+        data: { type: "transpile-result", js: "js", requestId },
+      } as MessageEvent);
+    });
+
+    // The sandbox must never be asked to execute the stale JS, and no
+    // second run_result must appear.
+    expect(executeMock).not.toHaveBeenCalled();
+    const runResultCallsAfterLateReply = trackMock.mock.calls.filter(
+      ([name]) => name === "run_result",
+    );
+    expect(runResultCallsAfterLateReply).toHaveLength(1);
   });
 });
