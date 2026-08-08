@@ -1,6 +1,7 @@
 // Execution worker. Concatenated with the @abaplint/runtime bundle and turned
-// into a blob: Worker by ExecutionSandbox.tsx, so this file must be plain ES5-
-// compatible script with no imports — it is never processed as a module.
+// into a blob: Worker by ExecutionSandbox.tsx, so this file must contain no
+// imports and receive no bundler transforms — it is inlined as raw text via
+// `?raw` and never parsed as a module or run through Babel/TS.
 //
 // This is the thread that runs the user's ABAP. It exists so that a runaway
 // loop occupies a thread nobody else needs: the iframe that supervises it stays
@@ -11,14 +12,14 @@ var MAX_OUTPUT_BYTES = 1024 * 1024;
 var MAX_LINES = 10000;
 
 /**
- * Collects WRITE output. `total` is what the program produced; `emitted` is
- * what we sent. They differ once MAX_LINES is hit, and the measurement must
- * report the first — counting sent lines makes every runaway loop read as
- * exactly MAX_LINES + 1.
+ * Collects WRITE output as a single string. The executor below splits this
+ * into lines and separately tracks how many it actually emits vs. `total`,
+ * the number the program produced — those differ once MAX_LINES is hit, and
+ * the line-count measurement must report `total`, not the emitted count, or
+ * every runaway loop would read as exactly MAX_LINES + 1.
  */
 function OutputCollector() {
   this.data = "";
-  this.total = 0;
   this.empty = true;
 }
 OutputCollector.prototype.clear = function () {
@@ -67,6 +68,13 @@ self.onmessage = async function (event) {
       total = lines.length;
       var emit = total > MAX_LINES ? MAX_LINES : total;
       var slice = lines.slice(0, emit);
+      // text.split("\n") produces a trailing "" whenever the collected output
+      // itself ends in a newline (the common case for WRITE), which would
+      // otherwise render as a spurious blank line. Only drop it when nothing
+      // was truncated — `total` still counts it either way.
+      if (emit === total && slice.length > 0 && slice[slice.length - 1] === "") {
+        slice.pop();
+      }
       if (total > MAX_LINES) {
         slice.push("[output truncated: " + (total - MAX_LINES) + " more lines]");
       }

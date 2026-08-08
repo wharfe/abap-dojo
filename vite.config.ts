@@ -1,7 +1,7 @@
-/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { configDefaults } from "vitest/config";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -34,7 +34,9 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     // e2e/ holds Playwright specs, which use their own `test()`/`expect()` and
-    // must never be picked up by Vitest's default include glob.
-    exclude: ["**/node_modules/**", "e2e/**"],
+    // must never be picked up by Vitest's default include glob. Spreading
+    // configDefaults.exclude (not replacing it) keeps Vitest's own defaults —
+    // **/dist/**, **/node_modules/** and friends.
+    exclude: [...configDefaults.exclude, "e2e/**"],
   },
 });

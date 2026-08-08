@@ -209,9 +209,18 @@ function buildSandboxHtml(runtimeBundle: string): string {
   // runtime bundle is concatenated ahead of it so the worker has
   // `abaplintRuntime` as a global without any import.
   const workerSource = `${runtimeBundle}\n${executorSource}`;
+  // JSON.stringify does not escape "</script>", so a runtime bundle that ever
+  // contained that substring would close this inline <script> early and leave
+  // the frame silently dead (surfacing only as an unexplained timeout). Not
+  // live today — checked, the bundle has zero occurrences — but cheap to
+  // close off for good.
+  const serializedWorkerSource = JSON.stringify(workerSource).replace(
+    /</g,
+    "\\u003c",
+  );
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head><body>
-<script>self.__executorSource = ${JSON.stringify(workerSource)};</script>
+<script>self.__executorSource = ${serializedWorkerSource};</script>
 <script>${supervisorSource}</script>
 </body></html>`;
 }

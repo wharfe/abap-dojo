@@ -18,8 +18,25 @@ function setup() {
     onCancel: vi.fn(),
   };
   const ref = createRef<ExecutionSandboxHandle>();
-  render(<ExecutionSandbox ref={ref} {...handlers} />);
-  return { ref, handlers };
+  const { container } = render(<ExecutionSandbox ref={ref} {...handlers} />);
+  return { ref, handlers, container };
+}
+
+/**
+ * Start a run and hand back its iframe, so a test can play the iframe's side
+ * of the message contract: `window.dispatchEvent(new MessageEvent("message",
+ * { data, source: iframe.contentWindow, origin: "null" }))`, matching what
+ * `handleMessage` requires from both the source window and the (opaque, so
+ * literally `"null"`) origin.
+ */
+async function startRun() {
+  const { ref, handlers, container } = setup();
+  await act(async () => {
+    ref.current!.execute("js", "run-1");
+  });
+  const iframe = container.querySelector("iframe");
+  if (!iframe) throw new Error("execute() did not create an iframe");
+  return { handlers, iframe };
 }
 
 describe("ExecutionSandbox", () => {
@@ -146,5 +163,70 @@ describe("ExecutionSandbox", () => {
 
     expect(handlers.onTimeout).toHaveBeenCalledTimes(1);
     expect(handlers.onTimeout).toHaveBeenCalledWith("run-2");
+  });
+
+  // The executor batches WRITE output into an array (never one postMessage
+  // per line — see ExecutionSandbox's EXECUTION_TIMEOUT_MS comment history,
+  // #28), so the relay must hand that array through unchanged rather than
+  // rejoining or otherwise reshaping it.
+  it("relays a batch of output lines to onOutput as an array", async () => {
+    const { handlers, iframe } = await startRun();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { type: "output", lines: ["one", "two"], requestId: "run-1" },
+          source: iframe.contentWindow,
+          origin: "null",
+        }),
+      );
+    });
+
+    expect(handlers.onOutput).toHaveBeenCalledWith(["one", "two"], "run-1");
+  });
+
+  // The supervisor sets `fatal` only when its worker never produced anything
+  // (the runtime bundle itself is broken — our failure), and leaves it unset
+  // for an error surfaced from the user's own ABAP. `kind` is how that
+  // distinction reaches App.tsx's `load_error` vs `runtime_error` outcomes.
+  it("maps a fatal error to a load failure", async () => {
+    const { handlers, iframe } = await startRun();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            type: "error",
+            message: "bundle broke",
+            requestId: "run-1",
+            fatal: true,
+          },
+          source: iframe.contentWindow,
+          origin: "null",
+        }),
+      );
+    });
+
+    expect(handlers.onError).toHaveBeenCalledWith("bundle broke", "run-1", "load");
+  });
+
+  it("maps an error without fatal to a runtime failure", async () => {
+    const { handlers, iframe } = await startRun();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { type: "error", message: "user code threw", requestId: "run-1" },
+          source: iframe.contentWindow,
+          origin: "null",
+        }),
+      );
+    });
+
+    expect(handlers.onError).toHaveBeenCalledWith(
+      "user code threw",
+      "run-1",
+      "runtime",
+    );
   });
 });

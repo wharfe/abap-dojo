@@ -32,11 +32,30 @@
     if (typeof data.js !== "string" || typeof data.requestId !== "string") return;
 
     requestId = data.requestId;
+    // A run that is still active when a new "execute" arrives would otherwise
+    // leak a worker burning CPU with nothing left listening to it. Unreachable
+    // today (the parent tears down and rebuilds the iframe per run), but cheap
+    // to make correct on its own.
+    disposeWorker();
+    // Whether the worker has produced anything yet. `onerror` firing before
+    // this is true means the worker never ran the user's code at all (e.g. the
+    // runtime bundle itself is broken) — our failure, not the user's. Once
+    // it's true, an `onerror` is far more likely to be an async error surfaced
+    // from the user's own ABAP, which must not be reported as ours.
+    var producedOutput = false;
     try {
       var blob = new Blob([self.__executorSource], { type: "text/javascript" });
-      worker = new Worker(URL.createObjectURL(blob));
+      var blobUrl = URL.createObjectURL(blob);
+      worker = new Worker(blobUrl);
+      // The worker has the source it needs once it starts; holding the blob
+      // alive for the rest of the run only wastes the (multi-MB) bundle's
+      // memory.
+      URL.revokeObjectURL(blobUrl);
       worker.onmessage = function (m) {
         var payload = m.data;
+        if (payload.type === "output" || payload.type === "done") {
+          producedOutput = true;
+        }
         if (payload.type === "done" || payload.type === "error") {
           disposeWorker();
         }
@@ -47,6 +66,7 @@
         toParent({
           type: "error",
           message: (err && err.message) || "Execution worker failed",
+          fatal: !producedOutput,
         });
       };
       worker.postMessage({ type: "run", js: data.js });
