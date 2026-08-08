@@ -89,3 +89,25 @@ test("an ordinary program still runs and prints", async ({ page }) => {
     timeout: 30_000,
   });
 });
+
+test("output written before a timeout is still shown", async ({ page, browserName }) => {
+  // See #47: the transpile worker itself stalls on WebKit for an endless-loop
+  // program, well before the execution sandbox this test exercises. Same
+  // pre-existing, unrelated bug as the other two skipped cases above.
+  test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
+
+  await page.goto("/");
+  await typeProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
+  await page.getByRole("button", { name: /Run/i }).click();
+
+  // page.getByText("tick") alone is not safe here: the literal source the
+  // editor is displaying contains the substring "tick" too (Monaco mirrors
+  // it into syntax-highlighted spans), so that locator would match before
+  // Run is even clicked. Scoping to the output line's own class (there is no
+  // test id on OutputPanel's <p> yet) is what actually proves output arrived.
+  // The loop never ends, so a match can only appear if output is flushed
+  // while the program is still running.
+  await expect(
+    page.locator("p.text-green-300", { hasText: "tick" }).first(),
+  ).toBeVisible({ timeout: 10_000 });
+});

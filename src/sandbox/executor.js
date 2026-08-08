@@ -10,78 +10,144 @@
 
 var MAX_OUTPUT_BYTES = 1024 * 1024;
 var MAX_LINES = 10000;
+var FLUSH_LINES = 500;
+var FLUSH_INTERVAL_MS = 50;
 
 /**
- * Collects WRITE output as a single string. The executor below splits this
- * into lines and separately tracks how many it actually emits vs. `total`,
- * the number the program produced — those differ once MAX_LINES is hit, and
- * the line-count measurement must report `total`, not the emitted count, or
- * every runaway loop would read as exactly MAX_LINES + 1.
+ * Buffers WRITE output and flushes it in batches.
+ *
+ * Not one message per line, deliberately: 5000 individual postMessages starved
+ * the supervising frame's own 20ms timer down to a single tick, which would
+ * have re-created a weaker version of the freeze this whole change removes.
+ *
+ * `total` is what the program produced; `emitted` is what we sent. They part
+ * ways at MAX_LINES, and the measurement reports `total` — counting sent lines
+ * makes every runaway loop read as exactly MAX_LINES + 1.
  */
-function OutputCollector() {
-  this.data = "";
+function OutputStreamer() {
+  this.pending = [];
+  this.partial = "";
+  this.total = 0;
+  this.emitted = 0;
+  this.bytes = 0;
   this.empty = true;
+  this.truncated = false;
+  this.lastFlush = Date.now();
+  // Whether `partial` is empty because the last thing written genuinely ended
+  // in "\n" (matches `text.split("\n")`'s trailing "" element), as opposed to
+  // being cleared by the time-based promotion below. Only the former should
+  // count as an extra line in `finish()` — see the comment there.
+  this.trailingNewline = false;
 }
-OutputCollector.prototype.clear = function () {
-  this.data = "";
+OutputStreamer.prototype.clear = function () {
+  this.partial = "";
+  // MemoryConsole treats clear() as "nothing has been written", and isEmpty()
+  // is what WRITE ... NEW-LINE consults to decide whether to prepend a newline.
+  // The old PostMessageConsole forgot this; do not copy that.
+  this.empty = true;
 };
-OutputCollector.prototype.add = function (text) {
+OutputStreamer.prototype.add = function (text) {
   this.empty = false;
-  if (this.data.length >= MAX_OUTPUT_BYTES) return;
-  var remaining = MAX_OUTPUT_BYTES - this.data.length;
-  if (text.length > remaining) {
-    this.data = this.data + text.slice(0, remaining) + "\n[output truncated]";
-  } else {
-    this.data = this.data + text;
+  if (this.bytes >= MAX_OUTPUT_BYTES) return;
+  this.bytes += text.length;
+  var combined = this.partial + text;
+  var pieces = combined.split("\n");
+  // The last piece has no newline yet; hold it until one arrives.
+  this.partial = pieces.pop();
+  this.trailingNewline = this.partial === "" && combined.slice(-1) === "\n";
+  for (var i = 0; i < pieces.length; i++) this.push(pieces[i]);
+  if (this.pending.length >= FLUSH_LINES) {
+    this.flush();
+  } else if (Date.now() - this.lastFlush >= FLUSH_INTERVAL_MS) {
+    // WRITE only starts a new output line when the ABAP explicitly asks for
+    // one (WRITE / ..., or an explicit NEW-LINE) — plain "WRITE 'x'." inside
+    // a loop keeps appending to the same unterminated line forever. Without
+    // this, that `partial` would grow without bound and never become a
+    // flushable line, so a runaway loop of exactly that (very common) shape
+    // would show nothing before the watchdog kills it — the failure #41
+    // exists to fix. Promoting it here turns "time passed" into a line break
+    // of its own: one logical line may render as several chunks, which is a
+    // fair trade against showing nothing at all.
+    if (this.partial !== "") {
+      this.push(this.partial);
+      this.partial = "";
+      this.trailingNewline = false;
+    }
+    this.flush();
   }
 };
-OutputCollector.prototype.get = function () {
-  return this.data;
+OutputStreamer.prototype.push = function (line) {
+  this.total++;
+  if (this.emitted >= MAX_LINES) {
+    if (!this.truncated) {
+      this.truncated = true;
+      this.pending.push("[output truncated]");
+    }
+    return;
+  }
+  this.emitted++;
+  this.pending.push(line.replace(/\s+$/, ""));
 };
-OutputCollector.prototype.isEmpty = function () {
+OutputStreamer.prototype.flush = function () {
+  this.lastFlush = Date.now();
+  if (this.pending.length === 0) return;
+  self.postMessage({ type: "output", lines: this.pending });
+  this.pending = [];
+};
+/**
+ * Emit any line that never got its trailing newline, then flush.
+ *
+ * A `text.split("\n")` over the whole run's output would produce a trailing ""
+ * element whenever the output itself ends in a newline (the common case for
+ * WRITE) — that element must still count toward `total` (matching what a
+ * non-streaming split would have counted) but must never render as a spurious
+ * blank line. `this.partial` being "" at finish time usually means exactly
+ * that: the newline that produced it already resolved a real line via `push`
+ * inside `add`, so here it only needs to be counted, not re-emitted. The one
+ * exception is `trailingNewline` being false with an empty `partial` — that
+ * combination only happens right after a time-based promotion (see `add`),
+ * which cleared `partial` without a real "\n" ever appearing, so there is
+ * nothing left to count.
+ */
+OutputStreamer.prototype.finish = function () {
+  if (!this.empty) {
+    if (this.partial !== "") {
+      this.push(this.partial);
+    } else if (this.trailingNewline) {
+      this.total++;
+    }
+    this.partial = "";
+  }
+  this.flush();
+};
+OutputStreamer.prototype.get = function () {
+  return this.partial;
+};
+OutputStreamer.prototype.isEmpty = function () {
   return this.empty;
 };
-OutputCollector.prototype.getTrimmed = function () {
-  return this.data
-    .split("\n")
-    .map(function (a) {
-      return a.replace(/\s+$/, "");
-    })
-    .join("\n");
+OutputStreamer.prototype.getTrimmed = function () {
+  return this.partial;
 };
 
 self.onmessage = async function (event) {
   var data = event.data;
   if (!data || data.type !== "run" || typeof data.js !== "string") return;
 
-  var collector = new OutputCollector();
+  var streamer = new OutputStreamer();
   try {
-    var abap = new abaplintRuntime.ABAP({ console: collector });
+    var abap = new abaplintRuntime.ABAP({ console: streamer });
     var AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     var fn = new AsyncFunction("abap", data.js);
     await fn(abap);
-
-    var text = collector.get();
-    var total = 0;
-    if (text) {
-      var lines = text.split("\n");
-      total = lines.length;
-      var emit = total > MAX_LINES ? MAX_LINES : total;
-      var slice = lines.slice(0, emit);
-      // text.split("\n") produces a trailing "" whenever the collected output
-      // itself ends in a newline (the common case for WRITE), which would
-      // otherwise render as a spurious blank line. Only drop it when nothing
-      // was truncated — `total` still counts it either way.
-      if (emit === total && slice.length > 0 && slice[slice.length - 1] === "") {
-        slice.pop();
-      }
-      if (total > MAX_LINES) {
-        slice.push("[output truncated: " + (total - MAX_LINES) + " more lines]");
-      }
-      self.postMessage({ type: "output", lines: slice });
-    }
-    self.postMessage({ type: "done", outputLines: total });
+    streamer.finish();
+    self.postMessage({ type: "done", outputLines: streamer.total });
   } catch (e) {
-    self.postMessage({ type: "error", message: (e && e.message) || String(e) });
+    streamer.finish();
+    self.postMessage({
+      type: "error",
+      message: (e && e.message) || String(e),
+      outputLines: streamer.total,
+    });
   }
 };

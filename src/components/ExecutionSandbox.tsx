@@ -16,6 +16,16 @@ import supervisorSource from "../sandbox/supervisor.js?raw";
  */
 const EXECUTION_TIMEOUT_MS = 5000;
 
+/** EXECUTION_TIMEOUT_MS in seconds, for messages shown to the user. Exported
+ *  so the number lives in exactly one place — a message that hardcoded it
+ *  separately would silently drift the day the timeout value changes. */
+export const EXECUTION_TIMEOUT_SECONDS = EXECUTION_TIMEOUT_MS / 1000;
+
+/** Grace period for the frame to answer a "stop" request before it is torn
+ *  down unconditionally. Covers a wedged frame — otherwise a run that cannot
+ *  even relay "stopped" would hang the caller forever waiting for one. */
+const STOP_GRACE_MS = 250;
+
 export interface ExecutionSandboxHandle {
   execute: (js: string, requestId: string) => void;
 }
@@ -25,17 +35,25 @@ interface ExecutionSandboxProps {
   /**
    * `kind` separates "the ABAP code threw" from "we could not load the runtime
    * to run it at all" — the second is our failure, not the user's, and the two
-   * must not be reported as the same thing.
+   * must not be reported as the same thing. `outputLines` is what the run
+   * produced before it errored.
    */
   onError: (
     message: string,
     requestId: string,
     kind: "runtime" | "load",
+    outputLines: number,
   ) => void;
   /** `outputLines` is what the run produced, before the display cap. */
   onDone: (requestId: string, outputLines: number) => void;
   /** The run exceeded EXECUTION_TIMEOUT_MS — almost always a runaway loop. */
-  onTimeout: (requestId: string) => void;
+  onTimeout: (requestId: string, outputLines: number) => void;
+  /**
+   * The run was stopped by explicit request (not a timeout — that is
+   * `onTimeout`). Nothing sends this yet: the Stop button is a later task,
+   * but the message plumbing for it lands here first.
+   */
+  onStopped: (requestId: string, outputLines: number) => void;
   /**
    * A still-running execution was torn down to make room for a new one.
    *
@@ -51,12 +69,21 @@ export const ExecutionSandbox = forwardRef<
   ExecutionSandboxHandle,
   ExecutionSandboxProps
 >(function ExecutionSandbox(
-  { onOutput, onError, onDone, onTimeout, onCancel },
+  { onOutput, onError, onDone, onTimeout, onStopped, onCancel },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<number | undefined>(undefined);
+  /** Fallback timer for a frame that does not answer a "stop" request. */
+  const stopFallbackRef = useRef<number | undefined>(undefined);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  /**
+   * Lines this component has handed to `onOutput` for the active run. The
+   * supervisor keeps its own count and that one is authoritative; this exists
+   * only for the path where the frame is wedged and cannot report at all.
+   */
+  const relayedLinesRef = useRef(0);
 
   /**
    * The execution the sandbox currently belongs to, or null when idle. Every
@@ -70,6 +97,7 @@ export const ExecutionSandbox = forwardRef<
 
   const cleanup = useCallback(() => {
     window.clearTimeout(timeoutRef.current);
+    window.clearTimeout(stopFallbackRef.current);
     if (handleMessageRef.current) {
       window.removeEventListener("message", handleMessageRef.current);
       handleMessageRef.current = null;
@@ -100,16 +128,29 @@ export const ExecutionSandbox = forwardRef<
 
       const data = event.data;
       if (data.type === "output") {
+        relayedLinesRef.current += data.lines.length;
         onOutput(data.lines, data.requestId);
       } else if (data.type === "error") {
         finish();
-        onError(data.message, data.requestId, data.fatal ? "load" : "runtime");
+        onError(
+          data.message,
+          data.requestId,
+          data.fatal ? "load" : "runtime",
+          data.outputLines ?? relayedLinesRef.current,
+        );
       } else if (data.type === "done") {
         finish();
         onDone(data.requestId, data.outputLines);
+      } else if (data.type === "stopped") {
+        finish();
+        if (data.reason === "user") {
+          onStopped(data.requestId, data.outputLines);
+        } else {
+          onTimeout(data.requestId, data.outputLines);
+        }
       }
     },
-    [onOutput, onError, onDone, finish],
+    [onOutput, onError, onDone, onTimeout, onStopped, finish],
   );
 
   const execute = useCallback(
@@ -120,6 +161,7 @@ export const ExecutionSandbox = forwardRef<
       const superseded = activeRequestIdRef.current;
       cleanup();
       activeRequestIdRef.current = requestId;
+      relayedLinesRef.current = 0;
       if (superseded !== null && superseded !== requestId) {
         onCancel(superseded);
       }
@@ -130,8 +172,29 @@ export const ExecutionSandbox = forwardRef<
       // the 5s budget covers the fetch too, which only matters on the very
       // first run of a session (the bundle is same-origin and cached after).
       timeoutRef.current = window.setTimeout(() => {
+        // Ask the frame to stop first: it knows how many lines went past, and
+        // that number is the difference between "timed out, here is what you
+        // got" and "timed out, nothing to show". Removing the iframe outright
+        // is the fallback, armed in case the frame itself is wedged.
+        const frame = iframeRef.current;
+        if (frame?.contentWindow) {
+          frame.contentWindow.postMessage(
+            { type: "stop", requestId, reason: "timeout" },
+            "*",
+          );
+          stopFallbackRef.current = window.setTimeout(() => {
+            if (activeRequestIdRef.current !== requestId) return;
+            finish();
+            // The frame never answered, so its count is unreachable. Fall back
+            // to what we relayed ourselves rather than reporting nothing.
+            onTimeout(requestId, relayedLinesRef.current);
+          }, STOP_GRACE_MS);
+          return;
+        }
+        // No iframe yet (still fetching the runtime bundle) — nothing could
+        // have produced output.
         finish();
-        onTimeout(requestId);
+        onTimeout(requestId, relayedLinesRef.current);
       }, EXECUTION_TIMEOUT_MS);
 
       let runtimeBundle: string;
@@ -146,6 +209,7 @@ export const ExecutionSandbox = forwardRef<
           "Could not load the ABAP runtime. Check your connection and try again.",
           requestId,
           "load",
+          0,
         );
         return;
       }
@@ -187,6 +251,7 @@ export const ExecutionSandbox = forwardRef<
           cause instanceof Error ? cause.message : String(cause),
           requestId,
           "load",
+          0,
         );
       }
     },

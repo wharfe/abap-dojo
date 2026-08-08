@@ -8,6 +8,9 @@
 (function () {
   var worker = null;
   var requestId = null;
+  // The worker cannot report anything once it is terminated, so the count of
+  // what it managed to emit before that has to live out here.
+  var linesRelayed = 0;
 
   function toParent(message) {
     message.requestId = requestId;
@@ -26,12 +29,23 @@
     var data = event.data;
     if (!data) return;
 
-    // "stop" and its "stopped" reply are a later task (#28 plan, Task 4) —
-    // deliberately absent here.
+    if (data.type === "stop") {
+      // The worker cannot report anything once terminated, so `linesRelayed`
+      // (tallied below as batches come through) is the only count left.
+      disposeWorker();
+      toParent({
+        type: "stopped",
+        outputLines: linesRelayed,
+        reason: data.reason,
+      });
+      return;
+    }
+
     if (data.type !== "execute") return;
     if (typeof data.js !== "string" || typeof data.requestId !== "string") return;
 
     requestId = data.requestId;
+    linesRelayed = 0;
     // A run that is still active when a new "execute" arrives would otherwise
     // leak a worker burning CPU with nothing left listening to it. Unreachable
     // today (the parent tears down and rebuilds the iframe per run), but cheap
@@ -42,6 +56,10 @@
     // runtime bundle itself is broken) — our failure, not the user's. Once
     // it's true, an `onerror` is far more likely to be an async error surfaced
     // from the user's own ABAP, which must not be reported as ours.
+    //
+    // Streaming makes this flip to true earlier and more often than it used to
+    // (the first flushed output batch, rather than only "done"/"error") — that
+    // is correct: any batch that made it out already proves the worker ran.
     var producedOutput = false;
     try {
       var blob = new Blob([self.__executorSource], { type: "text/javascript" });
@@ -53,7 +71,10 @@
       URL.revokeObjectURL(blobUrl);
       worker.onmessage = function (m) {
         var payload = m.data;
-        if (payload.type === "output" || payload.type === "done") {
+        if (payload.type === "output") {
+          producedOutput = true;
+          linesRelayed += payload.lines.length;
+        } else if (payload.type === "done") {
           producedOutput = true;
         }
         if (payload.type === "done" || payload.type === "error") {
@@ -67,6 +88,7 @@
           type: "error",
           message: (err && err.message) || "Execution worker failed",
           fatal: !producedOutput,
+          outputLines: linesRelayed,
         });
       };
       worker.postMessage({ type: "run", js: data.js });
@@ -76,6 +98,7 @@
         type: "error",
         message: (err && err.message) || String(err),
         fatal: true,
+        outputLines: 0,
       });
     }
   });

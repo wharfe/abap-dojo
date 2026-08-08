@@ -15,6 +15,7 @@ function setup() {
     onError: vi.fn(),
     onDone: vi.fn(),
     onTimeout: vi.fn(),
+    onStopped: vi.fn(),
     onCancel: vi.fn(),
   };
   const ref = createRef<ExecutionSandboxHandle>();
@@ -129,7 +130,9 @@ describe("ExecutionSandbox", () => {
       vi.advanceTimersByTime(5000);
     });
 
-    expect(handlers.onTimeout).toHaveBeenCalledWith("run-1");
+    // No iframe exists yet (the bundle fetch never resolved), so there is
+    // nothing to ask to stop and no output could have been produced.
+    expect(handlers.onTimeout).toHaveBeenCalledWith("run-1", 0);
   });
 
   it("times out a run whose sandbox never answers", async () => {
@@ -140,10 +143,14 @@ describe("ExecutionSandbox", () => {
       ref.current!.execute("js", "run-1");
     });
     act(() => {
+      // 5000ms fires the watchdog, which asks the (unresponsive, in this
+      // test) frame to stop; the extra 250ms is the grace period before it
+      // gives up waiting for a reply and tears the frame down itself.
       vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(250);
     });
 
-    expect(handlers.onTimeout).toHaveBeenCalledWith("run-1");
+    expect(handlers.onTimeout).toHaveBeenCalledWith("run-1", 0);
     expect(handlers.onError).not.toHaveBeenCalled();
   });
 
@@ -159,10 +166,11 @@ describe("ExecutionSandbox", () => {
     });
     act(() => {
       vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(250);
     });
 
     expect(handlers.onTimeout).toHaveBeenCalledTimes(1);
-    expect(handlers.onTimeout).toHaveBeenCalledWith("run-2");
+    expect(handlers.onTimeout).toHaveBeenCalledWith("run-2", 0);
   });
 
   // The executor batches WRITE output into an array (never one postMessage
@@ -200,6 +208,7 @@ describe("ExecutionSandbox", () => {
             message: "bundle broke",
             requestId: "run-1",
             fatal: true,
+            outputLines: 0,
           },
           source: iframe.contentWindow,
           origin: "null",
@@ -207,16 +216,21 @@ describe("ExecutionSandbox", () => {
       );
     });
 
-    expect(handlers.onError).toHaveBeenCalledWith("bundle broke", "run-1", "load");
+    expect(handlers.onError).toHaveBeenCalledWith("bundle broke", "run-1", "load", 0);
   });
 
-  it("maps an error without fatal to a runtime failure", async () => {
+  it("maps an error without fatal to a runtime failure, carrying its output count", async () => {
     const { handlers, iframe } = await startRun();
 
     await act(async () => {
       window.dispatchEvent(
         new MessageEvent("message", {
-          data: { type: "error", message: "user code threw", requestId: "run-1" },
+          data: {
+            type: "error",
+            message: "user code threw",
+            requestId: "run-1",
+            outputLines: 7,
+          },
           source: iframe.contentWindow,
           origin: "null",
         }),
@@ -227,6 +241,86 @@ describe("ExecutionSandbox", () => {
       "user code threw",
       "run-1",
       "runtime",
+      7,
     );
+  });
+
+  // The supervisor omits `outputLines` only when it had to synthesize the
+  // error itself (e.g. it could not even construct the worker); in that case
+  // the relay falls back to what it has already handed to onOutput.
+  it("falls back to the relayed line count when an error omits outputLines", async () => {
+    const { handlers, iframe } = await startRun();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { type: "output", lines: ["a", "b", "c"], requestId: "run-1" },
+          source: iframe.contentWindow,
+          origin: "null",
+        }),
+      );
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { type: "error", message: "worker failed", requestId: "run-1" },
+          source: iframe.contentWindow,
+          origin: "null",
+        }),
+      );
+    });
+
+    expect(handlers.onError).toHaveBeenCalledWith(
+      "worker failed",
+      "run-1",
+      "runtime",
+      3,
+    );
+  });
+
+  // Task 4 adds the button that sends reason: "user"; this task only adds the
+  // plumbing, so it is exercised directly here rather than through the UI.
+  it("routes a stopped/user reply to onStopped", async () => {
+    const { handlers, iframe } = await startRun();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            type: "stopped",
+            requestId: "run-1",
+            outputLines: 42,
+            reason: "user",
+          },
+          source: iframe.contentWindow,
+          origin: "null",
+        }),
+      );
+    });
+
+    expect(handlers.onStopped).toHaveBeenCalledWith("run-1", 42);
+    expect(handlers.onTimeout).not.toHaveBeenCalled();
+  });
+
+  it("routes a stopped/timeout reply to onTimeout", async () => {
+    const { handlers, iframe } = await startRun();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            type: "stopped",
+            requestId: "run-1",
+            outputLines: 42,
+            reason: "timeout",
+          },
+          source: iframe.contentWindow,
+          origin: "null",
+        }),
+      );
+    });
+
+    expect(handlers.onTimeout).toHaveBeenCalledWith("run-1", 42);
+    expect(handlers.onStopped).not.toHaveBeenCalled();
   });
 });

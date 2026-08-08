@@ -10,6 +10,7 @@ import { Toolbar } from "./components/Toolbar";
 import {
   ExecutionSandbox,
   type ExecutionSandboxHandle,
+  EXECUTION_TIMEOUT_SECONDS,
 } from "./components/ExecutionSandbox";
 import { debounce } from "./utils/debounce";
 import { encodeSource, decodeSource } from "./utils/urlShare";
@@ -306,24 +307,46 @@ function App() {
   }, []);
 
   const handleError = useCallback(
-    (message: string, requestId: string, kind: "runtime" | "load") => {
+    (
+      message: string,
+      requestId: string,
+      kind: "runtime" | "load",
+      outputLines: number,
+    ) => {
       if (requestId === validationRequestIdRef.current) {
         endValidationRuntime({ status: "fail", error: message });
         return;
       }
-      endRun(kind === "load" ? "load_error" : "runtime_error", message);
+      endRun(kind === "load" ? "load_error" : "runtime_error", message, outputLines);
     },
     [endRun, endValidationRuntime],
   );
 
   const handleTimeout = useCallback(
-    (requestId: string) => {
-      const message = "Execution timeout (5s)";
+    (requestId: string, outputLines: number) => {
+      const message = `Execution timeout (${EXECUTION_TIMEOUT_SECONDS}s)`;
       if (requestId === validationRequestIdRef.current) {
         endValidationRuntime({ status: "fail", error: message });
         return;
       }
-      endRun("timeout", message);
+      endRun("timeout", message, outputLines);
+    },
+    [endRun, endValidationRuntime],
+  );
+
+  /**
+   * The run was stopped by explicit request rather than the watchdog. Nothing
+   * can trigger this yet — the Stop button is a later task — but the sandbox
+   * requires a handler to be wired regardless.
+   */
+  const handleStopped = useCallback(
+    (requestId: string, outputLines: number) => {
+      const message = "Execution stopped.";
+      if (requestId === validationRequestIdRef.current) {
+        endValidationRuntime({ status: "fail", error: message });
+        return;
+      }
+      endRun("cancelled", message, outputLines);
     },
     [endRun, endValidationRuntime],
   );
@@ -567,6 +590,7 @@ function App() {
         onError={handleError}
         onDone={handleDone}
         onTimeout={handleTimeout}
+        onStopped={handleStopped}
         onCancel={handleCancel}
       />
     </div>

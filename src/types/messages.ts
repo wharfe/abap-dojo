@@ -51,16 +51,41 @@ export type WorkerResponse =
   | { type: "validate-stage-result"; stage: ValidationStage; result: StageResult };
 
 // Sandbox messages — requestId for disambiguating playground vs validation executions
-export type SandboxRequest = { type: "execute"; js: string; requestId: string };
+export type SandboxRequest =
+  | { type: "execute"; js: string; requestId: string }
+  /**
+   * Ask the supervisor to terminate the active run early. `reason` travels
+   * back unchanged on the "stopped" reply so the caller can tell a watchdog
+   * timeout apart from a user-initiated stop without a second round trip.
+   */
+  | { type: "stop"; requestId: string; reason: "timeout" | "user" };
 
 export type SandboxResponse =
   /** A flush of WRITE output. Batched, never one message per line: 5000 single
    *  postMessages starved the iframe's own timers down to a single tick. */
   | { type: "output"; lines: string[]; requestId: string }
-  | { type: "error"; message: string; requestId: string; fatal?: boolean }
+  /**
+   * `outputLines` is what the run produced before it errored. It is present
+   * whenever the executor itself reported the error (the ordinary case) and
+   * absent only when the supervisor had to synthesize the message itself
+   * (e.g. the worker could not even be constructed).
+   */
+  | {
+      type: "error";
+      message: string;
+      requestId: string;
+      fatal?: boolean;
+      outputLines?: number;
+    }
   /**
    * `outputLines` is the number of lines the run actually produced, which is
    * not the number of lines we sent: display stops at MAX_LINES and a runaway
    * loop would otherwise report exactly MAX_LINES + 1 every time.
    */
-  | { type: "done"; requestId: string; outputLines: number };
+  | { type: "done"; requestId: string; outputLines: number }
+  /**
+   * The worker was terminated from outside — the watchdog fired, or the user
+   * pressed Stop. `outputLines` is what the supervisor saw go past before it
+   * pulled the plug; the worker itself cannot report anything at this point.
+   */
+  | { type: "stopped"; requestId: string; outputLines: number; reason: "timeout" | "user" };
