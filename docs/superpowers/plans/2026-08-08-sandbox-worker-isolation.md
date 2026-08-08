@@ -884,20 +884,44 @@ self.onmessage = async function (event) {
         // is the fallback, armed in case the frame itself is wedged.
         const frame = iframeRef.current;
         if (frame?.contentWindow) {
-          frame.contentWindow.postMessage({ type: "stop", requestId }, "*");
+          frame.contentWindow.postMessage(
+            { type: "stop", requestId, reason: "timeout" },
+            "*",
+          );
           stopFallbackRef.current = window.setTimeout(() => {
             if (activeRequestIdRef.current !== requestId) return;
             finish();
-            onTimeout(requestId, runOutputSeenRef.current);
+            // The frame never answered, so its count is unreachable. Fall back
+            // to what we relayed ourselves rather than reporting nothing.
+            onTimeout(requestId, relayedLinesRef.current);
           }, 250);
           return;
         }
         finish();
-        onTimeout(requestId, 0);
+        onTimeout(requestId, relayedLinesRef.current);
       }, EXECUTION_TIMEOUT_MS);
 ```
 
-`stopFallbackRef` を `useRef<number | undefined>(undefined)` で宣言し、`cleanup` で `window.clearTimeout(stopFallbackRef.current)` すること。`onTimeout` の型を `(requestId: string, outputLines: number) => void` に変える。`stopped` を受け取ったときは、ウォッチドッグ由来なら `onTimeout` へ、ユーザー由来なら `onStopped` へ振り分ける（Task 4 で Stop ボタンが入るまでは全て `onTimeout`）。
+必要な追加宣言（3 つとも `ExecutionSandbox` の中）:
+
+```tsx
+  /** Fallback timer for a frame that does not answer a stop request. */
+  const stopFallbackRef = useRef<number | undefined>(undefined);
+  /**
+   * Lines this component has handed to `onOutput` for the active run. The
+   * supervisor keeps its own count and that one is authoritative; this exists
+   * only for the path where the frame is wedged and cannot report at all.
+   */
+  const relayedLinesRef = useRef(0);
+```
+
+`cleanup` で `window.clearTimeout(stopFallbackRef.current)` すること。
+`execute` の冒頭で `relayedLinesRef.current = 0`、`output` 受信時に
+`relayedLinesRef.current += data.lines.length` すること。
+`onTimeout` の型を `(requestId: string, outputLines: number) => void` に変える。
+`stopped` を受け取ったときは `data.reason` を見て、`"user"` なら `onStopped`、
+それ以外は `onTimeout` へ振り分ける（Stop ボタンは Task 4 で入るので、
+このタスクの時点では `"timeout"` しか来ない）。
 
 実装を単純に保つため、監督への停止要求に理由を持たせる:
 
@@ -910,10 +934,19 @@ iframe → 親 { type: "stopped", requestId, outputLines, reason }
 
 - [ ] **Step 7: App.tsx を新しい終端イベントに合わせる**
 
+先に `ExecutionSandbox.tsx` から秒数を export する（メッセージに数字を直書きすると
+Task 4 で値を変えたときに 2 箇所目を直し忘れる）:
+
+```tsx
+export const EXECUTION_TIMEOUT_SECONDS = EXECUTION_TIMEOUT_MS / 1000;
+```
+
+`App.tsx` でそれを import して使う:
+
 ```tsx
   const handleTimeout = useCallback(
     (requestId: string, outputLines: number) => {
-      const message = `Execution stopped after ${EXECUTION_TIMEOUT_SECONDS}s — this usually means an endless loop.`;
+      const message = `Execution timeout (${EXECUTION_TIMEOUT_SECONDS}s)`;
       if (requestId === validationRequestIdRef.current) {
         endValidationRuntime({ status: "fail", error: message });
         return;
@@ -1033,10 +1066,27 @@ export interface ExecutionSandboxHandle {
  * also stop a run themselves now, which is what makes a longer deadline safe.
  */
 const EXECUTION_TIMEOUT_MS = 15000;
-const EXECUTION_TIMEOUT_SECONDS = EXECUTION_TIMEOUT_MS / 1000;
 ```
 
-`EXECUTION_TIMEOUT_SECONDS` を export して App.tsx のメッセージで使うこと（数字を 2 箇所に書かない）。
+`EXECUTION_TIMEOUT_SECONDS` は Task 3 で export 済みなので、この定数を変えるだけで
+メッセージ側も追随する。
+
+そのうえで、タイムアウト時のメッセージを原因の説明に変える:
+
+```tsx
+      const message = `Execution stopped after ${EXECUTION_TIMEOUT_SECONDS}s — this usually means an endless loop.`;
+```
+
+**この文字列変更は Task 2 で書いた e2e を壊す。** `an endless loop still produces a
+terminal result` が `getByText(/timeout/i)` を assert しているが、新しい文面に
+"timeout" は含まれない。同じコミットで次に直すこと:
+
+```ts
+  await expect(page.getByText(/endless loop/i)).toBeVisible();
+```
+
+あわせて同テストの待ち時間を 15 秒ウォッチドッグに合わせて伸ばす（`timeout: 30_000`
+のままで足りるが、`stayedResponsive` の秒数は 8 → 18 にする）。
 
 - [ ] **Step 7: Toolbar に Stop を出す**
 
