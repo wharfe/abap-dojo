@@ -245,9 +245,13 @@ describe("ExecutionSandbox", () => {
     );
   });
 
-  // The supervisor omits `outputLines` only when it had to synthesize the
-  // error itself (e.g. it could not even construct the worker); in that case
-  // the relay falls back to what it has already handed to onOutput.
+  // Nothing the supervisor actually sends omits `outputLines` today — the
+  // worker's own errors carry `streamer.total`, and the supervisor's two
+  // synthesized errors (onerror, and the try/catch around constructing the
+  // worker) both set it explicitly. The `?? relayedLinesRef.current` fallback
+  // in handleMessage exists purely as defence against a message that somehow
+  // doesn't, which this test exercises directly rather than through a real
+  // supervisor code path.
   it("falls back to the relayed line count when an error omits outputLines", async () => {
     const { handlers, iframe } = await startRun();
 

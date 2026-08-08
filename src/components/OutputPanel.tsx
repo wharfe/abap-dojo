@@ -68,7 +68,11 @@ export function OutputPanel({
               <p className="text-red-400 whitespace-pre-wrap">{error}</p>
             )}
             {output.map((line, i) => (
-              <p key={i} className="text-green-300 whitespace-pre-wrap">
+              <p
+                key={i}
+                data-testid="output-line"
+                className="text-green-300 whitespace-pre-wrap"
+              >
                 {line}
               </p>
             ))}

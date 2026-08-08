@@ -232,6 +232,18 @@ covers runs that yield. The same freeze also inflates the `run_click` vs
 number of `output` messages received: display stops at 10,000 lines, so
 counting messages would report every runaway loop as exactly 10,001.
 
+**A loop that never writes a real newline inflates `output_lines` to roughly
+`elapsed_ms / 50`, not the number of `WRITE`s it executed.** The execution
+worker (`src/sandbox/executor.js`) flushes output every 500 buffered lines or
+50ms, whichever comes first; a program shaped like `DO. WRITE 'x'. ENDDO.`
+(no `WRITE /` or explicit `NEW-LINE`) never produces a `"\n"` on its own, so
+the 50ms timer is the only thing that ever turns its output into a "line" —
+each flush interval that elapses counts as one more. This matches what the UI
+displays and what the supervisor's own relayed-line count would say, so it is
+not a bug, but do not read a 5-second `timeout` with `output_lines: 100` as
+"100 `WRITE` statements ran" — it more likely means one `WRITE` ran continuously
+for 5 seconds with no line break.
+
 Also keep Enhanced Measurement's **browser-history / hash-routing** options OFF
 for this property. The URL hash carries user source, and those options can make
 GA4 treat a fragment change as a page view.

@@ -103,11 +103,11 @@ test("output written before a timeout is still shown", async ({ page, browserNam
   // page.getByText("tick") alone is not safe here: the literal source the
   // editor is displaying contains the substring "tick" too (Monaco mirrors
   // it into syntax-highlighted spans), so that locator would match before
-  // Run is even clicked. Scoping to the output line's own class (there is no
-  // test id on OutputPanel's <p> yet) is what actually proves output arrived.
-  // The loop never ends, so a match can only appear if output is flushed
-  // while the program is still running.
+  // Run is even clicked. Scoping to OutputPanel's own output-line test id is
+  // what actually proves output arrived (rather than a Tailwind colour class,
+  // which a palette change could silently break). The loop never ends, so a
+  // match can only appear if output is flushed while the program still runs.
   await expect(
-    page.locator("p.text-green-300", { hasText: "tick" }).first(),
+    page.getByTestId("output-line").filter({ hasText: "tick" }).first(),
   ).toBeVisible({ timeout: 10_000 });
 });

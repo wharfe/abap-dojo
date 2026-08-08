@@ -38,6 +38,17 @@ function OutputStreamer() {
   // being cleared by the time-based promotion below. Only the former should
   // count as an extra line in `finish()` — see the comment there.
   this.trailingNewline = false;
+  // Set when a promotion (see `add`) force-flushed a line that had not
+  // actually been terminated by "\n" yet. The abaplint runtime writes a line
+  // as TWO calls — `add("\n")` then `add(text)` (write.js) — so the real
+  // terminator for the promoted line can still arrive later, on its own,
+  // as a lone `add("\n")`. Without this flag that call's `combined` is just
+  // "\n": split gives `["", ""]`, and the LEADING "" (not the trailing one
+  // `add` already knows to drop) would be pushed as a spurious blank line —
+  // "a"/"b" written 50ms+ apart rendering as "a", "", "b" instead of "a", "b".
+  // `continuation` tells the next `add` to swallow exactly that one leading
+  // empty piece instead of treating it as real content.
+  this.continuation = false;
 }
 OutputStreamer.prototype.clear = function () {
   this.partial = "";
@@ -45,17 +56,43 @@ OutputStreamer.prototype.clear = function () {
   // is what WRITE ... NEW-LINE consults to decide whether to prepend a newline.
   // The old PostMessageConsole forgot this; do not copy that.
   this.empty = true;
+  this.trailingNewline = false;
+  this.continuation = false;
 };
 OutputStreamer.prototype.add = function (text) {
   this.empty = false;
-  if (this.bytes >= MAX_OUTPUT_BYTES) return;
-  this.bytes += text.length;
-  var combined = this.partial + text;
-  var pieces = combined.split("\n");
-  // The last piece has no newline yet; hold it until one arrives.
-  this.partial = pieces.pop();
-  this.trailingNewline = this.partial === "" && combined.slice(-1) === "\n";
-  for (var i = 0; i < pieces.length; i++) this.push(pieces[i]);
+  if (this.bytes < MAX_OUTPUT_BYTES) {
+    var remaining = MAX_OUTPUT_BYTES - this.bytes;
+    if (text.length > remaining) {
+      // Keep only what fits, plus a notice. The notice is plain content fed
+      // through the same split/push logic as everything else below, so it is
+      // displayed and counted exactly as Task 2's non-streaming collector
+      // treated its own truncation notice — baked into the same output text,
+      // not a separately-tracked system message.
+      text = text.slice(0, remaining) + "\n[output truncated: output too large]";
+    }
+    this.bytes += text.length;
+    var combined = this.partial + text;
+    var pieces = combined.split("\n");
+    // The last piece has no newline yet; hold it until one arrives.
+    this.partial = pieces.pop();
+    this.trailingNewline = this.partial === "" && combined.slice(-1) === "\n";
+    if (this.continuation) {
+      // The leading piece here is the other half of a line a promotion
+      // already pushed; drop it so it is not double-counted or re-rendered
+      // as a blank line. Only ever the first piece: a genuine embedded blank
+      // line arriving right after would be `pieces[1]`, untouched.
+      if (pieces.length > 0 && pieces[0] === "") pieces.shift();
+      this.continuation = false;
+    }
+    for (var i = 0; i < pieces.length; i++) this.push(pieces[i]);
+  }
+  // The byte cap must not also cap flushing: whatever was already buffered —
+  // including the truncation notice above — still has to reach the parent,
+  // especially if the watchdog kills this worker before `finish()` ever
+  // runs. Unconditional so a run that keeps calling WRITE after the cap
+  // (silently dropped above) still gets periodic delivery of what came
+  // before it, rather than being stranded in `pending`/`partial` forever.
   if (this.pending.length >= FLUSH_LINES) {
     this.flush();
   } else if (Date.now() - this.lastFlush >= FLUSH_INTERVAL_MS) {
@@ -67,11 +104,16 @@ OutputStreamer.prototype.add = function (text) {
     // would show nothing before the watchdog kills it — the failure #41
     // exists to fix. Promoting it here turns "time passed" into a line break
     // of its own: one logical line may render as several chunks, which is a
-    // fair trade against showing nothing at all.
+    // fair trade against showing nothing at all. `output_lines` counts every
+    // such chunk as its own line — for a run that never writes a real "\n"
+    // at all, that makes the reported count track elapsed time (roughly one
+    // "line" per FLUSH_INTERVAL_MS) rather than anything the ABAP source
+    // itself delimited; see the analytics note in CLAUDE.md.
     if (this.partial !== "") {
       this.push(this.partial);
       this.partial = "";
       this.trailingNewline = false;
+      this.continuation = true;
     }
     this.flush();
   }
@@ -79,10 +121,7 @@ OutputStreamer.prototype.add = function (text) {
 OutputStreamer.prototype.push = function (line) {
   this.total++;
   if (this.emitted >= MAX_LINES) {
-    if (!this.truncated) {
-      this.truncated = true;
-      this.pending.push("[output truncated]");
-    }
+    this.truncated = true;
     return;
   }
   this.emitted++;
@@ -108,6 +147,11 @@ OutputStreamer.prototype.flush = function () {
  * combination only happens right after a time-based promotion (see `add`),
  * which cleared `partial` without a real "\n" ever appearing, so there is
  * nothing left to count.
+ *
+ * The MAX_LINES truncation notice is appended here, not at the moment the
+ * cap was first hit, because only here do we know the final count of lines
+ * it hid — the same "N more lines" wording Task 2's collector used, now
+ * computed from `total` instead of a single upfront split.
  */
 OutputStreamer.prototype.finish = function () {
   if (!this.empty) {
@@ -117,6 +161,11 @@ OutputStreamer.prototype.finish = function () {
       this.total++;
     }
     this.partial = "";
+  }
+  if (this.truncated) {
+    this.pending.push(
+      "[output truncated: " + (this.total - MAX_LINES) + " more lines]",
+    );
   }
   this.flush();
 };
