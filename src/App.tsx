@@ -118,14 +118,29 @@ function App() {
 
   const sandboxRef = useRef<ExecutionSandboxHandle>(null);
 
-  // Deadlock breaker for the worker round trip. Armed when a run or validation
-  // is posted, disarmed the moment the worker answers or the sandbox takes over
-  // (the sandbox has a watchdog of its own from that point on).
-  const workerWatchdogRef = useRef<number | undefined>(undefined);
+  // Deadlock breakers for the worker round trip — one per mode. Each is armed
+  // when its own run/validation is posted and disarmed the moment the worker
+  // answers or the sandbox takes over (the sandbox has a watchdog of its own
+  // from that point on).
+  //
+  // Kept as two separate refs rather than one shared ref: a single ref meant
+  // an arm and its disarm did not necessarily belong to the same operation.
+  // Starting a Playground run, then starting a validation before the run's
+  // transpile came back, re-armed the one ref for the validation; the
+  // Playground response then disarmed it, leaving the validation's own
+  // deadlock breaker silently gone. If the worker later stalled on the
+  // validation, `isValidating` never returned to false. See #49.
+  const playgroundWatchdogRef = useRef<number | undefined>(undefined);
+  const validationWatchdogRef = useRef<number | undefined>(undefined);
 
-  const disarmWorkerWatchdog = useCallback(() => {
-    window.clearTimeout(workerWatchdogRef.current);
-    workerWatchdogRef.current = undefined;
+  const disarmPlaygroundWatchdog = useCallback(() => {
+    window.clearTimeout(playgroundWatchdogRef.current);
+    playgroundWatchdogRef.current = undefined;
+  }, []);
+
+  const disarmValidationWatchdog = useCallback(() => {
+    window.clearTimeout(validationWatchdogRef.current);
+    validationWatchdogRef.current = undefined;
   }, []);
 
   /**
@@ -146,7 +161,7 @@ function App() {
       // text and stays here; this is the sanitised half that may be measured.
       diagnostics?: TranspileDiagnostics,
     ) => {
-      disarmWorkerWatchdog();
+      disarmPlaygroundWatchdog();
       if (message !== undefined) {
         // `stopped` is the user's own choice, not a failure — keep it out of
         // the `error` slot OutputPanel renders in red.
@@ -169,18 +184,18 @@ function App() {
         transpile_node: diagnostics?.node,
       });
     },
-    [disarmWorkerWatchdog],
+    [disarmPlaygroundWatchdog],
   );
 
   /** End the validation, marking its runtime stage with `result`. */
   const endValidationRuntime = useCallback(
     (result: StageResult) => {
-      disarmWorkerWatchdog();
+      disarmValidationWatchdog();
       setValidationStages((prev) => ({ ...prev, runtime: result }));
       validationRequestIdRef.current = null;
       setIsValidating(false);
     },
-    [disarmWorkerWatchdog],
+    [disarmValidationWatchdog],
   );
 
   // Hero visibility: hidden if dismissed, or if URL has code parameter
@@ -219,21 +234,32 @@ function App() {
       if (data.type === "lint-result") {
         setLintIssues(data.issues);
       } else if (data.type === "transpile-result") {
-        // A Stop pressed while this was still in flight abandons the run and
-        // clears playgroundRequestIdRef.current (see handleStopClick) —
-        // without this guard, a result that arrives after that would still
-        // reach the sandbox and start an execution nobody asked for.
-        if (playgroundRequestIdRef.current) {
+        // A stale response is not just "a Stop happened" — Run A -> Stop
+        // (still transpiling) -> Run B can deliver A's transpile-result while
+        // B is the current run. Comparing `data.requestId` against the
+        // current ref (rather than the old truthy-only check) is what keeps
+        // A's JS from executing under B's requestId, and keeps a Stop pressed
+        // mid-transpile from letting the eventual late reply start a run
+        // nobody asked for. See #42 for widening this correlation to every
+        // worker message; lint/lint-result stay untouched on purpose (see the
+        // comment on WorkerRequest in types/messages.ts).
+        if (
+          playgroundRequestIdRef.current &&
+          data.requestId === playgroundRequestIdRef.current
+        ) {
           // The sandbox owns the deadline from here on.
-          disarmWorkerWatchdog();
+          disarmPlaygroundWatchdog();
           sandboxRef.current?.execute(data.js, playgroundRequestIdRef.current);
         }
       } else if (data.type === "transpile-error") {
-        // Same guard as transpile-result: a Stop pressed during the round
-        // trip already ended the run with its own run_result, so a
-        // transpile-error that lands afterwards must not end it a second
-        // time.
-        if (playgroundRequestIdRef.current) {
+        // Same requestId guard as transpile-result: a Stop pressed during the
+        // round trip already ended the run with its own run_result, and a
+        // stale transpile-error from an abandoned run must not terminate — or
+        // end — a run started after it.
+        if (
+          playgroundRequestIdRef.current &&
+          data.requestId === playgroundRequestIdRef.current
+        ) {
           const isSyntax = data.kind === "syntax";
           const label = isSyntax ? "Syntax error" : "Transpile error";
           endRun(
@@ -272,7 +298,7 @@ function App() {
           data.result.js
         ) {
           // The sandbox owns the deadline from here on.
-          disarmWorkerWatchdog();
+          disarmValidationWatchdog();
           const reqId = crypto.randomUUID();
           validationRequestIdRef.current = reqId;
           setValidationStages((prev) => ({
@@ -287,16 +313,16 @@ function App() {
           data.stage === "transpile" &&
           (data.result.status === "fail" || data.result.status === "skipped")
         ) {
-          disarmWorkerWatchdog();
+          disarmValidationWatchdog();
           setIsValidating(false);
         }
         if (data.stage === "runtime" && data.result.status === "skipped") {
-          disarmWorkerWatchdog();
+          disarmValidationWatchdog();
           setIsValidating(false);
         }
       }
     };
-  }, [disarmWorkerWatchdog, endRun]);
+  }, [disarmPlaygroundWatchdog, disarmValidationWatchdog, endRun]);
 
   // Boot the abaplint worker once the browser is idle. Creating it during mount
   // meant parsing 1.8 MB of JavaScript before the page could respond to input,
@@ -475,42 +501,40 @@ function App() {
     setStatusMessage(null);
     setIsRunning(true);
     setActiveTab("output");
-    playgroundRequestIdRef.current = crypto.randomUUID();
+    const requestId = crypto.randomUUID();
+    playgroundRequestIdRef.current = requestId;
     runStartRef.current = performance.now();
     runOutputCountRef.current = 0;
     track("run_click", { line_count: lineCount(source) });
-    appWorker?.postMessage({ type: "transpile", source });
+    appWorker?.postMessage({ type: "transpile", source, requestId });
     // Nothing else can end the run until the worker replies (or the sandbox
     // takes over), so guarantee an exit even if it never does.
-    disarmWorkerWatchdog();
-    workerWatchdogRef.current = window.setTimeout(() => {
+    disarmPlaygroundWatchdog();
+    playgroundWatchdogRef.current = window.setTimeout(() => {
       endRun("stalled", "The ABAP engine stopped responding. Try running again.");
     }, WORKER_TIMEOUT_MS);
-  }, [source, endRun, disarmWorkerWatchdog]);
+  }, [source, endRun, disarmPlaygroundWatchdog]);
 
   // Stop (Playground mode). Always ask the sandbox first and trust its
   // answer — `stop()` returns whether IT is the one responsible for
   // `playgroundRequestIdRef.current` (it owns the run, or it just ended one
-  // that had no frame yet). That return value is the only source of truth:
-  // `workerWatchdogRef` used to be read here as a proxy for "still in the
-  // transpile round trip", but the same ref is armed by handleValidate too,
-  // so switching modes mid-run could make a Playground Stop see someone
-  // else's armed watchdog and wrongly assume it owned nothing — disarming
-  // the validation's deadline breaker and emitting a `run_result` for a run
-  // the sandbox was still actually running (which then emits its own
-  // `run_result` when it finishes, orphaning `run_click` 1:2). Only fall back
-  // to ending the run here when the sandbox reports it does not own this
-  // requestId at all — the still-in-transpile case this used to special-case.
+  // that had no frame yet). That return value is the only source of truth.
+  // Only fall back to ending the run here when the sandbox reports it does
+  // not own this requestId at all — the still-in-transpile case.
   // Clearing `playgroundRequestIdRef.current` is what stops the transpile
   // result (or error) that is still in flight from starting — or re-ending —
-  // a run nobody wants anymore; see the guards in attachWorkerHandlers.
+  // a run nobody wants anymore; see the requestId guards in
+  // attachWorkerHandlers. `disarmPlaygroundWatchdog()` here is Playground's
+  // own watchdog only (see #49) — it can no longer strip a concurrent
+  // validation's deadline breaker the way the old shared `workerWatchdogRef`
+  // could.
   const handleStopClick = useCallback(() => {
     const sandboxOwnsIt = sandboxRef.current?.stop(playgroundRequestIdRef.current);
     if (sandboxOwnsIt) return;
-    disarmWorkerWatchdog();
+    disarmPlaygroundWatchdog();
     playgroundRequestIdRef.current = "";
     endRun("stopped", "Execution stopped.", 0);
-  }, [disarmWorkerWatchdog, endRun]);
+  }, [disarmPlaygroundWatchdog, endRun]);
 
   // Validate (Validator mode)
   const handleValidate = useCallback(() => {
@@ -526,14 +550,14 @@ function App() {
       runtime: { status: "pending" },
     });
     appWorker?.postMessage({ type: "validate", source });
-    disarmWorkerWatchdog();
-    workerWatchdogRef.current = window.setTimeout(() => {
+    disarmValidationWatchdog();
+    validationWatchdogRef.current = window.setTimeout(() => {
       endValidationRuntime({
         status: "fail",
         error: "The ABAP engine stopped responding. Try validating again.",
       });
     }, WORKER_TIMEOUT_MS);
-  }, [source, endValidationRuntime, disarmWorkerWatchdog]);
+  }, [source, endValidationRuntime, disarmValidationWatchdog]);
 
   // Mode change
   const handleModeChange = useCallback(

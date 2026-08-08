@@ -49,6 +49,13 @@ function OutputStreamer() {
   // `continuation` tells the next `add` to swallow exactly that one leading
   // empty piece instead of treating it as real content.
   this.continuation = false;
+  // Once the byte cap has tripped, `add` stops buffering/sending content but
+  // must keep `total` honest (CLAUDE.md documents `done`/`error` as reporting
+  // the executor's own *uncapped* total). These two mirror `partial` and
+  // `trailingNewline` above, but track line boundaries in text that is never
+  // pushed to `pending` at all.
+  this.partialAfterCap = "";
+  this.trailingNewlineAfterCap = false;
 }
 OutputStreamer.prototype.clear = function () {
   this.partial = "";
@@ -90,16 +97,29 @@ OutputStreamer.prototype.add = function (text) {
       this.continuation = false;
     }
     for (var i = 0; i < pieces.length; i++) this.push(pieces[i]);
-  } else if (this.continuation) {
-    // The byte cap has already tripped, so the split/push block above (the
-    // only place that consumes `continuation`) is skipped entirely. A
-    // promotion set this flag just before the cap tripped; with nothing left
-    // to consume it, leave it set and the next real `add` after `clear()`
-    // could misinterpret its own first blank piece as this stale
-    // continuation. Not reachable today — once the cap trips, `add` never
-    // sees the promotion path fire again in the same run — but clear it
-    // rather than leave it dangling.
-    this.continuation = false;
+  } else {
+    // The byte cap has already tripped: nothing more is buffered or emitted,
+    // but the program is still running and every line it produces from here
+    // on must still count toward `total`. Mirror the split/pop above without
+    // touching `bytes`, `pending`, or `push()` (which would resurrect display
+    // and MAX_LINES bookkeeping this text must never reach).
+    if (this.continuation) {
+      // The byte cap has already tripped, so the split/push block above (the
+      // only place that otherwise consumes `continuation`) is skipped
+      // entirely. A promotion set this flag just before the cap tripped;
+      // with nothing left to consume it, leave it set and the next real
+      // `add` after `clear()` could misinterpret its own first blank piece
+      // as this stale continuation. Not reachable today — once the cap
+      // trips, `add` never sees the promotion path fire again in the same
+      // run — but clear it rather than leave it dangling.
+      this.continuation = false;
+    }
+    var combinedAfterCap = this.partialAfterCap + text;
+    var afterCapPieces = combinedAfterCap.split("\n");
+    this.partialAfterCap = afterCapPieces.pop();
+    this.trailingNewlineAfterCap =
+      this.partialAfterCap === "" && combinedAfterCap.slice(-1) === "\n";
+    this.total += afterCapPieces.length;
   }
   // The byte cap must not also cap flushing: whatever was already buffered —
   // including the truncation notice above — still has to reach the parent,
@@ -175,6 +195,17 @@ OutputStreamer.prototype.finish = function () {
       this.total++;
     }
     this.partial = "";
+    // Whatever the program produced after the byte cap tripped was never
+    // routed through `push()` above (see `add`), so its last, possibly
+    // unterminated line has to be counted here the same way `partial`/
+    // `trailingNewline` are — just without ever reaching `pending`. A no-op
+    // whenever the cap never tripped: both fields stay at their initial "no
+    // content yet" values for the whole run.
+    if (this.partialAfterCap !== "") {
+      this.total++;
+    } else if (this.trailingNewlineAfterCap) {
+      this.total++;
+    }
   }
   if (this.truncated) {
     this.pending.push(

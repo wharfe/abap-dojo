@@ -82,6 +82,24 @@ vi.mock("./utils/analytics", async (importOriginal) => {
 // Imported after the mocks above so App.tsx picks them up.
 const { default: App } = await import("./App");
 
+/**
+ * The `requestId` App.tsx generated for its most recent "transpile" post —
+ * the real abaplintWorker.ts echoes this back verbatim on both
+ * "transpile-result" and "transpile-error" (see the requestId correlation
+ * fix). Tests that hand-drive `worker.onmessage` need this to build a
+ * response that looks like it actually answers the run currently in flight.
+ */
+function lastTranspileRequestId(worker: InstanceType<typeof FakeWorker>): string {
+  const calls = worker.postMessage.mock.calls as Array<
+    [{ type: string; requestId?: string }]
+  >;
+  const call = [...calls].reverse().find(([msg]) => msg.type === "transpile");
+  if (!call || call[0].requestId === undefined) {
+    throw new Error("no transpile request was posted");
+  }
+  return call[0].requestId;
+}
+
 describe("App — Stop during the transpile round trip", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -134,10 +152,18 @@ describe("App — Stop during the transpile round trip", () => {
     expect(executeMock).not.toHaveBeenCalled();
 
     // The transpile worker answers late, after the user already gave up on
-    // this run. Nothing should start.
+    // this run. Nothing should start. Echoing the run's own requestId here
+    // (rather than omitting it) shows the guard rejects it on
+    // `playgroundRequestIdRef.current` being cleared, not merely on a
+    // requestId mismatch.
+    const abandonedRequestId = lastTranspileRequestId(worker);
     act(() => {
       worker.onmessage?.({
-        data: { type: "transpile-result", js: "console.log(1)" },
+        data: {
+          type: "transpile-result",
+          js: "console.log(1)",
+          requestId: abandonedRequestId,
+        },
       } as MessageEvent);
     });
 
@@ -150,6 +176,120 @@ describe("App — Stop during the transpile round trip", () => {
     // Back to Run, not stuck showing Stop for a run that no longer exists.
     // getByRole throws if the button is not found, which is the assertion.
     screen.getByRole("button", { name: /Run/i });
+  });
+});
+
+describe("App — a stale transpile response from an abandoned run must not affect a later run", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    workerInstances.length = 0;
+    executeMock.mockClear();
+    stopMock.mockReset();
+    trackMock.mockClear();
+    sandboxProps = null;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Gate3 fix (CRITICAL 1): Run A -> Stop while A is still transpiling -> Run
+  // B (fresh requestId) -> A's transpile-result finally arrives. Before the
+  // requestId correlation fix, the guard on "transpile-result" was only
+  // `if (playgroundRequestIdRef.current)` — true again once Run B set it —
+  // so A's JS would execute under B's requestId, and a `transpile-error`
+  // reply from A would incorrectly end B's run. Both must be impossible now
+  // that the response is matched against the requestId App actually sent.
+  it("ignores a stale transpile-result and lets Run B proceed on its own reply", async () => {
+    render(<App />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const worker = workerInstances[0];
+
+    // Run A, then Stop it before the worker answers.
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    const requestIdA = lastTranspileRequestId(worker);
+    fireEvent.click(screen.getByRole("button", { name: /Stop/i }));
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+
+    // Run B — a fresh requestId is now current.
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    const requestIdB = lastTranspileRequestId(worker);
+    expect(requestIdB).not.toBe(requestIdA);
+
+    // A's transpile-result finally lands, carrying A's own (stale) requestId.
+    act(() => {
+      worker.onmessage?.({
+        data: { type: "transpile-result", js: "console.log('A')", requestId: requestIdA },
+      } as MessageEvent);
+    });
+
+    // A's JS must never reach the sandbox — neither as a fresh execution nor
+    // attributed to B.
+    expect(executeMock).not.toHaveBeenCalled();
+    // Still exactly one run_result (A's `stopped`) — B has not resolved yet,
+    // and the stale reply must not have produced a second one for it.
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+
+    // B's own reply now arrives and must be the one that actually executes.
+    act(() => {
+      worker.onmessage?.({
+        data: { type: "transpile-result", js: "console.log('B')", requestId: requestIdB },
+      } as MessageEvent);
+    });
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    expect(executeMock).toHaveBeenCalledWith("console.log('B')", requestIdB);
+  });
+
+  // Same scenario, but A's stale reply is a transpile-error. Before the fix
+  // this called `endRun`, emitting a spurious `run_result` for B (which had
+  // not failed) and, since `endRun` clears nothing about B's own in-flight
+  // request, left B's eventual real transpile-result still trying to execute
+  // — i.e. two `run_result`s for one `run_click`.
+  it("ignores a stale transpile-error and does not end Run B", async () => {
+    render(<App />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const worker = workerInstances[0];
+
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    const requestIdA = lastTranspileRequestId(worker);
+    fireEvent.click(screen.getByRole("button", { name: /Stop/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    const requestIdB = lastTranspileRequestId(worker);
+    trackMock.mockClear();
+
+    // A's transpile-error finally lands.
+    act(() => {
+      worker.onmessage?.({
+        data: {
+          type: "transpile-error",
+          kind: "syntax",
+          message: "boom",
+          requestId: requestIdA,
+        },
+      } as MessageEvent);
+    });
+
+    // Must not have ended B: no run_result from this stale reply.
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(0);
+
+    // B can still finish normally afterwards.
+    act(() => {
+      worker.onmessage?.({
+        data: { type: "transpile-result", js: "console.log('B')", requestId: requestIdB },
+      } as MessageEvent);
+    });
+    expect(executeMock).toHaveBeenCalledWith("console.log('B')", requestIdB);
   });
 });
 
@@ -189,7 +329,11 @@ describe("App — Stop ownership must come from the sandbox, not an inferred tim
     fireEvent.click(screen.getByRole("button", { name: /Run/i }));
     act(() => {
       worker.onmessage?.({
-        data: { type: "transpile-result", js: "js" },
+        data: {
+          type: "transpile-result",
+          js: "js",
+          requestId: lastTranspileRequestId(worker),
+        },
       } as MessageEvent);
     });
     expect(executeMock).toHaveBeenCalledTimes(1);
@@ -292,5 +436,125 @@ describe("App — a terminal event with no requestId must never be routed to an 
     // The idle validation's runtime stage must be untouched — this event was
     // never validation's, so nothing should mark it failed.
     expect(screen.queryByText("Execution stopped.")).toBeNull();
+  });
+});
+
+describe("App — Playground and Validator each own their own watchdog (#49)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    workerInstances.length = 0;
+    executeMock.mockClear();
+    stopMock.mockReset();
+    trackMock.mockClear();
+    sandboxProps = null;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Gate3 fix (IMPORTANT 3): before this fix, `workerWatchdogRef` was a
+  // single ref armed by both handleRun and handleValidate. Starting a
+  // validation, then starting (and completing) a Playground run while the
+  // validation was still awaiting its own worker reply, re-armed the shared
+  // ref for Playground and then disarmed it when Playground finished —
+  // silently stripping the validation's deadlock breaker. If the abaplint
+  // worker then stalled on the validation, `isValidating` never returned to
+  // false. This test proves the validation's watchdog still fires on
+  // schedule even though a whole Playground run started and completed while
+  // it was pending.
+  it("a completed Playground run leaves a concurrent validation's watchdog armed", async () => {
+    render(<App />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const worker = workerInstances[0];
+
+    // Start a validation and leave it pending (no reply yet).
+    fireEvent.click(screen.getByRole("button", { name: /AI Validator/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Validate/i }));
+    expect(worker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "validate" }),
+    );
+
+    // Switch to Playground, run to completion.
+    fireEvent.click(screen.getByRole("button", { name: "Playground" }));
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    const playgroundRequestId = lastTranspileRequestId(worker);
+    act(() => {
+      worker.onmessage?.({
+        data: {
+          type: "transpile-result",
+          js: "js",
+          requestId: playgroundRequestId,
+        },
+      } as MessageEvent);
+    });
+    expect(executeMock).toHaveBeenCalledWith("js", playgroundRequestId);
+    act(() => {
+      sandboxProps!.onDone(playgroundRequestId, 1);
+    });
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+
+    // The validation never got a reply. If Playground's completion had
+    // disarmed the shared ref (the pre-fix bug), this timeout would never
+    // fire and no `validate_result` would ever be tracked.
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+    const validateResultCalls = trackMock.mock.calls.filter(
+      ([name]) => name === "validate_result",
+    );
+    expect(validateResultCalls).toHaveLength(1);
+    expect(validateResultCalls[0][1]).toMatchObject({ outcome: "fail" });
+  });
+
+  // Symmetric case: a validation completing normally must not strip
+  // Playground's watchdog. Before the fix, `endValidationRuntime`'s
+  // `disarmWorkerWatchdog()` would clear the very timer Playground was
+  // relying on to ever end a run whose transpile reply never arrives.
+  it("a completed validation leaves a concurrent Playground run's watchdog armed", async () => {
+    render(<App />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const worker = workerInstances[0];
+
+    // Start a Playground run and leave it pending (no reply yet).
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    expect(worker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "transpile" }),
+    );
+
+    // Switch to Validator and complete a validation via a syntax failure —
+    // the shortest path to `isValidating` going back to false.
+    fireEvent.click(screen.getByRole("button", { name: /AI Validator/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Validate/i }));
+    act(() => {
+      worker.onmessage?.({
+        data: {
+          type: "validate-stage-result",
+          stage: "transpile",
+          result: { status: "fail", error: "syntax error" },
+        },
+      } as MessageEvent);
+    });
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "validate_result"),
+    ).toHaveLength(1);
+
+    // Playground's transpile reply never arrived. If validation's completion
+    // had disarmed the shared ref (the pre-fix bug), this timeout would
+    // never fire and Playground would stay "running" forever.
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+    const runResultCalls = trackMock.mock.calls.filter(
+      ([name]) => name === "run_result",
+    );
+    expect(runResultCalls).toHaveLength(1);
+    expect(runResultCalls[0][1]).toMatchObject({ outcome: "stalled" });
   });
 });

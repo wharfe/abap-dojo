@@ -13,14 +13,22 @@ export interface LintIssue {
 }
 
 // Worker messages
+//
+// `transpile`/`transpile-result`/`transpile-error` carry a `requestId` so App
+// can tell a stale response (from a run the user already abandoned via Stop)
+// apart from the current one — see the guard in App.tsx's `attachWorkerHandlers`.
+// `lint`/`lint-result` deliberately do NOT: lint is debounced and idempotent
+// (the latest result is always the right one to show, regardless of which
+// keystroke triggered it), so correlating it is issue #42's job, not this
+// fix's. Widening `requestId` to every worker message is tracked there.
 export type WorkerRequest =
   | { type: "lint"; source: string }
-  | { type: "transpile"; source: string }
+  | { type: "transpile"; source: string; requestId: string }
   | { type: "validate"; source: string };
 
 export type WorkerResponse =
   | { type: "lint-result"; issues: LintIssue[] }
-  | { type: "transpile-result"; js: string }
+  | { type: "transpile-result"; js: string; requestId: string }
   /**
    * `kind` distinguishes the two very different things that stop a run before
    * any JavaScript exists: `syntax` is the user's own ABAP failing to parse
@@ -44,6 +52,7 @@ export type WorkerResponse =
       type: "transpile-error";
       kind: "syntax" | "transpile";
       message: string;
+      requestId: string;
       line?: number;
       diagnostics?: TranspileDiagnostics;
     }

@@ -46,7 +46,10 @@ async function handleLint(source: string): Promise<WorkerResponse> {
   return { type: "lint-result", issues: [...issues, ...pitfalls] };
 }
 
-async function handleTranspile(source: string): Promise<WorkerResponse> {
+async function handleTranspile(
+  source: string,
+  requestId: string,
+): Promise<WorkerResponse> {
   try {
     const reg = new Registry(abaplintConfig);
     reg.addFile(new MemoryFile("ztest.prog.abap", source));
@@ -62,6 +65,7 @@ async function handleTranspile(source: string): Promise<WorkerResponse> {
         kind: "syntax",
         message: first.getMessage(),
         line: first.getStart().getRow(),
+        requestId,
       };
     }
 
@@ -76,7 +80,7 @@ async function handleTranspile(source: string): Promise<WorkerResponse> {
       output.initializationScript2,
     ].join("\n");
 
-    return { type: "transpile-result", js };
+    return { type: "transpile-result", js, requestId };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return {
@@ -84,6 +88,7 @@ async function handleTranspile(source: string): Promise<WorkerResponse> {
       kind: "transpile",
       message: msg,
       diagnostics: classifyTranspileError(msg),
+      requestId,
     };
   }
 }
@@ -171,7 +176,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   if (request.type === "lint") {
     self.postMessage(await handleLint(request.source));
   } else if (request.type === "transpile") {
-    self.postMessage(await handleTranspile(request.source));
+    self.postMessage(await handleTranspile(request.source, request.requestId));
   } else if (request.type === "validate") {
     await handleValidate(request.source);
   }

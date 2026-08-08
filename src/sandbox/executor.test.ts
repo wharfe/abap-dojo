@@ -209,6 +209,42 @@ describe("OutputStreamer", () => {
       expect(displayed.some((l) => l.includes("output truncated"))).toBe(true);
       expect(displayed.some((l) => l.includes("more"))).toBe(false);
     });
+
+    // Gate3 fix: `add()` used to stop incrementing `total` the instant the
+    // byte cap tripped (an early return before the split/push block), so a
+    // program that produced more than 1 MB and then finished normally
+    // reported an `output_lines` that was neither the true produced count
+    // nor the displayed count. CLAUDE.md documents `done`/`error` as
+    // reporting "the executor's own uncapped `total`" — this held only for
+    // the line-count cap (MAX_LINES), never for the byte cap, until this fix.
+    it("keeps counting produced lines after the byte cap trips, without buffering or emitting them", () => {
+      const { streamer, messages } = makeStreamer();
+      // Land bytes on exactly MAX_OUTPUT_BYTES with a clean trailing "\n" —
+      // no truncation notice gets injected, so every line from here on has
+      // an unambiguous, easy-to-verify count.
+      const exactlyAtCap = "x".repeat(1024 * 1024 - 1) + "\n";
+      streamer.add(exactlyAtCap);
+
+      const REAL_LINES_AFTER_CAP = 500;
+      for (let i = 0; i < REAL_LINES_AFTER_CAP; i++) {
+        streamer.add("past-the-cap-" + i + "\n");
+      }
+      // One more, unterminated line at the very end — must still be counted.
+      streamer.add("trailing-partial");
+      streamer.finish();
+
+      const displayed = displayedLines(messages);
+      // Nothing produced after the cap tripped reaches the display.
+      expect(displayed.some((l) => l.startsWith("past-the-cap-"))).toBe(false);
+      expect(displayed.some((l) => l === "trailing-partial")).toBe(false);
+      expect(displayed).toHaveLength(1);
+      // `total` still accounts for every line the program produced: the
+      // pre-cap line counts as 2 (matching this suite's established
+      // "a trailing newline's split-off empty string still counts" rule —
+      // see the MAX_LINES truncation test above), plus every post-cap line,
+      // plus the trailing unterminated one.
+      expect(streamer.total).toBe(2 + REAL_LINES_AFTER_CAP + 1);
+    });
   });
 
   it("isEmpty() is true initially and again after clear(), matching MemoryConsole", () => {
