@@ -57,8 +57,8 @@ test("an endless loop does not freeze the tab", async ({ page, browserName }) =>
   await typeProgram(page, "REPORT ztest.\nDO.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
-  // The watchdog is 15s at this point in the plan; give it room and keep
-  // checking that the renderer is still answering the whole time.
+  // The watchdog is 15s; give it room and keep checking that the renderer is
+  // still answering the whole time.
   expect(await stayedResponsive(page, 18)).toBe(true);
 });
 
@@ -74,8 +74,13 @@ test("an endless loop still produces a terminal result", async ({ page, browserN
   await typeProgram(page, "REPORT ztest.\nDO.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
-  // The run must end on its own: the Run button becomes usable again.
-  await expect(page.getByRole("button", { name: /Run/i })).toBeEnabled({
+  // The run must end on its own: the Run button becomes usable again. The
+  // button is never given a `disabled` attribute (Toolbar swaps its label
+  // and handler between Run and Stop instead), so `toBeEnabled()` cannot
+  // actually fail on enabled-ness here — `toBeVisible()` states what this
+  // assertion checks: the label flipped back to "Run", which only happens
+  // once the run has ended.
+  await expect(page.getByRole("button", { name: /Run/i })).toBeVisible({
     timeout: 30_000,
   });
   await expect(page.getByText(/endless loop/i)).toBeVisible();

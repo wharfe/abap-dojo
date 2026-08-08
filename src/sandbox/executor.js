@@ -52,9 +52,13 @@ function OutputStreamer() {
 }
 OutputStreamer.prototype.clear = function () {
   this.partial = "";
-  // MemoryConsole treats clear() as "nothing has been written", and isEmpty()
-  // is what WRITE ... NEW-LINE consults to decide whether to prepend a newline.
-  // The old PostMessageConsole forgot this; do not copy that.
+  // MemoryConsole treats clear() as "nothing has been written" for the
+  // purposes of these flags — it does NOT retract lines already flushed to
+  // the parent via `push`/`flush`, which is fine here since `isEmpty()` is
+  // only ever consulted about the current (unflushed) line.
+  // isEmpty() is what WRITE ... NEW-LINE consults to decide whether to
+  // prepend a newline. The old PostMessageConsole forgot this; do not copy
+  // that.
   this.empty = true;
   this.trailingNewline = false;
   this.continuation = false;
@@ -86,6 +90,16 @@ OutputStreamer.prototype.add = function (text) {
       this.continuation = false;
     }
     for (var i = 0; i < pieces.length; i++) this.push(pieces[i]);
+  } else if (this.continuation) {
+    // The byte cap has already tripped, so the split/push block above (the
+    // only place that consumes `continuation`) is skipped entirely. A
+    // promotion set this flag just before the cap tripped; with nothing left
+    // to consume it, leave it set and the next real `add` after `clear()`
+    // could misinterpret its own first blank piece as this stale
+    // continuation. Not reachable today — once the cap trips, `add` never
+    // sees the promotion path fire again in the same run — but clear it
+    // rather than leave it dangling.
+    this.continuation = false;
   }
   // The byte cap must not also cap flushing: whatever was already buffered —
   // including the truncation notice above — still has to reach the parent,
@@ -169,14 +183,17 @@ OutputStreamer.prototype.finish = function () {
   }
   this.flush();
 };
-OutputStreamer.prototype.get = function () {
+// Returns only the buffered, not-yet-terminated tail of the current line —
+// NOT the whole run's output. Nothing in this file calls it (the runtime
+// only ever calls `add` and `isEmpty`); it exists for tests to assert what
+// survives a `clear()`. `getTrimmed` used to exist as a byte-for-byte
+// duplicate of this method under a different name, which read as though it
+// applied some extra trimming — it did not.
+OutputStreamer.prototype.getPendingTail = function () {
   return this.partial;
 };
 OutputStreamer.prototype.isEmpty = function () {
   return this.empty;
-};
-OutputStreamer.prototype.getTrimmed = function () {
-  return this.partial;
 };
 
 self.onmessage = async function (event) {

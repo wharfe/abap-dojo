@@ -12,8 +12,18 @@
   // what it managed to emit before that has to live out here.
   var linesRelayed = 0;
 
-  function toParent(message) {
-    message.requestId = requestId;
+  // `explicitRequestId` lets a caller stamp a reply with an id it just
+  // received on the incoming message, rather than the module-level
+  // `requestId` this frame is currently tracking. Needed for "stop": it can
+  // arrive before "execute" ever has (the parent's watchdog posts "stop" as
+  // soon as the iframe's contentWindow exists, which can be before "onload"
+  // fires on a slow bundle fetch), and at that point `requestId` here is
+  // still `null` — stamping the reply with it would produce
+  // `{requestId: null}`, which the parent's `null === null` check on an idle
+  // validationRequestIdRef could misroute to the wrong caller.
+  function toParent(message, explicitRequestId) {
+    message.requestId =
+      explicitRequestId !== undefined ? explicitRequestId : requestId;
     window.parent.postMessage(message, "*");
   }
 
@@ -33,11 +43,18 @@
       // The worker cannot report anything once terminated, so `linesRelayed`
       // (tallied below as batches come through) is the only count left.
       disposeWorker();
-      toParent({
-        type: "stopped",
-        outputLines: linesRelayed,
-        reason: data.reason,
-      });
+      // Echo the requestId the caller sent on THIS message, not the
+      // module-level `requestId` — a "stop" can arrive before any "execute"
+      // has, in which case that module-level value is still `null`. See
+      // `toParent`'s comment above.
+      toParent(
+        {
+          type: "stopped",
+          outputLines: linesRelayed,
+          reason: data.reason,
+        },
+        data.requestId,
+      );
       return;
     }
 

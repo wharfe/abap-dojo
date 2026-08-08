@@ -320,16 +320,32 @@ function App() {
     };
   }, [attachWorkerHandlers]);
 
-  // Sandbox callbacks — requestId disambiguates playground vs validation
+  // Sandbox callbacks — requestId disambiguates playground vs validation.
+  //
+  // `validationRequestIdRef.current` is `null` whenever no validation is in
+  // flight. A message that somehow arrives with `requestId: null` (the
+  // supervisor used to produce exactly this when a "stop" raced an
+  // "execute" — see supervisor.js) must never match — `null === null` would
+  // silently route a Playground event into the Validator's handlers. Gating
+  // on `validationRequestIdRef.current !== null` first, rather than trusting
+  // `requestId` alone, is what keeps that structurally impossible regardless
+  // of what a future message shape does.
+  const isValidationRequest = useCallback(
+    (requestId: string) =>
+      validationRequestIdRef.current !== null &&
+      requestId === validationRequestIdRef.current,
+    [],
+  );
+
   const handleOutput = useCallback((lines: string[], requestId: string) => {
-    if (requestId === validationRequestIdRef.current) {
+    if (isValidationRequest(requestId)) {
       // Validation only cares whether the runtime stage succeeded, not what it
       // printed.
       return;
     }
     runOutputCountRef.current += lines.length;
     setOutput((prev) => [...prev, ...lines]);
-  }, []);
+  }, [isValidationRequest]);
 
   const handleError = useCallback(
     (
@@ -338,25 +354,25 @@ function App() {
       kind: "runtime" | "load",
       outputLines: number,
     ) => {
-      if (requestId === validationRequestIdRef.current) {
+      if (isValidationRequest(requestId)) {
         endValidationRuntime({ status: "fail", error: message });
         return;
       }
       endRun(kind === "load" ? "load_error" : "runtime_error", message, outputLines);
     },
-    [endRun, endValidationRuntime],
+    [endRun, endValidationRuntime, isValidationRequest],
   );
 
   const handleTimeout = useCallback(
     (requestId: string, outputLines: number) => {
       const message = `Execution stopped after ${EXECUTION_TIMEOUT_SECONDS}s — this usually means an endless loop.`;
-      if (requestId === validationRequestIdRef.current) {
+      if (isValidationRequest(requestId)) {
         endValidationRuntime({ status: "fail", error: message });
         return;
       }
       endRun("timeout", message, outputLines);
     },
-    [endRun, endValidationRuntime],
+    [endRun, endValidationRuntime, isValidationRequest],
   );
 
   /**
@@ -367,13 +383,13 @@ function App() {
   const handleStopped = useCallback(
     (requestId: string, outputLines: number) => {
       const message = "Execution stopped.";
-      if (requestId === validationRequestIdRef.current) {
+      if (isValidationRequest(requestId)) {
         endValidationRuntime({ status: "fail", error: message });
         return;
       }
       endRun("stopped", message, outputLines);
     },
-    [endRun, endValidationRuntime],
+    [endRun, endValidationRuntime, isValidationRequest],
   );
 
   /**
@@ -384,24 +400,24 @@ function App() {
   const handleCancel = useCallback(
     (requestId: string) => {
       const message = "Execution cancelled — another run started.";
-      if (requestId === validationRequestIdRef.current) {
+      if (isValidationRequest(requestId)) {
         endValidationRuntime({ status: "fail", error: message });
         return;
       }
       endRun("cancelled", message);
     },
-    [endRun, endValidationRuntime],
+    [endRun, endValidationRuntime, isValidationRequest],
   );
 
   const handleDone = useCallback(
     (requestId: string, outputLines: number) => {
-      if (requestId === validationRequestIdRef.current) {
+      if (isValidationRequest(requestId)) {
         endValidationRuntime({ status: "pass" });
         return;
       }
       endRun("success", undefined, outputLines);
     },
-    [endRun, endValidationRuntime],
+    [endRun, endValidationRuntime, isValidationRequest],
   );
 
   const handleChange = useCallback((value: string) => {
@@ -472,26 +488,28 @@ function App() {
     }, WORKER_TIMEOUT_MS);
   }, [source, endRun, disarmWorkerWatchdog]);
 
-  // Stop (Playground mode). The sandbox itself guards against a race where
-  // the run already ended (or was superseded) before this reaches it — see
-  // ExecutionSandbox's `stop`.
-  //
-  // `workerWatchdogRef` being armed means the run is still in the abaplint
-  // transpile round trip and has not reached the sandbox yet — there is
-  // nothing for the sandbox to stop. Ending the run here instead of calling
-  // through avoids the alternative, which was a Stop press that silently did
-  // nothing until the 20s worker watchdog eventually rescued the user.
+  // Stop (Playground mode). Always ask the sandbox first and trust its
+  // answer — `stop()` returns whether IT is the one responsible for
+  // `playgroundRequestIdRef.current` (it owns the run, or it just ended one
+  // that had no frame yet). That return value is the only source of truth:
+  // `workerWatchdogRef` used to be read here as a proxy for "still in the
+  // transpile round trip", but the same ref is armed by handleValidate too,
+  // so switching modes mid-run could make a Playground Stop see someone
+  // else's armed watchdog and wrongly assume it owned nothing — disarming
+  // the validation's deadline breaker and emitting a `run_result` for a run
+  // the sandbox was still actually running (which then emits its own
+  // `run_result` when it finishes, orphaning `run_click` 1:2). Only fall back
+  // to ending the run here when the sandbox reports it does not own this
+  // requestId at all — the still-in-transpile case this used to special-case.
   // Clearing `playgroundRequestIdRef.current` is what stops the transpile
   // result (or error) that is still in flight from starting — or re-ending —
   // a run nobody wants anymore; see the guards in attachWorkerHandlers.
   const handleStopClick = useCallback(() => {
-    if (workerWatchdogRef.current !== undefined) {
-      disarmWorkerWatchdog();
-      playgroundRequestIdRef.current = "";
-      endRun("stopped", "Execution stopped.", 0);
-      return;
-    }
-    sandboxRef.current?.stop(playgroundRequestIdRef.current);
+    const sandboxOwnsIt = sandboxRef.current?.stop(playgroundRequestIdRef.current);
+    if (sandboxOwnsIt) return;
+    disarmWorkerWatchdog();
+    playgroundRequestIdRef.current = "";
+    endRun("stopped", "Execution stopped.", 0);
   }, [disarmWorkerWatchdog, endRun]);
 
   // Validate (Validator mode)

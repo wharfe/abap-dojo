@@ -21,10 +21,19 @@ Runs entirely client-side using the abaplint ecosystem (MIT License).
 - `npm run lint` - run ESLint
 - `npm run typecheck` - run TypeScript type checking (`tsc -b --noEmit`)
 - `npm test` - run the Vitest suite once (`npm run test:watch` for watch mode)
+- `npm run test:e2e` - run the Playwright suite (Chromium, Firefox, WebKit). Its
+  `webServer` config runs `npm run build` and serves the production build, so
+  this is also the one command that exercises the real bundle rather than a
+  dev/test double.
 
-CI (`.github/workflows/ci.yml`) runs `lint` + `typecheck` + `test` on every PR and on
-pushes to `main`. The production build is verified separately by the Cloudflare Pages
-preview deployment, which is the only place CSP/`_headers` breakage surfaces.
+CI (`.github/workflows/ci.yml`) runs `lint` + `typecheck` + `test` + `test:e2e`
+on every PR and on pushes to `main`. `test:e2e` is the only suite that can
+catch a threading regression like #28: jsdom has no threads, so Vitest is
+structurally unable to notice a CPU-bound loop blocking a thread it never
+modeled in the first place. The production build itself is still also
+verified separately by the Cloudflare Pages preview deployment, which remains
+the only place CSP/`_headers` breakage surfaces (Playwright's `webServer`
+build is not deployed to Pages, so it does not get Pages' `_headers`).
 
 - `node scripts/encode-share-url.mjs <file.abap>` — produce the `#code=` hash for a
   static page's "try it live" CTA. `--fix` rewrites every CTA under `public/` to
@@ -45,7 +54,17 @@ preview deployment, which is the only place CSP/`_headers` breakage surfaces.
 1. **Serverless** - everything runs in-browser. No backend. User code never leaves the browser
 2. **Web Workers** - abaplint/transpiler run in Web Workers to avoid blocking the UI thread. Use Vite's `?worker` suffix for imports
 3. **No LLM API calls** - AI Validator uses static rule-based analysis only (privacy, offline, reproducibility)
-4. **Sandboxed execution** - transpiled JS runs in a sandboxed iframe. WRITE output returned via postMessage
+4. **Sandboxed execution** - a `sandbox="allow-scripts"` iframe (no
+   `allow-same-origin`, so it has an opaque origin) hosts the execution: that
+   opacity is the actual isolation from the parent's DOM, cookies and
+   localStorage. The iframe itself executes nothing — as of #28 it builds the
+   transpiled JS into a `blob:` Worker and supervises it, so a runaway ABAP
+   loop occupies a thread nobody else needs instead of the iframe's own main
+   thread (which used to be shared with the parent page and froze the whole
+   tab). Removing the iframe would drop the isolation; removing the Worker
+   would bring back the freeze — both parts are load-bearing. WRITE output
+   streams back to the parent via postMessage, batched rather than one message
+   per line (see `src/sandbox/executor.js`)
 
 ## Project Structure
 
@@ -54,13 +73,18 @@ src/
   components/     # React components
   workers/        # Web Worker scripts (lint, transpile, validate)
   rules/          # LLM Pitfall Detector — definitions.ts, detector.ts, matchers/
-  sandbox/        # The @abaplint/runtime bundle inlined into the execution iframe
+  sandbox/        # runtime-bundle.js (the @abaplint/runtime bundle), plus
+                  # executor.js (runs inside the blob: Worker) and
+                  # supervisor.js (runs inside the iframe, relays messages
+                  # between the parent and the Worker) — see #28
   samples/        # Sample ABAP code presets
   types/          # Shared message and validation types
   utils/          # Shared utility functions
   App.tsx         # Mode state, worker wiring, run/validation lifecycle
 scripts/          # Dev tools, not part of the build
 public/           # Copied verbatim — static pages, sitemap, _headers
+e2e/              # Playwright specs, run by `npm run test:e2e` against a
+                  # production build (see Build & Dev Commands)
 ```
 
 Mode logic lives in `App.tsx` rather than a `modes/` directory: both modes share
@@ -231,7 +255,7 @@ date the sandbox iframe ran the transpiled JS directly with `srcdoc`, sharing
 the parent's main thread: a CPU-bound ABAP loop froze the whole tab and the
 watchdog never got a turn to fire — the page died before it could report
 anything. `timeout` from that era therefore does not mean endless loops were
-rare; it means the page usually couldn't tell you about them. As of #41 the
+rare; it means the page usually couldn't tell you about them. As of #28 the
 transpiled JS runs in a Worker inside the frame, so the frame and the parent
 both stay free and the watchdog reliably fires (now at 15s — see
 `EXECUTION_TIMEOUT_MS` in `src/components/ExecutionSandbox.tsx`). A `timeout`
@@ -241,7 +265,7 @@ measurement; do not chart them as one series.
 `output_lines` is the count the sandbox reports in its terminal message
 (`done`, `stopped`, or the timeout path), not the number of `output` messages
 received: display stops at 10,000 lines, so counting messages would report
-every runaway loop as exactly 10,001. Since #41 this count is a real number on
+every runaway loop as exactly 10,001. Since #28 this count is a real number on
 every exit path, including a killed run — before that, a run torn down by the
 watchdog frequently reported nothing because the frame that knew the count was
 already unresponsive. It is not the same kind of number on every path, though:
@@ -280,6 +304,14 @@ GA4 treat a fragment change as a page view.
 - DB operations (SELECT etc.) require in-memory DB simulation in browser.
 - Security headers (CSP, HSTS, etc.) live in `public/_headers` — Cloudflare Pages-specific format. `vite preview` does NOT apply them, so CSP-related breakage only shows in production. Test with Playwright + production build before claiming a deploy is safe.
 - **Cloudflare Pages 308-redirects `/x.html` to `/x`.** The extensionless URL is the only one that serves 200, so it is the one every `rel="canonical"`, `og:url`, `sitemap.xml` entry and internal `href` must use. Declaring the `.html` form told Google the canonical was a redirecting URL, and Search Console duly indexed both forms of the same page as separate URLs. `/docs/index.html` redirects to `/docs/`, so directory pages keep the trailing slash. `vite preview` resolves extensionless URLs to the `.html` file too, so this is verifiable locally — but the redirect itself only exists in production.
+- `src/sandbox/executor.js` is inlined into the execution Worker as raw text
+  (imported via `?raw` in `ExecutionSandbox.tsx` and concatenated with the
+  runtime bundle into a `blob:` URL) — it is never parsed as a module and
+  never runs through Vite/Babel/TS transforms. Adding an `import`/`export` to
+  it, or writing syntax that depends on a bundler transform, does not fail
+  the build: it fails silently at runtime, inside the sandboxed iframe, as an
+  unexplained Run failure with nothing in the console the parent page can
+  see.
 
 ## Git Workflow
 

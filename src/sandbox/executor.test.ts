@@ -25,9 +25,8 @@ type PostedMessage = OutputMessage | DoneMessage | ErrorMessage;
 interface Streamer {
   add(text: string): void;
   clear(): void;
-  get(): string;
   isEmpty(): boolean;
-  getTrimmed(): string;
+  getPendingTail(): string;
   finish(): void;
   total: number;
   emitted: number;
@@ -224,7 +223,6 @@ describe("OutputStreamer", () => {
 
     // A fresh write after clear() must behave like nothing came before it.
     streamer.add("world");
-    expect(streamer.get()).toBe("world");
-    expect(streamer.getTrimmed()).toBe("world");
+    expect(streamer.getPendingTail()).toBe("world");
   });
 });

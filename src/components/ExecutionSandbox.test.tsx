@@ -182,9 +182,10 @@ describe("ExecutionSandbox", () => {
   });
 
   // The executor batches WRITE output into an array (never one postMessage
-  // per line — see ExecutionSandbox's EXECUTION_TIMEOUT_MS comment history,
-  // #28), so the relay must hand that array through unchanged rather than
-  // rejoining or otherwise reshaping it.
+  // per line — see the OutputStreamer comment in executor.js:19-25 and the
+  // SandboxResponse "output" case in types/messages.ts, #28), so the relay
+  // must hand that array through unchanged rather than rejoining or
+  // otherwise reshaping it.
   it("relays a batch of output lines to onOutput as an array", async () => {
     const { handlers, iframe } = await startRun();
 
@@ -336,31 +337,38 @@ describe("ExecutionSandbox", () => {
     expect(handlers.onStopped).not.toHaveBeenCalled();
   });
 
-  it("posts a stop message with reason user to the owning frame", async () => {
+  it("posts a stop message with reason user to the owning frame, and reports ownership", async () => {
     const { ref, iframe } = await startRun();
     const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
 
+    let handled: boolean | undefined;
     act(() => {
-      ref.current!.stop("run-1");
+      handled = ref.current!.stop("run-1");
     });
 
     expect(postMessage).toHaveBeenCalledWith(
       { type: "stop", requestId: "run-1", reason: "user" },
       "*",
     );
+    // App.tsx trusts this return value to decide whether it must end the run
+    // itself — `true` here means the sandbox took responsibility for it.
+    expect(handled).toBe(true);
   });
 
-  it("does not stop a run that no longer owns the sandbox", async () => {
+  it("does not stop a run that no longer owns the sandbox, and reports it does not own it", async () => {
     const { ref, iframe } = await startRun();
     const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
 
     // "run-2" never owned this sandbox (it was never passed to execute), so
-    // this must be a no-op rather than reaching into someone else's run.
+    // this must be a no-op rather than reaching into someone else's run —
+    // and the caller must be told so it can end its own run.
+    let handled: boolean | undefined;
     act(() => {
-      ref.current!.stop("run-2");
+      handled = ref.current!.stop("run-2");
     });
 
     expect(postMessage).not.toHaveBeenCalled();
+    expect(handled).toBe(false);
   });
 
   // Ambiguity resolution #4: the user can click Stop in the instant a run
@@ -383,13 +391,17 @@ describe("ExecutionSandbox", () => {
 
     expect(handlers.onDone).toHaveBeenCalledTimes(1);
 
+    let handled: boolean | undefined;
     expect(() => {
       act(() => {
-        ref.current!.stop("run-1");
+        handled = ref.current!.stop("run-1");
       });
     }).not.toThrow();
 
-    // No second terminal event of any kind for run-1.
+    // No second terminal event of any kind for run-1, and the caller is told
+    // the sandbox does not own this requestId any more (so it must not
+    // assume the sandbox will report anything further for it either).
+    expect(handled).toBe(false);
     expect(handlers.onDone).toHaveBeenCalledTimes(1);
     expect(handlers.onStopped).not.toHaveBeenCalled();
     expect(handlers.onTimeout).not.toHaveBeenCalled();
@@ -419,10 +431,14 @@ describe("ExecutionSandbox", () => {
     // sandbox.
     expect(container.querySelector("iframe")).toBeNull();
 
+    let handled: boolean | undefined;
     act(() => {
-      ref.current!.stop("run-1");
+      handled = ref.current!.stop("run-1");
     });
 
+    // The sandbox took responsibility for run-1 here even though there was
+    // no frame to ask — it ended the run itself, and told the caller so.
+    expect(handled).toBe(true);
     expect(handlers.onStopped).toHaveBeenCalledWith("run-1", 0);
     expect(handlers.onTimeout).not.toHaveBeenCalled();
 

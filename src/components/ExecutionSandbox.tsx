@@ -26,15 +26,39 @@ const EXECUTION_TIMEOUT_MS = 15000;
  *  separately would silently drift the day the timeout value changes. */
 export const EXECUTION_TIMEOUT_SECONDS = EXECUTION_TIMEOUT_MS / 1000;
 
-/** Grace period for the frame to answer a "stop" request before it is torn
- *  down unconditionally. Covers a wedged frame — otherwise a run that cannot
- *  even relay "stopped" would hang the caller forever waiting for one. */
+/**
+ * Grace period for the frame to answer the watchdog's own "stop" request
+ * before it is torn down unconditionally. Only the timeout path in `execute`
+ * arms this — a wedged frame that cannot even relay "stopped" would otherwise
+ * hang that path forever waiting for one.
+ *
+ * A user-initiated `stop()` does NOT arm this timer: it relies on the same
+ * watchdog (armed once, in `execute`) to eventually rescue a wedged frame
+ * instead of starting a second countdown. That means a user's Stop click can
+ * take up to the remainder of EXECUTION_TIMEOUT_MS (plus this grace period)
+ * to resolve if the frame never answers — slower than this constant's name
+ * alone suggests, but it is the existing watchdog doing the rescuing, not a
+ * second one.
+ */
 const STOP_GRACE_MS = 250;
 
 export interface ExecutionSandboxHandle {
   execute: (js: string, requestId: string) => void;
-  /** Ask the running program to stop. No-op if `requestId` no longer owns the sandbox. */
-  stop: (requestId: string) => void;
+  /**
+   * Ask the running program to stop.
+   *
+   * Returns `true` when the sandbox took responsibility for `requestId` —
+   * either it posted the stop request to the frame, or it ended the run
+   * itself because no frame exists yet (still fetching the runtime bundle).
+   * Returns `false` when `requestId` does not currently own the sandbox — it
+   * already ended on its own, it was superseded, or it never reached the
+   * sandbox at all (e.g. still in the caller's own transpile round trip).
+   * Callers must not infer sandbox ownership any other way (from a timer they
+   * also use for something else, for instance): this return value is the only
+   * source of truth, and a caller that gets `false` is responsible for ending
+   * its own run.
+   */
+  stop: (requestId: string) => boolean;
 }
 
 interface ExecutionSandboxProps {
@@ -269,9 +293,12 @@ export const ExecutionSandbox = forwardRef<
    * Ask the frame to stop the run it currently owns. `requestId` guards
    * against a race where the run already ended on its own (or was
    * superseded) by the time the user clicks Stop — in that case
-   * `activeRequestIdRef.current` no longer matches and this is a no-op, so
-   * Stop can never produce a second terminal event for a run that is already
-   * done.
+   * `activeRequestIdRef.current` no longer matches, this returns `false`, and
+   * the caller (never this component) is responsible for ending its own run.
+   * That return value is deliberately the only way a caller learns whether
+   * the sandbox owns a given requestId — inferring it from some other signal
+   * (e.g. a timer the caller also uses for an unrelated deadline) is exactly
+   * the bug this return value replaced.
    *
    * A matching `requestId` does not always mean there is a frame to ask,
    * though: on the very first run of a session (or any run still fetching
@@ -280,21 +307,23 @@ export const ExecutionSandbox = forwardRef<
    * that case here, pressing Stop in that window would do nothing at all
    * until the watchdog eventually rescued the user 15s later — silently
    * inert is worse than a no-op with a reason. There is no frame to answer,
-   * so end the run here instead of asking one to.
+   * so end the run here instead of asking one to, and still return `true`:
+   * the sandbox took responsibility for `requestId` either way.
    */
   const stop = useCallback(
-    (requestId: string) => {
-      if (activeRequestIdRef.current !== requestId) return;
+    (requestId: string): boolean => {
+      if (activeRequestIdRef.current !== requestId) return false;
       const frame = iframeRef.current;
       if (!frame?.contentWindow) {
         finish();
         onStopped(requestId, 0);
-        return;
+        return true;
       }
       frame.contentWindow.postMessage(
         { type: "stop", requestId, reason: "user" },
         "*",
       );
+      return true;
     },
     [finish, onStopped],
   );

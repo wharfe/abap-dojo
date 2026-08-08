@@ -88,7 +88,14 @@ describe("Content-Security-Policy", () => {
     expect(directive("script-src")).toContain("'unsafe-eval'");
   });
 
-  it("allows blob: workers, which is how the abaplint worker loads", () => {
+  it("allows blob: workers, which is how the abaplint worker AND the execution sandbox's blob: Worker load", () => {
+    // Two independent consumers depend on this directive: the abaplint
+    // worker (parses/lints/transpiles) and, since #28, the execution Worker
+    // that ExecutionSandbox builds inside its iframe from a blob: URL to run
+    // the transpiled JS off the main thread. Losing `blob:` here breaks Run
+    // entirely — CSP failures are silent (no test in this toolchain applies
+    // `_headers`), so this assertion is the only thing that would catch it
+    // before production.
     expect(directive("worker-src")).toContain("blob:");
   });
 
