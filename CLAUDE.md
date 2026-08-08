@@ -276,6 +276,12 @@ made it out in a batch before the worker was terminated, which flattens at
 past that point, the reported number is the capped relayed count, not the true
 total produced.
 
+Two `stopped` paths report a hard `0` from the parent rather than any count at
+all: `ExecutionSandbox.stop()`'s no-frame branch, and `handleStopClick`'s
+fallback for a Stop pressed before the sandbox owned the run. Both cover a run
+that had not begun executing, so `0` is the truth — but they are not the
+supervisor's count and will never be nonzero.
+
 **A loop that never writes a real newline inflates `output_lines` to roughly
 `elapsed_ms / 50`, not the number of `WRITE`s it executed.** The execution
 worker (`src/sandbox/executor.js`) flushes output every 500 buffered lines or
@@ -304,14 +310,15 @@ GA4 treat a fragment change as a page view.
 - DB operations (SELECT etc.) require in-memory DB simulation in browser.
 - Security headers (CSP, HSTS, etc.) live in `public/_headers` — Cloudflare Pages-specific format. `vite preview` does NOT apply them, so CSP-related breakage only shows in production. Test with Playwright + production build before claiming a deploy is safe.
 - **Cloudflare Pages 308-redirects `/x.html` to `/x`.** The extensionless URL is the only one that serves 200, so it is the one every `rel="canonical"`, `og:url`, `sitemap.xml` entry and internal `href` must use. Declaring the `.html` form told Google the canonical was a redirecting URL, and Search Console duly indexed both forms of the same page as separate URLs. `/docs/index.html` redirects to `/docs/`, so directory pages keep the trailing slash. `vite preview` resolves extensionless URLs to the `.html` file too, so this is verifiable locally — but the redirect itself only exists in production.
-- `src/sandbox/executor.js` is inlined into the execution Worker as raw text
-  (imported via `?raw` in `ExecutionSandbox.tsx` and concatenated with the
-  runtime bundle into a `blob:` URL) — it is never parsed as a module and
-  never runs through Vite/Babel/TS transforms. Adding an `import`/`export` to
-  it, or writing syntax that depends on a bundler transform, does not fail
-  the build: it fails silently at runtime, inside the sandboxed iframe, as an
-  unexplained Run failure with nothing in the console the parent page can
-  see.
+- **Both files in `src/sandbox/` that are not the runtime bundle are inlined as
+  raw text and never parsed as modules.** `executor.js` goes via `?raw` into
+  the `blob:` URL the execution Worker is built from (concatenated after the
+  runtime bundle); `supervisor.js` goes via `?raw` into an inline `<script>` in
+  the iframe's `srcdoc`. Neither runs through Vite/Babel/TS transforms. Adding
+  an `import`/`export` to either, or writing syntax that depends on a bundler
+  transform, does not fail the build: it fails silently at runtime inside the
+  sandboxed iframe, as an unexplained Run failure with nothing in the console
+  the parent page can see.
 
 ## Git Workflow
 
