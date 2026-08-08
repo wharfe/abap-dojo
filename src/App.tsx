@@ -87,6 +87,9 @@ function App() {
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
   const [output, setOutput] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Separate from `error`: the user pressing Stop is their own choice, not a
+  // failure, and OutputPanel must not paint it red the way it paints `error`.
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [activeTab, setActiveTab] = useState<OutputTab>("output");
 
@@ -144,7 +147,17 @@ function App() {
       diagnostics?: TranspileDiagnostics,
     ) => {
       disarmWorkerWatchdog();
-      if (message !== undefined) setError(message);
+      if (message !== undefined) {
+        // `stopped` is the user's own choice, not a failure — keep it out of
+        // the `error` slot OutputPanel renders in red.
+        if (outcome === "stopped") {
+          setStatusMessage(message);
+          setError(null);
+        } else {
+          setError(message);
+          setStatusMessage(null);
+        }
+      }
       setIsRunning(false);
       track("run_result", {
         outcome,
@@ -206,23 +219,35 @@ function App() {
       if (data.type === "lint-result") {
         setLintIssues(data.issues);
       } else if (data.type === "transpile-result") {
-        // The sandbox owns the deadline from here on.
-        disarmWorkerWatchdog();
-        sandboxRef.current?.execute(data.js, playgroundRequestIdRef.current);
+        // A Stop pressed while this was still in flight abandons the run and
+        // clears playgroundRequestIdRef.current (see handleStopClick) —
+        // without this guard, a result that arrives after that would still
+        // reach the sandbox and start an execution nobody asked for.
+        if (playgroundRequestIdRef.current) {
+          // The sandbox owns the deadline from here on.
+          disarmWorkerWatchdog();
+          sandboxRef.current?.execute(data.js, playgroundRequestIdRef.current);
+        }
       } else if (data.type === "transpile-error") {
-        const isSyntax = data.kind === "syntax";
-        const label = isSyntax ? "Syntax error" : "Transpile error";
-        endRun(
-          isSyntax ? "syntax_error" : "transpile_error",
-          data.line
-            ? `${label} (L${data.line}): ${data.message}`
-            : `${label}: ${data.message}`,
-          undefined,
-          // "set on no other outcome" is the documented invariant, so enforce it
-          // here rather than trusting the worker to keep omitting it: the field
-          // is optional on a union member that covers both kinds.
-          isSyntax ? undefined : data.diagnostics,
-        );
+        // Same guard as transpile-result: a Stop pressed during the round
+        // trip already ended the run with its own run_result, so a
+        // transpile-error that lands afterwards must not end it a second
+        // time.
+        if (playgroundRequestIdRef.current) {
+          const isSyntax = data.kind === "syntax";
+          const label = isSyntax ? "Syntax error" : "Transpile error";
+          endRun(
+            isSyntax ? "syntax_error" : "transpile_error",
+            data.line
+              ? `${label} (L${data.line}): ${data.message}`
+              : `${label}: ${data.message}`,
+            undefined,
+            // "set on no other outcome" is the documented invariant, so enforce it
+            // here rather than trusting the worker to keep omitting it: the field
+            // is optional on a union member that covers both kinds.
+            isSyntax ? undefined : data.diagnostics,
+          );
+        }
       }
 
       // Validation messages
@@ -431,6 +456,7 @@ function App() {
   const handleRun = useCallback(() => {
     setOutput([]);
     setError(null);
+    setStatusMessage(null);
     setIsRunning(true);
     setActiveTab("output");
     playgroundRequestIdRef.current = crypto.randomUUID();
@@ -449,9 +475,24 @@ function App() {
   // Stop (Playground mode). The sandbox itself guards against a race where
   // the run already ended (or was superseded) before this reaches it — see
   // ExecutionSandbox's `stop`.
+  //
+  // `workerWatchdogRef` being armed means the run is still in the abaplint
+  // transpile round trip and has not reached the sandbox yet — there is
+  // nothing for the sandbox to stop. Ending the run here instead of calling
+  // through avoids the alternative, which was a Stop press that silently did
+  // nothing until the 20s worker watchdog eventually rescued the user.
+  // Clearing `playgroundRequestIdRef.current` is what stops the transpile
+  // result (or error) that is still in flight from starting — or re-ending —
+  // a run nobody wants anymore; see the guards in attachWorkerHandlers.
   const handleStopClick = useCallback(() => {
+    if (workerWatchdogRef.current !== undefined) {
+      disarmWorkerWatchdog();
+      playgroundRequestIdRef.current = "";
+      endRun("stopped", "Execution stopped.", 0);
+      return;
+    }
     sandboxRef.current?.stop(playgroundRequestIdRef.current);
-  }, []);
+  }, [disarmWorkerWatchdog, endRun]);
 
   // Validate (Validator mode)
   const handleValidate = useCallback(() => {
@@ -576,6 +617,7 @@ function App() {
             <OutputPanel
               output={output}
               error={error}
+              statusMessage={statusMessage}
               lintIssues={lintIssues}
               isRunning={isRunning}
               activeTab={activeTab}

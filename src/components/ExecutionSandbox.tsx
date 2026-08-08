@@ -175,8 +175,9 @@ export const ExecutionSandbox = forwardRef<
       // Arm the watchdog BEFORE awaiting the bundle. A fetch that rejects or
       // never settles is the one case where no iframe is ever created, so a
       // watchdog armed after the await could not fire at all. The cost is that
-      // the 5s budget covers the fetch too, which only matters on the very
-      // first run of a session (the bundle is same-origin and cached after).
+      // the EXECUTION_TIMEOUT_MS budget covers the fetch too, which only
+      // matters on the very first run of a session (the bundle is
+      // same-origin and cached after).
       timeoutRef.current = window.setTimeout(() => {
         // Ask the frame to stop first: it knows how many lines went past, and
         // that number is the difference between "timed out, here is what you
@@ -271,16 +272,32 @@ export const ExecutionSandbox = forwardRef<
    * `activeRequestIdRef.current` no longer matches and this is a no-op, so
    * Stop can never produce a second terminal event for a run that is already
    * done.
+   *
+   * A matching `requestId` does not always mean there is a frame to ask,
+   * though: on the very first run of a session (or any run still fetching
+   * the bundle) `execute` has armed the watchdog and claimed
+   * `activeRequestIdRef` but has not created an iframe yet. Without handling
+   * that case here, pressing Stop in that window would do nothing at all
+   * until the watchdog eventually rescued the user 15s later — silently
+   * inert is worse than a no-op with a reason. There is no frame to answer,
+   * so end the run here instead of asking one to.
    */
-  const stop = useCallback((requestId: string) => {
-    if (activeRequestIdRef.current !== requestId) return;
-    const frame = iframeRef.current;
-    if (!frame?.contentWindow) return;
-    frame.contentWindow.postMessage(
-      { type: "stop", requestId, reason: "user" },
-      "*",
-    );
-  }, []);
+  const stop = useCallback(
+    (requestId: string) => {
+      if (activeRequestIdRef.current !== requestId) return;
+      const frame = iframeRef.current;
+      if (!frame?.contentWindow) {
+        finish();
+        onStopped(requestId, 0);
+        return;
+      }
+      frame.contentWindow.postMessage(
+        { type: "stop", requestId, reason: "user" },
+        "*",
+      );
+    },
+    [finish, onStopped],
+  );
 
   useImperativeHandle(ref, () => ({ execute, stop }), [execute, stop]);
 

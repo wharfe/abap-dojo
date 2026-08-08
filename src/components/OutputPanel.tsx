@@ -5,6 +5,12 @@ type Tab = "output" | "lint";
 interface OutputPanelProps {
   output: string[];
   error: string | null;
+  /**
+   * Non-error status text, e.g. "Execution stopped." after the user presses
+   * Stop. Kept separate from `error` so a deliberate user choice is not
+   * painted red the way an actual failure is.
+   */
+  statusMessage: string | null;
   lintIssues: LintIssue[];
   isRunning: boolean;
   activeTab: Tab;
@@ -26,6 +32,7 @@ const SEVERITY_ICONS: Record<string, string> = {
 export function OutputPanel({
   output,
   error,
+  statusMessage,
   lintIssues,
   isRunning,
   activeTab,
@@ -64,6 +71,9 @@ export function OutputPanel({
             {isRunning && (
               <p className="text-gray-400">Running...</p>
             )}
+            {statusMessage && (
+              <p className="text-gray-400 whitespace-pre-wrap">{statusMessage}</p>
+            )}
             {error && (
               <p className="text-red-400 whitespace-pre-wrap">{error}</p>
             )}
@@ -76,7 +86,7 @@ export function OutputPanel({
                 {line}
               </p>
             ))}
-            {!isRunning && !error && output.length === 0 && (
+            {!isRunning && !error && !statusMessage && output.length === 0 && (
               <p className="text-gray-500">
                 Click Run to execute your ABAP code.
               </p>

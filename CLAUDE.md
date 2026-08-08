@@ -244,7 +244,13 @@ received: display stops at 10,000 lines, so counting messages would report
 every runaway loop as exactly 10,001. Since #41 this count is a real number on
 every exit path, including a killed run — before that, a run torn down by the
 watchdog frequently reported nothing because the frame that knew the count was
-already unresponsive.
+already unresponsive. It is not the same kind of number on every path, though:
+`done`/`error` report the executor's own uncapped `total`, while `stopped` and
+the timeout path report the supervisor's `linesRelayed` — only what actually
+made it out in a batch before the worker was terminated, which flattens at
+`MAX_LINES` (10,000) the same way the display does. For a runaway loop killed
+past that point, the reported number is the capped relayed count, not the true
+total produced.
 
 **A loop that never writes a real newline inflates `output_lines` to roughly
 `elapsed_ms / 50`, not the number of `WRITE`s it executed.** The execution
@@ -254,9 +260,9 @@ worker (`src/sandbox/executor.js`) flushes output every 500 buffered lines or
 the 50ms timer is the only thing that ever turns its output into a "line" —
 each flush interval that elapses counts as one more. This matches what the UI
 displays and what the supervisor's own relayed-line count would say, so it is
-not a bug, but do not read a 5-second `timeout` with `output_lines: 100` as
-"100 `WRITE` statements ran" — it more likely means one `WRITE` ran continuously
-for 5 seconds with no line break.
+not a bug, but do not read a 15-second `timeout` with `output_lines: 300` as
+"300 `WRITE` statements ran" — it more likely means one `WRITE` ran continuously
+for 15 seconds with no line break.
 
 Also keep Enhanced Measurement's **browser-history / hash-routing** options OFF
 for this property. The URL hash carries user source, and those options can make

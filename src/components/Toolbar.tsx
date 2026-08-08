@@ -34,7 +34,13 @@ export function Toolbar({
               : "bg-green-600 hover:bg-green-500"
           }`}
         >
-          {isRunning ? "\u25A0 Stop" : "\u25B6 Run"}
+          {/* The label swaps in place ("\u25B6 Run" <-> "\u25A0 Stop") with no other
+              visual cue that anything changed. aria-live announces that swap
+              to a screen-reader user holding focus on the button, who
+              otherwise gets no feedback at all when a run starts or ends. */}
+          <span aria-live="polite">
+            {isRunning ? "\u25A0 Stop" : "\u25B6 Run"}
+          </span>
         </button>
       )}
       {mode === "validator" && (

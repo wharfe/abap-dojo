@@ -256,19 +256,24 @@ describe("sanitizeParams", () => {
 
   // Every exit path in App.tsx must survive the allowlist, or the run it
   // reports vanishes and reads as a user drop-off instead.
+  //
+  // ALL_RUN_OUTCOMES is a Record<RunOutcome, true> rather than a plain array
+  // so this stays exhaustive at compile time: a tenth outcome added to
+  // RunOutcome but not here is a missing-property type error, not a test that
+  // silently stops covering it (the failure mode this test exists to catch).
   it("accepts every declared run outcome", () => {
-    const outcomes: RunOutcome[] = [
-      "success",
-      "syntax_error",
-      "transpile_error",
-      "runtime_error",
-      "timeout",
-      "stalled",
-      "cancelled",
-      "stopped",
-      "load_error",
-    ];
-    for (const outcome of outcomes) {
+    const ALL_RUN_OUTCOMES: Record<RunOutcome, true> = {
+      success: true,
+      syntax_error: true,
+      transpile_error: true,
+      runtime_error: true,
+      timeout: true,
+      stalled: true,
+      cancelled: true,
+      stopped: true,
+      load_error: true,
+    };
+    for (const outcome of Object.keys(ALL_RUN_OUTCOMES) as RunOutcome[]) {
       expect(sanitizeParams("run_result", { outcome, duration_ms: 1 })).toEqual({
         outcome,
         duration_ms: 1,

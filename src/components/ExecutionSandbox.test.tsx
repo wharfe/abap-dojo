@@ -395,4 +395,81 @@ describe("ExecutionSandbox", () => {
     expect(handlers.onTimeout).not.toHaveBeenCalled();
     expect(handlers.onError).not.toHaveBeenCalled();
   });
+
+  // Review fix: `requestId` matching `activeRequestIdRef` does not mean there
+  // is a frame to ask. On the very first run of a session (or any run still
+  // fetching the bundle), `execute` has already claimed the requestId but has
+  // not created an iframe yet. Before this fix, Stop pressed in that window
+  // did nothing at all until the watchdog eventually rescued the user 15s
+  // later — pressable but silently inert, the worst version of "not working".
+  it("ends the run itself when Stop is pressed before a frame exists", async () => {
+    let resolveBundle!: (bundle: string) => void;
+    getRuntimeBundle.mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        resolveBundle = resolve;
+      }),
+    );
+    const { ref, handlers, container } = setup();
+
+    act(() => {
+      ref.current!.execute("js", "run-1");
+    });
+
+    // Still fetching: no iframe yet, but the requestId already owns the
+    // sandbox.
+    expect(container.querySelector("iframe")).toBeNull();
+
+    act(() => {
+      ref.current!.stop("run-1");
+    });
+
+    expect(handlers.onStopped).toHaveBeenCalledWith("run-1", 0);
+    expect(handlers.onTimeout).not.toHaveBeenCalled();
+
+    // The bundle arriving afterwards must not resurrect the abandoned run:
+    // finish() already cleared activeRequestIdRef, so execute()'s own
+    // post-await ownership check bails out before an iframe is ever created.
+    await act(async () => {
+      resolveBundle("/* runtime */");
+    });
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(handlers.onStopped).toHaveBeenCalledTimes(1);
+    expect(handlers.onError).not.toHaveBeenCalled();
+  });
+
+  // Pins the invariant the reviewer verified by reading finish()/cleanup():
+  // the watchdog firing and the user clicking Stop in the same window must
+  // still produce exactly one terminal event, not two. Once the watchdog's
+  // own stop message is posted, cleanup() only runs once — from whichever of
+  // the watchdog's grace-period fallback or a real reply gets there first —
+  // and that removes the message listener before a second one could land.
+  it("produces exactly one terminal event when the user clicks Stop while the watchdog's own stop is in flight", async () => {
+    vi.useFakeTimers();
+    const { ref, handlers } = setup();
+
+    await act(async () => {
+      ref.current!.execute("js", "run-1");
+    });
+
+    // Watchdog fires: posts stop/timeout to the (unresponsive, in this test)
+    // frame and arms its own grace-period fallback.
+    act(() => {
+      vi.advanceTimersByTime(EXECUTION_TIMEOUT_MS);
+    });
+
+    // The user presses Stop in the same window, before the grace period
+    // ends. The frame never replies to either message in this test, so only
+    // the watchdog's own fallback can end the run.
+    act(() => {
+      ref.current!.stop("run-1");
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+
+    expect(handlers.onTimeout).toHaveBeenCalledTimes(1);
+    expect(handlers.onTimeout).toHaveBeenCalledWith("run-1", 0);
+    expect(handlers.onStopped).not.toHaveBeenCalled();
+  });
 });
