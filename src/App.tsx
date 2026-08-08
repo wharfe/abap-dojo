@@ -295,13 +295,14 @@ function App() {
   }, [attachWorkerHandlers]);
 
   // Sandbox callbacks — requestId disambiguates playground vs validation
-  const handleOutput = useCallback((text: string, requestId: string) => {
+  const handleOutput = useCallback((lines: string[], requestId: string) => {
     if (requestId === validationRequestIdRef.current) {
-      // Validation runtime output — we only care about success/failure, not output
+      // Validation only cares whether the runtime stage succeeded, not what it
+      // printed.
       return;
     }
-    runOutputCountRef.current += 1;
-    setOutput((prev) => [...prev, text]);
+    runOutputCountRef.current += lines.length;
+    setOutput((prev) => [...prev, ...lines]);
   }, []);
 
   const handleError = useCallback(

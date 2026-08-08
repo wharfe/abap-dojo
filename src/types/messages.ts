@@ -54,11 +54,13 @@ export type WorkerResponse =
 export type SandboxRequest = { type: "execute"; js: string; requestId: string };
 
 export type SandboxResponse =
-  | { type: "output"; text: string; requestId: string }
-  | { type: "error"; message: string; requestId: string }
+  /** A flush of WRITE output. Batched, never one message per line: 5000 single
+   *  postMessages starved the iframe's own timers down to a single tick. */
+  | { type: "output"; lines: string[]; requestId: string }
+  | { type: "error"; message: string; requestId: string; fatal?: boolean }
   /**
    * `outputLines` is the number of lines the run actually produced, which is
-   * not the number of "output" messages that preceded this one: the sandbox
-   * stops posting after MAX_LINES and sends a single truncation notice instead.
+   * not the number of lines we sent: display stops at MAX_LINES and a runaway
+   * loop would otherwise report exactly MAX_LINES + 1 every time.
    */
   | { type: "done"; requestId: string; outputLines: number };

@@ -1,17 +1,18 @@
 import { useRef, useCallback, useImperativeHandle, forwardRef } from "react";
 import type { SandboxResponse } from "../types/messages";
 import { getRuntimeBundle } from "../utils/runtimeBundle";
+import { prepareTranspiledJs } from "../utils/prepareTranspiledJs";
 import runtimeBundleUrl from "../sandbox/runtime-bundle.js?url";
+import executorSource from "../sandbox/executor.js?raw";
+import supervisorSource from "../sandbox/supervisor.js?raw";
 
 /**
  * Deadline for a run, enforced from the parent page.
  *
- * KNOWN LIMIT (#28): this cannot interrupt a CPU-bound loop. A srcdoc iframe
- * shares the parent's main thread, so `DO. ENDDO.` blocks the whole tab and
- * this timer never gets a turn to fire. It only rescues runs that yield.
- * Fixing that means running the transpiled JS in a Worker *inside* the iframe,
- * which keeps the opaque origin while freeing the thread — until then, expect
- * the `timeout` outcome to be rare for reasons that are not good news.
+ * This used to be decorative: the sandbox ran on the parent's main thread, so a
+ * CPU-bound loop blocked the timer that was supposed to rescue it (#28). The
+ * transpiled JS now runs in a Worker inside the frame, so the frame and the
+ * parent both stay free and this timer fires when it should.
  */
 const EXECUTION_TIMEOUT_MS = 5000;
 
@@ -20,7 +21,7 @@ export interface ExecutionSandboxHandle {
 }
 
 interface ExecutionSandboxProps {
-  onOutput: (text: string, requestId: string) => void;
+  onOutput: (lines: string[], requestId: string) => void;
   /**
    * `kind` separates "the ABAP code threw" from "we could not load the runtime
    * to run it at all" — the second is our failure, not the user's, and the two
@@ -99,10 +100,10 @@ export const ExecutionSandbox = forwardRef<
 
       const data = event.data;
       if (data.type === "output") {
-        onOutput(data.text, data.requestId);
+        onOutput(data.lines, data.requestId);
       } else if (data.type === "error") {
         finish();
-        onError(data.message, data.requestId, "runtime");
+        onError(data.message, data.requestId, data.fatal ? "load" : "runtime");
       } else if (data.type === "done") {
         finish();
         onDone(data.requestId, data.outputLines);
@@ -173,7 +174,7 @@ export const ExecutionSandbox = forwardRef<
         // Append iframe and wait for load, then send execute message
         iframe.onload = () => {
           iframe.contentWindow?.postMessage(
-            { type: "execute", js, requestId },
+            { type: "execute", js: prepareTranspiledJs(js), requestId },
             "*",
           );
         };
@@ -198,121 +199,19 @@ export const ExecutionSandbox = forwardRef<
 });
 
 function buildSandboxHtml(runtimeBundle: string): string {
-  // The sandbox HTML runs inside an iframe with sandbox="allow-scripts"
-  // (no allow-same-origin). It cannot access the parent page's DOM,
-  // cookies, localStorage, or origin.
+  // The iframe is sandbox="allow-scripts" with no allow-same-origin, so it has
+  // an opaque origin: no access to the parent's DOM, cookies, localStorage.
+  // That isolation is why the iframe stays even though it no longer executes
+  // anything — a bare Worker would run on our own origin.
   //
-  // The @abaplint/runtime is fully inlined. We create an ABAP instance
-  // with a custom console that sends WRITE output via postMessage.
-  //
-  // Transpiled ABAP code calls abap.statements.write(...) which internally
-  // calls context.console.add(text). Our custom console forwards each
-  // add() call to the parent window.
-  //
-  // The transpiled JS init scripts contain ES module import statements
-  // that we strip since the runtime is provided globally.
+  // The executor source is handed to the frame as a string rather than a
+  // <script>, because the frame's job is to turn it into a blob: Worker. The
+  // runtime bundle is concatenated ahead of it so the worker has
+  // `abaplintRuntime` as a global without any import.
+  const workerSource = `${runtimeBundle}\n${executorSource}`;
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head><body>
-<script>
-// Inline @abaplint/runtime bundle (IIFE -> abaplintRuntime global)
-${runtimeBundle}
-</script>
-<script>
-// Sandbox execution context for transpiled ABAP-to-JS code.
-// iframe sandbox="allow-scripts" only (no allow-same-origin) provides isolation.
-
-// Custom console that captures WRITE output and sends it to the parent.
-// Output is capped at MAX_OUTPUT_BYTES to defend against runaway WRITE loops.
-var MAX_OUTPUT_BYTES = 1024 * 1024;
-var PostMessageConsole = (function() {
-  function PostMessageConsole() {
-    this.data = "";
-    this.empty = true;
-  }
-  PostMessageConsole.prototype.clear = function() {
-    this.data = "";
-  };
-  PostMessageConsole.prototype.add = function(text) {
-    if (this.data.length >= MAX_OUTPUT_BYTES) return;
-    var remaining = MAX_OUTPUT_BYTES - this.data.length;
-    if (text.length > remaining) {
-      this.data = this.data + text.slice(0, remaining) + "\\n[output truncated]";
-    } else {
-      this.data = this.data + text;
-    }
-    this.empty = false;
-  };
-  PostMessageConsole.prototype.get = function() {
-    return this.data;
-  };
-  PostMessageConsole.prototype.isEmpty = function() {
-    return this.empty;
-  };
-  PostMessageConsole.prototype.getTrimmed = function() {
-    return this.data.split("\\n").map(function(a) { return a.trimEnd(); }).join("\\n");
-  };
-  return PostMessageConsole;
-})();
-
-window.addEventListener("message", async function(event) {
-  // Only accept the single execute message from our parent.
-  if (event.source !== window.parent) return;
-  if (!event.data || event.data.type !== "execute") return;
-  if (typeof event.data.js !== "string" || typeof event.data.requestId !== "string") return;
-  var requestId = event.data.requestId;
-  try {
-    // Create runtime with custom console for WRITE capture
-    var customConsole = new PostMessageConsole();
-    var abap = new abaplintRuntime.ABAP({ console: customConsole });
-
-    // Strip ES module import/export statements from transpiled code.
-    // The init scripts contain lines like:
-    //   import runtime from "@abaplint/runtime";
-    //   import "./_top.mjs";
-    //   export async function initializeABAP() {
-    // We replace imports with nothing and exports with plain declarations.
-    var js = event.data.js;
-    js = js.replace(/^import\\s+.*$/gm, "");
-    js = js.replace(/^export\\s+/gm, "");
-
-    // The @abaplint/runtime internally references globalThis.abap in methods
-    // like append, loop, etc. (e.g., abap.builtin.sy.get().tabix.set(...)).
-    // We must set globalThis.abap BEFORE the transpiled code runs, and remove
-    // the init script's own ABAP() construction to avoid overwriting our
-    // custom-console instance.
-    js = js.replace(/globalThis\\.abap\\s*=\\s*new\\s+runtime\\.ABAP\\(\\);?/g, "");
-    js = "globalThis.abap = abap;\\n" + js;
-
-    // Execute the transpiled code with abap available in scope
-    var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-    var fn = new AsyncFunction("abap", js);
-    await fn(abap);
-
-    // After execution, send all captured output. Line count is capped to
-    // avoid flooding the parent with postMessages from pathological loops.
-    var output = customConsole.get();
-    var totalLines = 0;
-    if (output) {
-      var lines = output.split("\\n");
-      var MAX_LINES = 10000;
-      totalLines = lines.length;
-      var emitCount = totalLines > MAX_LINES ? MAX_LINES : totalLines;
-      for (var i = 0; i < emitCount; i++) {
-        if (lines[i] !== "" || i < emitCount - 1) {
-          window.parent.postMessage({ type: "output", text: lines[i], requestId: requestId }, "*");
-        }
-      }
-      if (totalLines > MAX_LINES) {
-        window.parent.postMessage({ type: "output", text: "[output truncated: " + (totalLines - MAX_LINES) + " more lines]", requestId: requestId }, "*");
-      }
-    }
-
-    // totalLines is what the run produced, not what we posted: display is
-    // capped at MAX_LINES but the measurement must not saturate with it.
-    window.parent.postMessage({ type: "done", requestId: requestId, outputLines: totalLines }, "*");
-  } catch (e) {
-    window.parent.postMessage({ type: "error", message: e.message || String(e), requestId: requestId }, "*");
-  }
-});
-</script></body></html>`;
+<script>self.__executorSource = ${JSON.stringify(workerSource)};</script>
+<script>${supervisorSource}</script>
+</body></html>`;
 }

@@ -31,4 +31,8 @@ dist-ssr
 
 # Git worktrees
 .worktrees/
+
+# Playwright
+test-results/
+playwright-report/
 .superpowers/
