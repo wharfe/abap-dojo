@@ -57,9 +57,9 @@ test("an endless loop does not freeze the tab", async ({ page, browserName }) =>
   await typeProgram(page, "REPORT ztest.\nDO.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
-  // The watchdog is 5s at this point in the plan; give it room and keep
+  // The watchdog is 15s at this point in the plan; give it room and keep
   // checking that the renderer is still answering the whole time.
-  expect(await stayedResponsive(page, 8)).toBe(true);
+  expect(await stayedResponsive(page, 18)).toBe(true);
 });
 
 test("an endless loop still produces a terminal result", async ({ page, browserName }) => {
@@ -78,7 +78,7 @@ test("an endless loop still produces a terminal result", async ({ page, browserN
   await expect(page.getByRole("button", { name: /Run/i })).toBeEnabled({
     timeout: 30_000,
   });
-  await expect(page.getByText(/timeout/i)).toBeVisible();
+  await expect(page.getByText(/endless loop/i)).toBeVisible();
 });
 
 test("an ordinary program still runs and prints", async ({ page }) => {
@@ -110,4 +110,40 @@ test("output written before a timeout is still shown", async ({ page, browserNam
   await expect(
     page.getByTestId("output-line").filter({ hasText: "tick" }).first(),
   ).toBeVisible({ timeout: 10_000 });
+});
+
+test("the user can stop an endless loop immediately", async ({
+  page,
+  browserName,
+}) => {
+  // See #47: the transpile worker itself stalls on WebKit for an endless-loop
+  // program, well before the execution sandbox (and its Stop button) this
+  // test exercises. Same pre-existing, unrelated bug as the other skipped
+  // cases above.
+  test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
+
+  await page.goto("/");
+  await typeProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
+  await page.getByRole("button", { name: /Run/i }).click();
+
+  // Wait for at least one output flush before stopping, so this test proves
+  // "stop while running" rather than racing the very first flush interval
+  // (the executor batches output every 500 lines or 50ms — see executor.js).
+  const tickLine = page
+    .getByTestId("output-line")
+    .filter({ hasText: "tick" })
+    .first();
+  await expect(tickLine).toBeVisible({ timeout: 10_000 });
+
+  const stop = page.getByRole("button", { name: /Stop/i });
+  await expect(stop).toBeVisible();
+  await stop.click();
+
+  // Back to Run well before the 15s watchdog would have done it anyway.
+  await expect(page.getByRole("button", { name: /Run/i })).toBeVisible({
+    timeout: 5_000,
+  });
+  // Output already visible above proves the program was actually running,
+  // not merely displaying its own source.
+  await expect(tickLine).toBeVisible();
 });

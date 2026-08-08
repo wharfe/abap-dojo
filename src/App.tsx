@@ -324,7 +324,7 @@ function App() {
 
   const handleTimeout = useCallback(
     (requestId: string, outputLines: number) => {
-      const message = `Execution timeout (${EXECUTION_TIMEOUT_SECONDS}s)`;
+      const message = `Execution stopped after ${EXECUTION_TIMEOUT_SECONDS}s — this usually means an endless loop.`;
       if (requestId === validationRequestIdRef.current) {
         endValidationRuntime({ status: "fail", error: message });
         return;
@@ -335,9 +335,9 @@ function App() {
   );
 
   /**
-   * The run was stopped by explicit request rather than the watchdog. Nothing
-   * can trigger this yet — the Stop button is a later task — but the sandbox
-   * requires a handler to be wired regardless.
+   * The run was stopped by explicit request (the Stop button), not the
+   * watchdog and not the other mode taking the sandbox away — `stopped` is
+   * its own outcome precisely so it does not get folded into `cancelled`.
    */
   const handleStopped = useCallback(
     (requestId: string, outputLines: number) => {
@@ -346,7 +346,7 @@ function App() {
         endValidationRuntime({ status: "fail", error: message });
         return;
       }
-      endRun("cancelled", message, outputLines);
+      endRun("stopped", message, outputLines);
     },
     [endRun, endValidationRuntime],
   );
@@ -445,6 +445,13 @@ function App() {
       endRun("stalled", "The ABAP engine stopped responding. Try running again.");
     }, WORKER_TIMEOUT_MS);
   }, [source, endRun, disarmWorkerWatchdog]);
+
+  // Stop (Playground mode). The sandbox itself guards against a race where
+  // the run already ended (or was superseded) before this reaches it — see
+  // ExecutionSandbox's `stop`.
+  const handleStopClick = useCallback(() => {
+    sandboxRef.current?.stop(playgroundRequestIdRef.current);
+  }, []);
 
   // Validate (Validator mode)
   const handleValidate = useCallback(() => {
@@ -545,6 +552,7 @@ function App() {
       <Toolbar
         mode={mode}
         onRun={handleRun}
+        onStop={handleStopClick}
         onValidate={handleValidate}
         isRunning={isRunning}
         isValidating={isValidating}

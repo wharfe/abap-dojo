@@ -40,9 +40,12 @@ import { TRANSPILE_REASONS, type TranspileReason } from "../types/diagnostics";
  *
  * - `syntax_error`    the user's ABAP did not parse — the ordinary case
  * - `transpile_error` our transpiler threw on ABAP that did parse
- * - `timeout`     the 5s sandbox watchdog fired — nearly always a runaway loop
+ * - `timeout`     the sandbox watchdog fired — nearly always a runaway loop
  * - `stalled`     the abaplint worker never answered; our pipeline broke, not the code
  * - `cancelled`   superseded by another run before it could finish
+ * - `stopped`     the user pressed Stop — their choice, not a failure and not
+ *                 the watchdog. Kept apart from `cancelled`, which means the
+ *                 other mode took the sandbox away.
  * - `load_error`  the ABAP runtime bundle itself could not be fetched
  *
  * `syntax_error`/`transpile_error` and `timeout`/`stalled` are each kept apart
@@ -57,6 +60,7 @@ export type RunOutcome =
   | "timeout"
   | "stalled"
   | "cancelled"
+  | "stopped"
   | "load_error";
 
 export type ValidateOutcome = "pass" | "warn" | "fail";
@@ -135,6 +139,7 @@ const RUN_OUTCOMES: readonly RunOutcome[] = [
   "timeout",
   "stalled",
   "cancelled",
+  "stopped",
   "load_error",
 ];
 

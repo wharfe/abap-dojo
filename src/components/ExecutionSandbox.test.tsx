@@ -1,7 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRef } from "react";
 import { render, act } from "@testing-library/react";
-import { ExecutionSandbox, type ExecutionSandboxHandle } from "./ExecutionSandbox";
+import {
+  ExecutionSandbox,
+  EXECUTION_TIMEOUT_SECONDS,
+  type ExecutionSandboxHandle,
+} from "./ExecutionSandbox";
+
+/** The watchdog deadline in ms, derived so these tests track a future change
+ *  to EXECUTION_TIMEOUT_MS instead of silently under- or over-advancing. */
+const EXECUTION_TIMEOUT_MS = EXECUTION_TIMEOUT_SECONDS * 1000;
 
 // The real module fetches a Vite-resolved asset URL, which jsdom cannot serve.
 // Each test decides whether loading the runtime succeeds or fails.
@@ -37,7 +45,7 @@ async function startRun() {
   });
   const iframe = container.querySelector("iframe");
   if (!iframe) throw new Error("execute() did not create an iframe");
-  return { handlers, iframe };
+  return { ref, handlers, iframe };
 }
 
 describe("ExecutionSandbox", () => {
@@ -127,7 +135,7 @@ describe("ExecutionSandbox", () => {
       ref.current!.execute("js", "run-1");
     });
     act(() => {
-      vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(EXECUTION_TIMEOUT_MS);
     });
 
     // No iframe exists yet (the bundle fetch never resolved), so there is
@@ -143,10 +151,10 @@ describe("ExecutionSandbox", () => {
       ref.current!.execute("js", "run-1");
     });
     act(() => {
-      // 5000ms fires the watchdog, which asks the (unresponsive, in this
+      // The watchdog deadline fires, which asks the (unresponsive, in this
       // test) frame to stop; the extra 250ms is the grace period before it
       // gives up waiting for a reply and tears the frame down itself.
-      vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(EXECUTION_TIMEOUT_MS);
       vi.advanceTimersByTime(250);
     });
 
@@ -165,7 +173,7 @@ describe("ExecutionSandbox", () => {
       ref.current!.execute("js", "run-2");
     });
     act(() => {
-      vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(EXECUTION_TIMEOUT_MS);
       vi.advanceTimersByTime(250);
     });
 
@@ -282,8 +290,8 @@ describe("ExecutionSandbox", () => {
     );
   });
 
-  // Task 4 adds the button that sends reason: "user"; this task only adds the
-  // plumbing, so it is exercised directly here rather than through the UI.
+  // The Stop button (App.tsx) is what triggers this in production; exercised
+  // directly here via the message contract rather than through the UI.
   it("routes a stopped/user reply to onStopped", async () => {
     const { handlers, iframe } = await startRun();
 
@@ -326,5 +334,65 @@ describe("ExecutionSandbox", () => {
 
     expect(handlers.onTimeout).toHaveBeenCalledWith("run-1", 42);
     expect(handlers.onStopped).not.toHaveBeenCalled();
+  });
+
+  it("posts a stop message with reason user to the owning frame", async () => {
+    const { ref, iframe } = await startRun();
+    const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
+
+    act(() => {
+      ref.current!.stop("run-1");
+    });
+
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: "stop", requestId: "run-1", reason: "user" },
+      "*",
+    );
+  });
+
+  it("does not stop a run that no longer owns the sandbox", async () => {
+    const { ref, iframe } = await startRun();
+    const postMessage = vi.spyOn(iframe.contentWindow!, "postMessage");
+
+    // "run-2" never owned this sandbox (it was never passed to execute), so
+    // this must be a no-op rather than reaching into someone else's run.
+    act(() => {
+      ref.current!.stop("run-2");
+    });
+
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  // Ambiguity resolution #4: the user can click Stop in the instant a run
+  // finishes on its own. By the time the click handler runs, `finish()` has
+  // already cleared activeRequestIdRef and torn down the iframe, so `stop`
+  // must be a no-op — not a second terminal event, not a throw from posting
+  // to a removed frame.
+  it("is a no-op when the run already ended on its own before Stop is clicked", async () => {
+    const { ref, handlers, iframe } = await startRun();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { type: "done", requestId: "run-1", outputLines: 5 },
+          source: iframe.contentWindow,
+          origin: "null",
+        }),
+      );
+    });
+
+    expect(handlers.onDone).toHaveBeenCalledTimes(1);
+
+    expect(() => {
+      act(() => {
+        ref.current!.stop("run-1");
+      });
+    }).not.toThrow();
+
+    // No second terminal event of any kind for run-1.
+    expect(handlers.onDone).toHaveBeenCalledTimes(1);
+    expect(handlers.onStopped).not.toHaveBeenCalled();
+    expect(handlers.onTimeout).not.toHaveBeenCalled();
+    expect(handlers.onError).not.toHaveBeenCalled();
   });
 });

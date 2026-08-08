@@ -136,7 +136,7 @@ makes the report unusable. Note `outcome` is shared by `run_result` and
 `validate_result` (`pass`/`warn`/`fail`), so always filter by `event_name`
 when reading it.
 
-`run_result` reports one of eight outcomes, and `run_click`/`run_result` are
+`run_result` reports one of nine outcomes, and `run_click`/`run_result` are
 meant to reconcile 1:1 — a gap between them is an orphaned execution, not a
 user who walked away. Adding a *value* to an already-registered dimension
 needs no GA4 change; only a new *parameter* does.
@@ -147,14 +147,19 @@ needs no GA4 change; only a new *parameter* does.
 | `syntax_error` | the user's ABAP did not parse — the ordinary case |
 | `transpile_error` | our transpiler threw on ABAP that *did* parse |
 | `runtime_error` | the transpiled JS threw |
-| `timeout` | 5s sandbox watchdog — see the caveat below |
+| `timeout` | 15s sandbox watchdog — see the caveat below |
 | `stalled` | 20s worker watchdog — the abaplint worker never answered |
 | `cancelled` | superseded by a run started in the other mode |
+| `stopped` | the user pressed Stop |
 | `load_error` | the `@abaplint/runtime` bundle could not be fetched |
 
 The pairs `syntax_error`/`transpile_error` and `timeout`/`stalled` exist so
 that "what users write" stays separable from "whether we are broken". Merging
-either pair makes both questions unanswerable.
+either pair makes both questions unanswerable. `stopped` and `cancelled` are
+kept apart for the same kind of reason: `stopped` is the user's own choice
+(they pressed Stop), `cancelled` means the other mode took the sandbox away
+from underneath them — merging those would hide whether people are actually
+using the Stop button.
 
 ### `transpile_error` carries its own diagnosis
 
@@ -221,16 +226,25 @@ The vocabulary lives in `src/types/diagnostics.ts`, apart from the classifier,
 because `analytics.ts` needs the enum and is reachable from the entry chunk —
 importing `@abaplint/core` there would put 2.7 MB back into `index-*.js`.
 
-**Do not read a low `timeout` count as "users rarely write endless loops"**
-(#28). The sandbox iframe uses `srcdoc`, so it shares the parent's main thread:
-a CPU-bound ABAP loop freezes the whole tab and the watchdog never gets a turn
-to fire — the page dies before it can report anything. `timeout` therefore only
-covers runs that yield. The same freeze also inflates the `run_click` vs
-`run_result` gap, so that gap is not purely drop-off either.
+**Do not compare `timeout` rates across 2026-08-08** (#28, #41). Before that
+date the sandbox iframe ran the transpiled JS directly with `srcdoc`, sharing
+the parent's main thread: a CPU-bound ABAP loop froze the whole tab and the
+watchdog never got a turn to fire — the page died before it could report
+anything. `timeout` from that era therefore does not mean endless loops were
+rare; it means the page usually couldn't tell you about them. As of #41 the
+transpiled JS runs in a Worker inside the frame, so the frame and the parent
+both stay free and the watchdog reliably fires (now at 15s — see
+`EXECUTION_TIMEOUT_MS` in `src/components/ExecutionSandbox.tsx`). A `timeout`
+count from before that change and one from after are not the same
+measurement; do not chart them as one series.
 
-`output_lines` is the count the sandbox reports in its `done` message, not the
-number of `output` messages received: display stops at 10,000 lines, so
-counting messages would report every runaway loop as exactly 10,001.
+`output_lines` is the count the sandbox reports in its terminal message
+(`done`, `stopped`, or the timeout path), not the number of `output` messages
+received: display stops at 10,000 lines, so counting messages would report
+every runaway loop as exactly 10,001. Since #41 this count is a real number on
+every exit path, including a killed run — before that, a run torn down by the
+watchdog frequently reported nothing because the frame that knew the count was
+already unresponsive.
 
 **A loop that never writes a real newline inflates `output_lines` to roughly
 `elapsed_ms / 50`, not the number of `WRITE`s it executed.** The execution

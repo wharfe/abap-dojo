@@ -5,6 +5,7 @@ import type { AppMode } from "../types/validation";
 interface ToolbarProps {
   mode: AppMode;
   onRun: () => void;
+  onStop: () => void;
   onValidate: () => void;
   isRunning: boolean;
   isValidating: boolean;
@@ -15,6 +16,7 @@ interface ToolbarProps {
 export function Toolbar({
   mode,
   onRun,
+  onStop,
   onValidate,
   isRunning,
   isValidating,
@@ -25,11 +27,14 @@ export function Toolbar({
     <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700">
       {mode === "playground" && (
         <button
-          onClick={onRun}
-          disabled={isRunning}
-          className="flex items-center gap-1.5 px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors"
+          onClick={isRunning ? onStop : onRun}
+          className={`flex items-center gap-1.5 px-4 py-1.5 text-white text-sm font-medium rounded transition-colors ${
+            isRunning
+              ? "bg-red-600 hover:bg-red-500"
+              : "bg-green-600 hover:bg-green-500"
+          }`}
         >
-          {isRunning ? "Running..." : "\u25B6 Run"}
+          {isRunning ? "\u25A0 Stop" : "\u25B6 Run"}
         </button>
       )}
       {mode === "validator" && (

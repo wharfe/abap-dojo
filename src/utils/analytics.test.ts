@@ -158,6 +158,7 @@ describe("sanitizeParams", () => {
       "timeout",
       "stalled",
       "cancelled",
+      "stopped",
       "load_error",
     ] satisfies RunOutcome[]) {
       expect(
@@ -264,6 +265,7 @@ describe("sanitizeParams", () => {
       "timeout",
       "stalled",
       "cancelled",
+      "stopped",
       "load_error",
     ];
     for (const outcome of outcomes) {
@@ -272,6 +274,16 @@ describe("sanitizeParams", () => {
         duration_ms: 1,
       });
     }
+  });
+
+  it("accepts the stopped outcome", () => {
+    expect(
+      sanitizeParams("run_result", {
+        outcome: "stopped",
+        duration_ms: 900,
+        output_lines: 42,
+      }),
+    ).toEqual({ outcome: "stopped", duration_ms: 900, output_lines: 42 });
   });
 
   it("drops ids that are not the authored kebab-case shape", () => {

@@ -13,8 +13,13 @@ import supervisorSource from "../sandbox/supervisor.js?raw";
  * CPU-bound loop blocked the timer that was supposed to rescue it (#28). The
  * transpiled JS now runs in a Worker inside the frame, so the frame and the
  * parent both stay free and this timer fires when it should.
+ *
+ * 15s, not the old 5s: that number was chosen when a long run froze the tab,
+ * so cutting things short was the lesser harm. It is not any more, and 5s was
+ * killing legitimately slow loops on phones. The user can also stop a run
+ * themselves now, which is what makes a longer deadline safe.
  */
-const EXECUTION_TIMEOUT_MS = 5000;
+const EXECUTION_TIMEOUT_MS = 15000;
 
 /** EXECUTION_TIMEOUT_MS in seconds, for messages shown to the user. Exported
  *  so the number lives in exactly one place — a message that hardcoded it
@@ -28,6 +33,8 @@ const STOP_GRACE_MS = 250;
 
 export interface ExecutionSandboxHandle {
   execute: (js: string, requestId: string) => void;
+  /** Ask the running program to stop. No-op if `requestId` no longer owns the sandbox. */
+  stop: (requestId: string) => void;
 }
 
 interface ExecutionSandboxProps {
@@ -50,8 +57,7 @@ interface ExecutionSandboxProps {
   onTimeout: (requestId: string, outputLines: number) => void;
   /**
    * The run was stopped by explicit request (not a timeout — that is
-   * `onTimeout`). Nothing sends this yet: the Stop button is a later task,
-   * but the message plumbing for it lands here first.
+   * `onTimeout`). Fired when the user presses Stop.
    */
   onStopped: (requestId: string, outputLines: number) => void;
   /**
@@ -258,7 +264,25 @@ export const ExecutionSandbox = forwardRef<
     [cleanup, finish, handleMessage, onError, onTimeout, onCancel],
   );
 
-  useImperativeHandle(ref, () => ({ execute }), [execute]);
+  /**
+   * Ask the frame to stop the run it currently owns. `requestId` guards
+   * against a race where the run already ended on its own (or was
+   * superseded) by the time the user clicks Stop — in that case
+   * `activeRequestIdRef.current` no longer matches and this is a no-op, so
+   * Stop can never produce a second terminal event for a run that is already
+   * done.
+   */
+  const stop = useCallback((requestId: string) => {
+    if (activeRequestIdRef.current !== requestId) return;
+    const frame = iframeRef.current;
+    if (!frame?.contentWindow) return;
+    frame.contentWindow.postMessage(
+      { type: "stop", requestId, reason: "user" },
+      "*",
+    );
+  }, []);
+
+  useImperativeHandle(ref, () => ({ execute, stop }), [execute, stop]);
 
   return <div ref={containerRef} className="hidden" />;
 });
