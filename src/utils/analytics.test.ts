@@ -80,6 +80,121 @@ describe("sanitizeParams", () => {
     ).toEqual({ url_length: 900, line_count: 2 });
   });
 
+  // The transpile diagnostics widen run_result by two parameters, so they get
+  // the same scrutiny as the rest of the boundary. The closed-set check that
+  // makes `transpile_node` safe lives in the worker; this asserts the shape
+  // guard behind it, which is what stands if that check ever regresses.
+  it("accepts the transpile diagnostics and nothing shaped like source", () => {
+    expect(
+      sanitizeUnchecked("run_result", {
+        outcome: "transpile_error",
+        duration_ms: 30,
+        transpile_reason: "unsupported_statement",
+        transpile_node: "Multiply",
+      }),
+    ).toEqual({
+      outcome: "transpile_error",
+      duration_ms: 30,
+      transpile_reason: "unsupported_statement",
+      transpile_node: "Multiply",
+    });
+
+    for (const transpile_node of [
+      "SELECT * FROM zsecret",
+      "lv_secret_password",
+      "Multiply;DROP",
+      "",
+      "Multiply ",
+      "REPORT ztest.\nWRITE 'x'.",
+    ]) {
+      expect(
+        sanitizeUnchecked("run_result", {
+          outcome: "transpile_error",
+          duration_ms: 30,
+          transpile_node,
+        }),
+      ).toEqual({ outcome: "transpile_error", duration_ms: 30 });
+    }
+
+    expect(
+      sanitizeUnchecked("run_result", {
+        outcome: "transpile_error",
+        duration_ms: 30,
+        transpile_reason: "Statement Multiply not supported, MULTIPLY lv_secret BY 3.",
+      }),
+    ).toEqual({ outcome: "transpile_error", duration_ms: 30 });
+  });
+
+  /**
+   * Pins the limit of the shape guard so nobody mistakes it for the guarantee.
+   * Every case the loop above rejects contains a space, an underscore, a
+   * semicolon or a newline. A bare DDIC table name has none of those and sails
+   * through — which is fine, because the worker only ever hands this parameter
+   * a name it has already matched against abaplint's exports, but it means the
+   * pattern would not stop a leak if that check regressed.
+   */
+  it("does not pretend the AST_NODE pattern is the privacy guarantee", () => {
+    for (const transpile_node of ["ZSECRET", "MARA", "T100", "zcustomerpii"]) {
+      expect(
+        sanitizeUnchecked("run_result", {
+          outcome: "transpile_error",
+          duration_ms: 30,
+          transpile_node,
+        }),
+      ).toEqual({ outcome: "transpile_error", duration_ms: 30, transpile_node });
+    }
+  });
+
+  /**
+   * The diagnostics describe a transpile failure and mean nothing on any other
+   * outcome. A per-key allowlist cannot say that, so `sanitizeParams` drops
+   * them itself — the caller getting it right is not the guarantee.
+   */
+  it("drops the transpile diagnostics on every other outcome", () => {
+    for (const outcome of [
+      "success",
+      "syntax_error",
+      "runtime_error",
+      "timeout",
+      "stalled",
+      "cancelled",
+      "load_error",
+    ] satisfies RunOutcome[]) {
+      expect(
+        sanitizeUnchecked("run_result", {
+          outcome,
+          duration_ms: 30,
+          transpile_reason: "unsupported_statement",
+          transpile_node: "Multiply",
+        }),
+      ).toEqual({ outcome, duration_ms: 30 });
+    }
+
+    // Including the case where `outcome` itself was rejected: nothing is left
+    // to justify the diagnostics, so they go too.
+    expect(
+      sanitizeUnchecked("run_result", {
+        outcome: "not_a_real_outcome",
+        duration_ms: 30,
+        transpile_reason: "unsupported_statement",
+        transpile_node: "Multiply",
+      }),
+    ).toEqual({ duration_ms: 30 });
+  });
+
+  /** The three categories that cannot occur are no longer accepted values. */
+  it("rejects the retired transpile reasons", () => {
+    for (const transpile_reason of ["db_missing", "void_type", "kernel_missing"]) {
+      expect(
+        sanitizeUnchecked("run_result", {
+          outcome: "transpile_error",
+          duration_ms: 30,
+          transpile_reason,
+        }),
+      ).toEqual({ outcome: "transpile_error", duration_ms: 30 });
+    }
+  });
+
   it("drops multi-line strings", () => {
     expect(
       sanitizeUnchecked("sample_select", {

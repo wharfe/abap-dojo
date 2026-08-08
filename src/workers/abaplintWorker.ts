@@ -10,6 +10,7 @@ import type { WorkerRequest, WorkerResponse, LintIssue } from "../types/messages
 import type { StageResult, ValidationStage } from "../types/validation";
 import { detectPitfalls } from "../rules/detector";
 import { pitfallToLintIssue } from "../rules/pitfallToLintIssue";
+import { classifyTranspileError } from "./transpileDiagnostics";
 
 const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
 
@@ -78,7 +79,12 @@ async function handleTranspile(source: string): Promise<WorkerResponse> {
     return { type: "transpile-result", js };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { type: "transpile-error", kind: "transpile", message: msg };
+    return {
+      type: "transpile-error",
+      kind: "transpile",
+      message: msg,
+      diagnostics: classifyTranspileError(msg),
+    };
   }
 }
 

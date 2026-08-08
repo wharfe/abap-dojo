@@ -97,6 +97,16 @@ Product-usage events live in `src/utils/analytics.ts`. Two rules:
    is sent. Do not add free-string parameters — abaplint and transpiler error
    messages embed the user's own source verbatim on a single line, so "it has no
    newline" proves nothing. Use a `count` or an `enum`.
+
+   A string parameter is allowed only when every value it can hold is checked
+   for membership in a **closed set the user cannot extend** — and the check has
+   to live where that set does, which is generally not here. `transpile_node` is
+   the one such parameter today: the worker matches it against the class names
+   `@abaplint/core` exports and drops anything else, and `AST_NODE` in
+   `analytics.ts` is a shape backstop, not the guarantee (`ZSECRET` satisfies
+   it). "It comes from a fixed list" is not the bar; a runtime membership test
+   against an enumerable set is. If you cannot point at the set and the line
+   that tests against it, use a `count` or an `enum` instead.
 2. **gtag loads on `abapdojo.com` only** — the host gate is duplicated in
    `index.html` and in all 7 `public/docs/*.html` pages. Local dev, `vite preview`
    and Pages previews leave `window.gtag` undefined so `track()` no-ops there.
@@ -119,7 +129,7 @@ renaming a parameter:
 
 | Register as custom **dimension** (text) | Register as custom **metric** (number) |
 |---|---|
-| `outcome`, `sample_id`, `mode`, `to_mode` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
+| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
 
 Do not register `duration_ms` as a dimension — it is near-unique per event and
 makes the report unusable. Note `outcome` is shared by `run_result` and
@@ -145,6 +155,71 @@ needs no GA4 change; only a new *parameter* does.
 The pairs `syntax_error`/`transpile_error` and `timeout`/`stalled` exist so
 that "what users write" stays separable from "whether we are broken". Merging
 either pair makes both questions unanswerable.
+
+### `transpile_error` carries its own diagnosis
+
+That split earned its keep: over 2026-08-05..08, `transpile_error` was 25.6% of
+runs against `syntax_error`'s 2.5%. Visitors write valid ABAP; we fail to
+transpile a quarter of it. `run_result` therefore also carries
+`transpile_reason` (a 6-value enum: which *kind* of failure) and
+`transpile_node` (which abaplint AST class had no transpiler, e.g. `Multiply`),
+both produced by `src/workers/transpileDiagnostics.ts` and set on no other
+outcome.
+
+The rule against free strings still holds, and this is how: the transpiler's
+messages interpolate the user's own source
+(`` `Statement ${node.get().constructor.name} not supported, ${node.concatTokens()}` ``),
+so `transpile_node` is lifted from the left slot only and then kept **only if it
+is a member of the set `@abaplint/core` exports** — `Statements` for a
+statement, `Expressions` for an expression, looked up in their own set (six
+names are exported as both, so for those the separation decides nothing).
+Membership in a vocabulary the user cannot add to is the guarantee; the anchored
+regex and the `AST_NODE` shape in `analytics.ts` are backups, and `AST_NODE`
+alone would not stop a leak — `ZSECRET` satisfies it. It fails safe: rename an
+export, or lose `keepNames`, and `transpile_node` stops being reported while
+`transpile_reason` continues.
+
+`transpile_reason` gets no such guarantee and needs none — it is an enum, so
+nothing the user writes can be emitted. But its fallback tests substring-match
+the *whole* message, and most of those messages end in `${node.concatTokens()}`.
+So the user's own source can steer the bucket, and not only at the margins:
+`ComponentCondSubTranspiler, unexpected: <source>` is an `internal` failure, but
+source containing the words "type not found" reclassifies it as `unknown_type`,
+because that test runs first. Word boundaries keep `lv_todo` out of
+`not_implemented`; they do nothing about this. Treat the fallback buckets as
+indicative, not exact — the anchored fix is #43, and it is the same fix that
+empties `other`. Neither is a leak: `transpile_reason` can only ever emit one of
+its six declared values.
+
+**Three things this metric does not tell you.** Read it wrong and it will point
+you at the wrong work:
+
+1. **It covers transpile-*time* throws only.** Most unsupported statements are
+   handled by emitting `throw new Error("SelectOption, not supported, transpiler")`
+   *into the generated JS*, so they reach the sandbox and land in
+   `runtime_error`. `PARAMETERS` and `SELECT-OPTIONS` — in nearly every ABAP
+   report an LLM writes — are among them, as is every `kernel class missing`
+   case (`AUTHORITY-CHECK`, `WAIT`, `CALL TRANSFORMATION`). A quiet
+   `unsupported_statement` count does not mean we support the statement. When
+   adding a reason, check whether the message is a `throw` or a `Chunk` string;
+   only the first kind can ever reach the classifier.
+2. **Filter by `outcome = transpile_error`, not just `event_name`.** Both
+   parameters are absent on the other ~74% of `run_result` events, so a
+   `run_result` × `transpile_node` exploration renders `(not set)` as its
+   dominant row. Same trap as `outcome` above.
+3. **`other` is large and is a to-do, not a residue.** Roughly half of the
+   transpiler's transpile-time throw sites match no rule and land there. The
+   identifying token is present — those messages start with the transpiler class
+   that failed (`CastTranspiler, Source not found`) — and that name comes from
+   another closed set we already import. See #43.
+
+Only Playground is instrumented. `handleValidate` catches the same throws but
+`validate_result` carries no `transpile_reason`; that is a scope call, not an
+oversight — Playground carries the volume this section is about.
+
+The vocabulary lives in `src/types/diagnostics.ts`, apart from the classifier,
+because `analytics.ts` needs the enum and is reachable from the entry chunk —
+importing `@abaplint/core` there would put 2.7 MB back into `index-*.js`.
 
 **Do not read a low `timeout` count as "users rarely write endless loops"**
 (#28). The sandbox iframe uses `srcdoc`, so it shares the parent's main thread:
