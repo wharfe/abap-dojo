@@ -31,6 +31,7 @@
  * caller pass `page_location` (see RESERVED_NAMES) to "fix SPA tracking".
  */
 import type { AppMode } from "../types/validation";
+import { TRANSPILE_REASONS, type TranspileReason } from "../types/diagnostics";
 
 /**
  * Every way a run can end. The set is exhaustive on purpose: `run_click` and
@@ -80,6 +81,17 @@ export interface EventMap {
      * received messages would report every runaway loop as exactly 10,001.
      */
     output_lines?: number;
+    /**
+     * Only on `outcome: "transpile_error"` — which of our own failures it was,
+     * and which abaplint AST node we could not transpile. Both come out of
+     * src/workers/transpileDiagnostics.ts, which classifies the message rather
+     * than forwarding it; the message itself embeds the user's source and never
+     * leaves the browser. `transpile_node` is already a member of abaplint's
+     * exported class set by the time it arrives — the pattern below is a second
+     * line of defence, not the guarantee.
+     */
+    transpile_reason?: TranspileReason;
+    transpile_node?: string;
   };
   /** Validate pressed in AI Validator mode. */
   validate_click: { line_count: number };
@@ -137,6 +149,21 @@ const SAMPLE_ID: ParamSpec = {
   pattern: /^[a-z0-9][a-z0-9-]{0,39}$/,
 };
 
+/**
+ * An abaplint AST class name, e.g. `Multiply`. The worker has already checked
+ * the name against the set abaplint exports and dropped anything else, so by
+ * the time a value reaches here it is drawn from a closed vocabulary the user
+ * cannot add to. That check is the guarantee; this shape is only a sanity gate
+ * on it — no space, no punctuation, no newline, 40 characters at most (the
+ * longest name abaplint exports is 28). Do not mistake it for a second
+ * independent barrier: an underscore-free identifier such as `ZSECRET` or
+ * `MARA` satisfies it, so it would not stop a leak on its own.
+ */
+const AST_NODE: ParamSpec = {
+  kind: "id",
+  pattern: /^[A-Za-z][A-Za-z0-9]{0,39}$/,
+};
+
 const COUNT: ParamSpec = { kind: "count" };
 
 /**
@@ -160,6 +187,8 @@ const EVENT_PARAMS: { readonly [K in EventName]: Readonly<SpecsFor<K>> } = {
     outcome: { kind: "enum", values: RUN_OUTCOMES },
     duration_ms: COUNT,
     output_lines: COUNT,
+    transpile_reason: { kind: "enum", values: TRANSPILE_REASONS },
+    transpile_node: AST_NODE,
   },
   validate_click: { line_count: COUNT },
   validate_result: {
@@ -227,6 +256,21 @@ function coerce(spec: ParamSpec, value: unknown): string | number | undefined {
 }
 
 /**
+ * The one rule a per-key allowlist cannot express: `transpile_reason` and
+ * `transpile_node` describe a transpile failure, so they are meaningless on any
+ * other outcome. Enforced here rather than left to the caller because that is
+ * this module's whole stance — the runtime is the boundary, not the types. A
+ * future caller that attaches diagnostics to a `success` gets them dropped
+ * instead of quietly widening what a successful run reports.
+ */
+function refine(name: EventName, clean: Record<string, string | number>): void {
+  if (name !== "run_result") return;
+  if (clean.outcome === "transpile_error") return;
+  delete clean.transpile_reason;
+  delete clean.transpile_node;
+}
+
+/**
  * Build the parameter object for `name` by pulling only its declared keys out
  * of `params`. Undeclared keys are never read; declared keys whose value does
  * not match the declared shape are dropped rather than coerced or truncated.
@@ -243,6 +287,7 @@ export function sanitizeParams(
     const value = coerce(spec, params[key]);
     if (value !== undefined) clean[key] = value;
   }
+  refine(name, clean);
   return clean;
 }
 

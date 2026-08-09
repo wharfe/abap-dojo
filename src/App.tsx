@@ -17,6 +17,7 @@ import { track, lineCount, type RunOutcome } from "./utils/analytics";
 import { scheduleIdle } from "./utils/scheduleIdle";
 import { computeSummary } from "./utils/validationSummary";
 import type { LintIssue, WorkerResponse } from "./types/messages";
+import type { TranspileDiagnostics } from "./types/diagnostics";
 import type { Sample } from "./samples";
 import type { AppMode, StageResult, ValidationStage } from "./types/validation";
 import AbaplintWorker from "./workers/abaplintWorker?worker";
@@ -133,7 +134,14 @@ function App() {
    * temporal dead zone on the first render.
    */
   const endRun = useCallback(
-    (outcome: RunOutcome, message?: string, outputLines?: number) => {
+    (
+      outcome: RunOutcome,
+      message?: string,
+      outputLines?: number,
+      // Only ever supplied on a transpile_error. `message` is the human-facing
+      // text and stays here; this is the sanitised half that may be measured.
+      diagnostics?: TranspileDiagnostics,
+    ) => {
       disarmWorkerWatchdog();
       if (message !== undefined) setError(message);
       setIsRunning(false);
@@ -143,6 +151,8 @@ function App() {
         // The sandbox reports the true total on success; otherwise all we have
         // is what we received, which the display cap may have truncated.
         output_lines: outputLines ?? runOutputCountRef.current,
+        transpile_reason: diagnostics?.reason,
+        transpile_node: diagnostics?.node,
       });
     },
     [disarmWorkerWatchdog],
@@ -199,12 +209,18 @@ function App() {
         disarmWorkerWatchdog();
         sandboxRef.current?.execute(data.js, playgroundRequestIdRef.current);
       } else if (data.type === "transpile-error") {
-        const label = data.kind === "syntax" ? "Syntax error" : "Transpile error";
+        const isSyntax = data.kind === "syntax";
+        const label = isSyntax ? "Syntax error" : "Transpile error";
         endRun(
-          data.kind === "syntax" ? "syntax_error" : "transpile_error",
+          isSyntax ? "syntax_error" : "transpile_error",
           data.line
             ? `${label} (L${data.line}): ${data.message}`
             : `${label}: ${data.message}`,
+          undefined,
+          // "set on no other outcome" is the documented invariant, so enforce it
+          // here rather than trusting the worker to keep omitting it: the field
+          // is optional on a union member that covers both kinds.
+          isSyntax ? undefined : data.diagnostics,
         );
       }
 
