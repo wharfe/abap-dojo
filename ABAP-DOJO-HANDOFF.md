@@ -386,6 +386,21 @@ Comlink等を使ってWorkerとの通信をPromiseベースで簡潔にする。
 安全性のため、トランスパイルされたJSは sandboxed iframe 内で実行する。
 WRITE文の出力はpostMessageでメインスレッドに返す。
 
+**実装上の補足（#28 で判明・修正済み）**: iframe だけでは足りない。`srcdoc` の iframe は
+親のサイトを継承するため site isolation で別プロセスに分離されず、**親と同じ
+メインスレッドで動く**。そのため `DO. ENDDO.` のような CPU を握るループがタブ全体を
+固め、ウォッチドッグにも順番が回らずページごと死んでいた。
+
+現在は iframe の**中に blob Worker を作り、実行はそちらへ移している**。iframe は実行を
+やめて中継役になった。役割分担は明確に分かれている:
+
+- **iframe**（`sandbox="allow-scripts"`、`allow-same-origin` なし）= opaque origin による
+  隔離。親の DOM / cookie / localStorage に触れない
+- **Worker** = スレッドの分離。暴走ループが専用スレッドを占有するだけで済む
+
+どちらか一方を外すと別のものが壊れる。出力は行ごとではなくバッチで送る
+（1行1メッセージにすると postMessage の洪水で iframe 側のイベントループが飽和する）。
+
 ---
 
 ## Claude Code向けの実装ガイダンス

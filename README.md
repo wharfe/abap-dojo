@@ -15,10 +15,18 @@ Browser-based ABAP playground & AI validator. Write, lint, and execute ABAP code
 ## How It Works
 
 ```
-ABAP source → @abaplint/core (parse + lint) → @abaplint/transpiler (ABAP → JS) → sandboxed iframe (execute)
+ABAP source → @abaplint/core (parse + lint) → @abaplint/transpiler (ABAP → JS) → Worker inside a sandboxed iframe (execute)
 ```
 
-All processing happens in Web Workers to keep the UI responsive. Transpiled code runs in a sandboxed iframe with WRITE output returned via postMessage.
+All processing happens off the UI thread. Parsing, linting and transpiling run in a
+Web Worker. The transpiled JavaScript runs in a second Worker created *inside* a
+sandboxed iframe, and WRITE output is streamed back in batches via postMessage.
+
+The two layers each defend a different thing. The iframe (`sandbox="allow-scripts"`,
+no `allow-same-origin`) has an opaque origin, so the code you run cannot reach the
+page's DOM, cookies or storage. The Worker inside it owns its own thread, so an
+endless ABAP loop occupies a thread nobody else needs — the page stays responsive
+and you can stop the run.
 
 ## Tech Stack
 
@@ -58,7 +66,12 @@ npm run preview    # Preview production build locally
 npm run lint       # ESLint
 npm run typecheck  # Type check
 npm test           # Run tests once (npm run test:watch to watch)
+npm run test:e2e   # Playwright, against the production build, on 3 engines
 ```
+
+`test:e2e` builds and previews the app before it runs, so it is slow. It exists
+because the thread behaviour it checks — that a runaway loop does not freeze the
+page — has no meaning under jsdom, which has no threads.
 
 CI runs all three on every pull request.
 
@@ -68,10 +81,13 @@ CI runs all three on every pull request.
 src/
   components/    # React components (EditorPanel, OutputPanel, HeroBanner, etc.)
   workers/       # Web Workers for abaplint/transpiler
+  sandbox/       # The execution iframe's supervisor and its Worker, plus the
+                 # @abaplint/runtime bundle they are built from
   rules/         # LLM Pitfall Detector rule definitions
   samples/       # Sample ABAP code presets
   types/         # TypeScript type definitions
   utils/         # Shared utilities
+e2e/             # Playwright tests against the production build
 public/
   *.html         # Landing pages for search (online compiler, editor, practice)
   docs/          # Static content pages (guides, pitfall articles)
