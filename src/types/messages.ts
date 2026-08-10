@@ -13,14 +13,22 @@ export interface LintIssue {
 }
 
 // Worker messages
+//
+// `transpile`/`transpile-result`/`transpile-error` carry a `requestId` so App
+// can tell a stale response (from a run the user already abandoned via Stop)
+// apart from the current one — see the guard in App.tsx's `attachWorkerHandlers`.
+// `lint`/`lint-result` deliberately do NOT: lint is debounced and idempotent
+// (the latest result is always the right one to show, regardless of which
+// keystroke triggered it), so correlating it is issue #42's job, not this
+// fix's. Widening `requestId` to every worker message is tracked there.
 export type WorkerRequest =
   | { type: "lint"; source: string }
-  | { type: "transpile"; source: string }
+  | { type: "transpile"; source: string; requestId: string }
   | { type: "validate"; source: string };
 
 export type WorkerResponse =
   | { type: "lint-result"; issues: LintIssue[] }
-  | { type: "transpile-result"; js: string }
+  | { type: "transpile-result"; js: string; requestId: string }
   /**
    * `kind` distinguishes the two very different things that stop a run before
    * any JavaScript exists: `syntax` is the user's own ABAP failing to parse
@@ -44,6 +52,7 @@ export type WorkerResponse =
       type: "transpile-error";
       kind: "syntax" | "transpile";
       message: string;
+      requestId: string;
       line?: number;
       diagnostics?: TranspileDiagnostics;
     }
@@ -51,14 +60,41 @@ export type WorkerResponse =
   | { type: "validate-stage-result"; stage: ValidationStage; result: StageResult };
 
 // Sandbox messages — requestId for disambiguating playground vs validation executions
-export type SandboxRequest = { type: "execute"; js: string; requestId: string };
+export type SandboxRequest =
+  | { type: "execute"; js: string; requestId: string }
+  /**
+   * Ask the supervisor to terminate the active run early. `reason` travels
+   * back unchanged on the "stopped" reply so the caller can tell a watchdog
+   * timeout apart from a user-initiated stop without a second round trip.
+   */
+  | { type: "stop"; requestId: string; reason: "timeout" | "user" };
 
 export type SandboxResponse =
-  | { type: "output"; text: string; requestId: string }
-  | { type: "error"; message: string; requestId: string }
+  /** A flush of WRITE output. Batched, never one message per line: 5000 single
+   *  postMessages starved the iframe's own timers down to a single tick. */
+  | { type: "output"; lines: string[]; requestId: string }
+  /**
+   * `outputLines` is what the run produced before it errored. It is present
+   * whenever the executor itself reported the error (the ordinary case) and
+   * absent only when the supervisor had to synthesize the message itself
+   * (e.g. the worker could not even be constructed).
+   */
+  | {
+      type: "error";
+      message: string;
+      requestId: string;
+      fatal?: boolean;
+      outputLines?: number;
+    }
   /**
    * `outputLines` is the number of lines the run actually produced, which is
-   * not the number of "output" messages that preceded this one: the sandbox
-   * stops posting after MAX_LINES and sends a single truncation notice instead.
+   * not the number of lines we sent: display stops at MAX_LINES and a runaway
+   * loop would otherwise report exactly MAX_LINES + 1 every time.
    */
-  | { type: "done"; requestId: string; outputLines: number };
+  | { type: "done"; requestId: string; outputLines: number }
+  /**
+   * The worker was terminated from outside — the watchdog fired, or the user
+   * pressed Stop. `outputLines` is what the supervisor saw go past before it
+   * pulled the plug; the worker itself cannot report anything at this point.
+   */
+  | { type: "stopped"; requestId: string; outputLines: number; reason: "timeout" | "user" };
