@@ -57,3 +57,38 @@ export interface TranspileDiagnostics {
   /** Present only when the failing AST node was named and recognised. */
   node?: string;
 }
+
+/**
+ * Why a *syntax* failure happened, at the only granularity abaplint itself
+ * offers for free: the rule key of the issue the user is looking at.
+ *
+ * `syntax_error` is the largest single Run outcome — 32% of runs over
+ * 2026-08-12..09-01, against `transpile_error`'s 1.7% — and until now it
+ * carried nothing at all. That is the same hole `transpile_reason` filled on
+ * the other branch, and it is filled the same way: classify, never forward.
+ * abaplint's own messages interpolate the user's source
+ * (`Database table or view "zcust_secret" not found`), so the message stays in
+ * the browser and only the key travels.
+ *
+ * There is no enum here on purpose. The vocabulary is abaplint's ~182 rule
+ * keys, enumerable at runtime from `ArtifactsRules.getRules()`, and pinning a
+ * copy of it into this file would rot the first time abaplint ships a rule.
+ * The membership test lives with the set, in src/workers/syntaxDiagnostics.ts;
+ * `RULE_KEY` in analytics.ts is a shape backstop, not the guarantee.
+ *
+ * Which keys actually show up, measured against real broken ABAP:
+ *   - `parser_error`      syntax abaplint does not recognise (`print(lv).`)
+ *   - `check_syntax`      resolved fine grammatically, then failed to look
+ *                         something up — a missing DB table, an unknown class
+ *   - `unknown_types`     a type we do not carry. `STRING_TABLE` is one, which
+ *                         is why this bucket matters: it separates "the user
+ *                         wrote nonsense" from "we are missing standard SAP
+ *                         artifacts", and those want opposite work
+ *   - `implement_methods` structural, e.g. a CLASS with no implementation
+ */
+export interface SyntaxDiagnostics {
+  /** Present only when the issue's key was recognised. */
+  key?: string;
+  /** How many Error-severity issues the parse produced. Always present. */
+  errorCount: number;
+}

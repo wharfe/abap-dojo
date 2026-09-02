@@ -1,6 +1,6 @@
 // src/types/messages.ts
 import type { ValidationStage, StageResult } from "./validation";
-import type { TranspileDiagnostics } from "./diagnostics";
+import type { TranspileDiagnostics, SyntaxDiagnostics } from "./diagnostics";
 
 export interface LintIssue {
   message: string;
@@ -36,10 +36,14 @@ export type WorkerResponse =
    * throwing. Lumping them together made it impossible to tell how often we
    * are the broken one.
    *
-   * `diagnostics` accompanies `kind: "transpile"` only, and is the measurable
-   * counterpart of `message`: the message itself embeds the user's source and
-   * stays in the browser, while `diagnostics` is a closed vocabulary safe to
-   * send. See src/workers/transpileDiagnostics.ts.
+   * `diagnostics` accompanies `kind: "transpile"` only and `syntaxDiagnostics`
+   * `kind: "syntax"` only. Both are the measurable counterpart of `message`:
+   * the message itself embeds the user's source and stays in the browser,
+   * while these carry values drawn from a vocabulary the user cannot extend.
+   * Two fields rather than one polymorphic one, because App.tsx strips the
+   * wrong half by hand on the way to analytics — that guard is only readable
+   * if each name means exactly one thing. See src/workers/transpileDiagnostics.ts
+   * and src/workers/syntaxDiagnostics.ts.
    *
    * Keep prose in this repo clear of bare Tailwind utility names. `src/index.css`
    * is a bare `@import "tailwindcss"` with no `source(none)`, so v4 scans every
@@ -55,6 +59,7 @@ export type WorkerResponse =
       requestId: string;
       line?: number;
       diagnostics?: TranspileDiagnostics;
+      syntaxDiagnostics?: SyntaxDiagnostics;
     }
   | { type: "validate-progress"; stage: ValidationStage; status: "running" | "skipped" }
   | { type: "validate-stage-result"; stage: ValidationStage; result: StageResult };

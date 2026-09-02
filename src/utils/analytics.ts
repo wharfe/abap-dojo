@@ -96,6 +96,17 @@ export interface EventMap {
      */
     transpile_reason?: TranspileReason;
     transpile_node?: string;
+    /**
+     * Only on `outcome: "syntax_error"` — which abaplint rule reported the
+     * issue the user is being shown, and how many Error-severity issues the
+     * parse produced. `syntax_key` has already been checked against the rule
+     * keys abaplint enumerates by the time it arrives (see
+     * src/workers/syntaxDiagnostics.ts); `RULE_KEY` below is a shape backstop.
+     * `syntax_error_count` is what remains if that check ever starts dropping
+     * everything, which is how we would find out abaplint had renamed a rule.
+     */
+    syntax_key?: string;
+    syntax_error_count?: number;
   };
   /** Validate pressed in AI Validator mode. */
   validate_click: { line_count: number };
@@ -169,6 +180,20 @@ const AST_NODE: ParamSpec = {
   pattern: /^[A-Za-z][A-Za-z0-9]{0,39}$/,
 };
 
+/**
+ * An abaplint rule key, e.g. `parser_error`. Snake case, unlike the PascalCase
+ * AST class names above, which is why it gets its own shape instead of reusing
+ * `AST_NODE`. The worker has already tested the value for membership in the set
+ * `ArtifactsRules` enumerates and dropped anything else — that test is the
+ * guarantee. This pattern is a sanity gate on it and nothing more: a snake_case
+ * identifier such as `zcust_secret` satisfies it, so it would not stop a leak
+ * on its own.
+ */
+const RULE_KEY: ParamSpec = {
+  kind: "id",
+  pattern: /^[a-z][a-z0-9_]{0,39}$/,
+};
+
 const COUNT: ParamSpec = { kind: "count" };
 
 /**
@@ -194,6 +219,8 @@ const EVENT_PARAMS: { readonly [K in EventName]: Readonly<SpecsFor<K>> } = {
     output_lines: COUNT,
     transpile_reason: { kind: "enum", values: TRANSPILE_REASONS },
     transpile_node: AST_NODE,
+    syntax_key: RULE_KEY,
+    syntax_error_count: COUNT,
   },
   validate_click: { line_count: COUNT },
   validate_result: {
@@ -261,18 +288,30 @@ function coerce(spec: ParamSpec, value: unknown): string | number | undefined {
 }
 
 /**
- * The one rule a per-key allowlist cannot express: `transpile_reason` and
- * `transpile_node` describe a transpile failure, so they are meaningless on any
- * other outcome. Enforced here rather than left to the caller because that is
- * this module's whole stance — the runtime is the boundary, not the types. A
- * future caller that attaches diagnostics to a `success` gets them dropped
- * instead of quietly widening what a successful run reports.
+ * The one rule a per-key allowlist cannot express: a parameter can be valid in
+ * shape and still be meaningless — `transpile_reason` describes a transpile
+ * failure, `syntax_key` a syntax one, and neither says anything on any other
+ * outcome. Enforced here rather than left to the caller because that is this
+ * module's whole stance: the runtime is the boundary, not the types. A future
+ * caller that attaches diagnostics to a `success` gets them dropped instead of
+ * quietly widening what a successful run reports.
+ *
+ * Note this is a strip, not a rejection — the rest of the event still goes.
+ * Losing a misplaced parameter is always better than losing the outcome it was
+ * attached to, because `run_click`/`run_result` are meant to reconcile 1:1 and
+ * a dropped `run_result` reads as an orphaned execution.
  */
+const OUTCOME_ONLY_PARAMS: ReadonlyArray<[string, readonly string[]]> = [
+  ["transpile_error", ["transpile_reason", "transpile_node"]],
+  ["syntax_error", ["syntax_key", "syntax_error_count"]],
+];
+
 function refine(name: EventName, clean: Record<string, string | number>): void {
   if (name !== "run_result") return;
-  if (clean.outcome === "transpile_error") return;
-  delete clean.transpile_reason;
-  delete clean.transpile_node;
+  for (const [outcome, params] of OUTCOME_ONLY_PARAMS) {
+    if (clean.outcome === outcome) continue;
+    for (const param of params) delete clean[param];
+  }
 }
 
 /**
