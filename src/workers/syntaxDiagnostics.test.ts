@@ -5,6 +5,7 @@ import { Buffer } from "buffer";
 import { Registry, MemoryFile, Config, ArtifactsRules } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
 import { classifySyntaxError, isKnownRuleKey } from "./syntaxDiagnostics";
+import { sanitizeParams } from "../utils/analytics";
 
 describe("isKnownRuleKey", () => {
   it("accepts the keys abaplint enumerates", () => {
@@ -58,6 +59,31 @@ describe("isKnownRuleKey", () => {
   it("reflects a full rule set, not a collapsed one", () => {
     expect(ArtifactsRules.getRules().length).toBeGreaterThan(150);
   });
+
+  /**
+   * The two gates have to agree. This module decides what may travel, but
+   * `sanitizeParams` gets the last word, so a key this one accepts and the
+   * `RULE_KEY` shape rejects is reported as `syntax_error_count` with no
+   * `syntax_key` — a bucket permanently `(not set)`, which reads as "this
+   * never happens" rather than "our two checks disagree". `7bit_ascii` was
+   * exactly that: a real rule key that a `^[a-z]` pattern dropped. Assert the
+   * whole allowed set survives the round trip so the next one fails here.
+   */
+  it("passes every allowed key through the analytics shape gate", () => {
+    const keys = [
+      ...ArtifactsRules.getRules().map((rule) => rule.getMetadata().key),
+      "structure",
+    ];
+    const rejected = keys.filter(
+      (key) =>
+        sanitizeParams("run_result", {
+          outcome: "syntax_error",
+          duration_ms: 1,
+          syntax_key: key,
+        }).syntax_key !== key,
+    );
+    expect(rejected).toEqual([]);
+  });
 });
 
 describe("classifySyntaxError", () => {
@@ -69,9 +95,11 @@ describe("classifySyntaxError", () => {
   });
 
   /**
-   * The failure mode that matters: detail goes, the count stays. If abaplint
-   * renames a rule we stop reporting `syntax_key` and keep reporting
-   * `syntax_error_count`, so the metric degrades visibly instead of going dark.
+   * The failure mode that matters: detail goes, the count stays. Note what does
+   * NOT reach this branch — a renamed abaplint rule, because the allowed set is
+   * built from the same `getMetadata().key` as the value and both move at once.
+   * What lands here is a key from outside the registry that `NON_RULE_KEYS`
+   * does not name, and anything our own code passes by mistake.
    */
   it("drops an unrecognised key but still reports the count", () => {
     expect(classifySyntaxError("zcust_secret", 2)).toEqual({

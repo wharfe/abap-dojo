@@ -243,11 +243,13 @@ you at the wrong work:
    adding a reason, check whether the message is a `throw` or a `Chunk` string;
    only the first kind can ever reach the classifier.
 2. **Filter by `outcome = transpile_error`, not just `event_name`.** Both
-   parameters are absent on the other ~74% of `run_result` events, so a
+   parameters are absent on the other ~98% of `run_result` events, so a
    `run_result` × `transpile_node` exploration renders `(not set)` as its
    dominant row. Same trap as `outcome` above.
-3. **`other` is large and is a to-do, not a residue.** Roughly half of the
-   transpiler's transpile-time throw sites match no rule and land there. The
+3. **`other` is a to-do, not a residue — but it is no longer large.** Roughly
+   half of the transpiler's transpile-time throw sites match no rule and land
+   there, so the *coverage* gap is real; the *volume* through it is now 21
+   events (see the re-measurement above), which is why #43 is a small fix. The
    identifying token is present — those messages start with the transpiler class
    that failed (`CastTranspiler, Source not found`) — and that name comes from
    another closed set we already import. See #43.
@@ -268,8 +270,19 @@ membership in the keys `ArtifactsRules.getRules()` enumerates at runtime (~182,
 plus the literal `structure`, which `structure_parser.ts` attaches without
 going through a rule). **That runtime membership test is the guarantee**;
 `RULE_KEY` in `analytics.ts` is a shape backstop and would not stop a leak on
-its own — `zcust_secret` satisfies it. It fails safe the same way: a renamed
-rule silently stops `syntax_key` while `syntax_error_count` keeps reporting.
+its own — `zcust_secret` satisfies it.
+
+**It does not fail safe the same way, and that is the one place the two
+branches genuinely differ.** For `transpile_node` the value is a
+`constructor.name` and the set is the export names, so a minifier can pull them
+apart and the parameter goes quiet — a real alarm, and what `keepNames` is
+guarding. For `syntax_key` the set and the value are both
+`getMetadata().key`: a renamed rule renames both at once and the new name keeps
+travelling, so **there is no rename alarm here to wait for**. What the
+membership test buys is still the whole privacy argument — only a key abaplint
+itself attaches can travel — but the only thing that actually fails closed is
+the hardcoded `structure` entry. Do not read a healthy `syntax_key` as evidence
+that our vocabulary is still in sync with abaplint's.
 
 `syntax_key` is the key of `errors[0]` — the same issue whose message the user
 is shown — deliberately, not the "most interesting" one. abaplint promises no

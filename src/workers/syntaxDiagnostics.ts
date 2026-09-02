@@ -13,25 +13,37 @@
  * cannot add a key to abaplint's rule registry, so a value that passes is
  * drawn from a vocabulary they do not control.
  *
- * It fails in the safe direction. If abaplint renames a rule, or a bundler
- * mangles the class names `ArtifactsRules` reflects over (see `keepNames` in
- * vite.config.ts), `key` stops being reported and `errorCount` keeps going.
- * We lose detail; we never leak source.
+ * What the check does NOT do is notice when abaplint moves under us. The
+ * allowed set and the value tested against it are both `getMetadata().key`, so
+ * a renamed rule renames both at once and the new name keeps travelling: there
+ * is no alarm here to hear. Do not copy the reasoning from
+ * transpileDiagnostics.ts, which looks identical and is not — there the value
+ * is a `constructor.name` and the set is the export names, two things a
+ * minifier really can pull apart, which is what `keepNames` in vite.config.ts
+ * is for. Reflection over class names plays no part in this module.
+ *
+ * The part that does fail closed is `NON_RULE_KEYS` below: those are hardcoded,
+ * so if abaplint renames one, `key` goes quiet while `errorCount` keeps
+ * reporting. We lose detail; we never leak source.
  */
 import { ArtifactsRules } from "@abaplint/core";
 import type { SyntaxDiagnostics } from "../types/diagnostics";
 
 /**
- * Two keys abaplint attaches to issues it builds outside the rule registry, so
- * `ArtifactsRules` does not know about them. `parser_error` happens to also be
- * a real rule and is already covered; `structure` is not, and without this line
- * every structure failure would be silently dropped.
+ * Keys abaplint attaches to issues it builds outside its rule classes. There
+ * are several — `parser_error`, `check_syntax`, `structure` — but a key only
+ * needs listing here if it is *also* absent from the rule registry, and today
+ * that is `structure` alone; the other two are registered rules too, so
+ * `ArtifactsRules` already covers them. Without this line every structure
+ * failure would be silently dropped.
  *
  * A dropped value is safe but not harmless: a bucket that can never be
  * anything but zero reads as "this never happens", which is worse than having
- * no bucket at all. Re-check this list when bumping @abaplint/core — the
- * source is the `Issue.atPosition(..., "<literal>", ...)` calls outside
- * `src/rules/`.
+ * no bucket at all. So when bumping @abaplint/core, re-audit against the
+ * invariant — every key abaplint can attach is in the rule registry or in this
+ * list — rather than against one grep. Searching `Issue.at*(..., "<literal>",
+ * ...)` outside `src/rules/` finds most of them and not all: `check_syntax`
+ * comes from the syntax engine and that search misses it.
  */
 const NON_RULE_KEYS: readonly string[] = ["structure"];
 
