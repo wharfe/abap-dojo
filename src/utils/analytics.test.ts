@@ -183,6 +183,123 @@ describe("sanitizeParams", () => {
     ).toEqual({ duration_ms: 30 });
   });
 
+  /**
+   * The syntax diagnostics get the same scrutiny as the transpile ones, and for
+   * the same reason: abaplint's messages interpolate the user's source, so the
+   * only thing making a key safe is that the worker matched it against the set
+   * abaplint enumerates. This asserts the shape guard standing behind that.
+   */
+  it("accepts the syntax diagnostics and nothing shaped like source", () => {
+    expect(
+      sanitizeUnchecked("run_result", {
+        outcome: "syntax_error",
+        duration_ms: 30,
+        syntax_key: "parser_error",
+        syntax_error_count: 4,
+      }),
+    ).toEqual({
+      outcome: "syntax_error",
+      duration_ms: 30,
+      syntax_key: "parser_error",
+      syntax_error_count: 4,
+    });
+
+    for (const syntax_key of [
+      'Database table or view "zcust_secret" not found',
+      "parser_error ",
+      "PARSER_ERROR",
+      "parser-error",
+      "",
+      "check_syntax\nWRITE 'x'.",
+    ]) {
+      expect(
+        sanitizeUnchecked("run_result", {
+          outcome: "syntax_error",
+          duration_ms: 30,
+          syntax_key,
+        }),
+      ).toEqual({ outcome: "syntax_error", duration_ms: 30 });
+    }
+  });
+
+  /**
+   * Same limit as AST_NODE, stated so nobody upgrades the pattern to a
+   * guarantee in their head. A snake_case identifier is exactly the
+   * shape of an ABAP variable or a customer table name, and it sails through —
+   * which is fine only because the worker never hands this parameter anything
+   * it has not already found in abaplint's rule keys.
+   */
+  it("does not pretend the RULE_KEY pattern is the privacy guarantee", () => {
+    for (const syntax_key of ["zcust_secret", "lv_password", "mara"]) {
+      expect(
+        sanitizeUnchecked("run_result", {
+          outcome: "syntax_error",
+          duration_ms: 30,
+          syntax_key,
+        }),
+      ).toEqual({ outcome: "syntax_error", duration_ms: 30, syntax_key });
+    }
+  });
+
+  /** A syntax key says nothing on any other outcome, so it does not travel. */
+  it("drops the syntax diagnostics on every other outcome", () => {
+    for (const outcome of [
+      "success",
+      "transpile_error",
+      "runtime_error",
+      "timeout",
+      "stalled",
+      "cancelled",
+      "stopped",
+      "load_error",
+    ] satisfies RunOutcome[]) {
+      expect(
+        sanitizeUnchecked("run_result", {
+          outcome,
+          duration_ms: 30,
+          syntax_key: "parser_error",
+          syntax_error_count: 4,
+        }),
+      ).toEqual({ outcome, duration_ms: 30 });
+    }
+  });
+
+  /**
+   * The two sets of diagnostics are mutually exclusive by construction, so a
+   * caller holding both is already confused. Whichever outcome it claims, only
+   * that outcome's parameters survive — the strip runs in both directions.
+   */
+  it("never lets both kinds of diagnostics travel on one event", () => {
+    const both = {
+      duration_ms: 30,
+      transpile_reason: "unsupported_statement",
+      transpile_node: "Multiply",
+      syntax_key: "parser_error",
+      syntax_error_count: 4,
+    };
+
+    expect(sanitizeUnchecked("run_result", { ...both, outcome: "syntax_error" })).toEqual({
+      outcome: "syntax_error",
+      duration_ms: 30,
+      syntax_key: "parser_error",
+      syntax_error_count: 4,
+    });
+
+    expect(
+      sanitizeUnchecked("run_result", { ...both, outcome: "transpile_error" }),
+    ).toEqual({
+      outcome: "transpile_error",
+      duration_ms: 30,
+      transpile_reason: "unsupported_statement",
+      transpile_node: "Multiply",
+    });
+
+    // An outcome that was itself rejected justifies neither set.
+    expect(
+      sanitizeUnchecked("run_result", { ...both, outcome: "not_a_real_outcome" }),
+    ).toEqual({ duration_ms: 30 });
+  });
+
   /** The three categories that cannot occur are no longer accepted values. */
   it("rejects the retired transpile reasons", () => {
     for (const transpile_reason of ["db_missing", "void_type", "kernel_missing"]) {

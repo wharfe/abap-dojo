@@ -11,6 +11,7 @@ import type { StageResult, ValidationStage } from "../types/validation";
 import { detectPitfalls } from "../rules/detector";
 import { pitfallToLintIssue } from "../rules/pitfallToLintIssue";
 import { classifyTranspileError } from "./transpileDiagnostics";
+import { classifySyntaxError } from "./syntaxDiagnostics";
 
 const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
 
@@ -65,6 +66,10 @@ async function handleTranspile(
         kind: "syntax",
         message: first.getMessage(),
         line: first.getStart().getRow(),
+        // The message above is what the user reads and it embeds their source;
+        // this is the half we are allowed to count. `first` is deliberately the
+        // same issue in both, so the metric can be checked against the screen.
+        syntaxDiagnostics: classifySyntaxError(first.getKey(), errors.length),
         requestId,
       };
     }

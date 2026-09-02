@@ -18,7 +18,7 @@ import { track, lineCount, type RunOutcome } from "./utils/analytics";
 import { scheduleIdle } from "./utils/scheduleIdle";
 import { computeSummary } from "./utils/validationSummary";
 import type { LintIssue, WorkerResponse } from "./types/messages";
-import type { TranspileDiagnostics } from "./types/diagnostics";
+import type { TranspileDiagnostics, SyntaxDiagnostics } from "./types/diagnostics";
 import type { Sample } from "./samples";
 import type { AppMode, StageResult, ValidationStage } from "./types/validation";
 import AbaplintWorker from "./workers/abaplintWorker?worker";
@@ -172,6 +172,11 @@ function App() {
       // Only ever supplied on a transpile_error. `message` is the human-facing
       // text and stays here; this is the sanitised half that may be measured.
       diagnostics?: TranspileDiagnostics,
+      // The same, for a syntax_error. Kept as its own parameter rather than
+      // folded in with the one above so the caller has to say which kind of
+      // failure it is holding, and so a value meant for one outcome cannot ride
+      // along on the other.
+      syntaxDiagnostics?: SyntaxDiagnostics,
     ) => {
       disarmPlaygroundWatchdog();
       playgroundRequestIdRef.current = "";
@@ -195,6 +200,8 @@ function App() {
         output_lines: outputLines ?? runOutputCountRef.current,
         transpile_reason: diagnostics?.reason,
         transpile_node: diagnostics?.node,
+        syntax_key: syntaxDiagnostics?.key,
+        syntax_error_count: syntaxDiagnostics?.errorCount,
       });
     },
     [disarmPlaygroundWatchdog],
@@ -281,10 +288,13 @@ function App() {
               ? `${label} (L${data.line}): ${data.message}`
               : `${label}: ${data.message}`,
             undefined,
-            // "set on no other outcome" is the documented invariant, so enforce it
-            // here rather than trusting the worker to keep omitting it: the field
-            // is optional on a union member that covers both kinds.
+            // "set on no other outcome" is the documented invariant, so enforce
+            // it here rather than trusting the worker to keep omitting it: both
+            // fields are optional on a union member that covers both kinds, and
+            // the strip runs in both directions so neither outcome can pick up
+            // the other's measurements.
             isSyntax ? undefined : data.diagnostics,
+            isSyntax ? data.syntaxDiagnostics : undefined,
           );
         }
       }

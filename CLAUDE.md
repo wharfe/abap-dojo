@@ -153,7 +153,7 @@ renaming a parameter:
 
 | Register as custom **dimension** (text) | Register as custom **metric** (number) |
 |---|---|
-| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
+| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length`, `syntax_error_count` |
 
 Do not register `duration_ms` as a dimension — it is near-unique per event and
 makes the report unusable. Note `outcome` is shared by `run_result` and
@@ -189,7 +189,17 @@ using the Stop button.
 
 That split earned its keep: over 2026-08-05..08, `transpile_error` was 25.6% of
 runs against `syntax_error`'s 2.5%. Visitors write valid ABAP; we fail to
-transpile a quarter of it. `run_result` therefore also carries
+transpile a quarter of it.
+
+**That ratio has since inverted, and the inversion is the point of keeping them
+apart.** Over 2026-08-12..09-01: `success` 58.3%, `syntax_error` 31.9% (2,883
+runs), `runtime_error` 6.4%, `transpile_error` **1.7%** (157 runs). The failure
+that dominates is no longer ours. Read either number alone and you would pick
+the wrong work; the pair is what shows the subject changed. Note the same
+period puts `other` — the `transpile_reason` bucket #43 exists to empty — at 21
+events total, so #43 is now a small fix, not the large one it was written as.
+
+`run_result` therefore also carries
 `transpile_reason` (a 6-value enum: which *kind* of failure) and
 `transpile_node` (which abaplint AST class had no transpiler, e.g. `Multiply`),
 both produced by `src/workers/transpileDiagnostics.ts` and set on no other
@@ -233,14 +243,86 @@ you at the wrong work:
    adding a reason, check whether the message is a `throw` or a `Chunk` string;
    only the first kind can ever reach the classifier.
 2. **Filter by `outcome = transpile_error`, not just `event_name`.** Both
-   parameters are absent on the other ~74% of `run_result` events, so a
+   parameters are absent on the other ~98% of `run_result` events, so a
    `run_result` × `transpile_node` exploration renders `(not set)` as its
    dominant row. Same trap as `outcome` above.
-3. **`other` is large and is a to-do, not a residue.** Roughly half of the
-   transpiler's transpile-time throw sites match no rule and land there. The
+3. **`other` is a to-do, not a residue — but it is no longer large.** Roughly
+   half of the transpiler's transpile-time throw sites match no rule and land
+   there, so the *coverage* gap is real; the *volume* through it is now 21
+   events (see the re-measurement above), which is why #43 is a small fix. The
    identifying token is present — those messages start with the transpiler class
    that failed (`CastTranspiler, Source not found`) — and that name comes from
    another closed set we already import. See #43.
+
+### `syntax_error` carries its own diagnosis too
+
+`syntax_error` is now the largest failure by a wide margin — five times
+`runtime_error`, the next one, and nineteen times `transpile_error` — so it gets
+the same treatment: `run_result` carries `syntax_key` (which abaplint rule
+reported the issue) and `syntax_error_count` (how many Error-severity issues
+the parse produced), both set on no other outcome, both produced by
+`src/workers/syntaxDiagnostics.ts`.
+
+The privacy argument is the same one, with a different closed set. abaplint's
+messages interpolate the user's source just as the transpiler's do
+(`Database table or view "zcust_secret" not found`), so the message stays in
+the browser and only the key travels — and only after being tested for
+membership in the keys `ArtifactsRules.getRules()` enumerates at runtime (~182,
+plus the literal `structure`, which `structure_parser.ts` attaches without
+going through a rule). **That runtime membership test is the guarantee**;
+`RULE_KEY` in `analytics.ts` is a shape backstop and would not stop a leak on
+its own — `zcust_secret` satisfies it.
+
+**It does not fail safe the same way, and that is the one place the two
+branches genuinely differ.** For `transpile_node` the value is a
+`constructor.name` and the set is the export names, so a minifier can pull them
+apart and the parameter goes quiet — a real alarm, and what `keepNames` is
+guarding. For `syntax_key` the set and the value are both
+`getMetadata().key`: a renamed rule renames both at once and the new name keeps
+travelling, so **there is no rename alarm here to wait for**. What the
+membership test buys is still the whole privacy argument — only a key abaplint
+itself attaches can travel — but the only thing that actually fails closed is
+the hardcoded `structure` entry. Do not read a healthy `syntax_key` as evidence
+that our vocabulary is still in sync with abaplint's.
+
+`syntax_key` is the key of `errors[0]` — the same issue whose message the user
+is shown — deliberately, not the "most interesting" one. abaplint promises no
+order, and a missing period really does surface `check_syntax` ahead of the
+`parser_error` that caused it. Ranking them would bury our own guess about
+which error matters inside the measurement, and we would then read that guess
+back out as if it were evidence. Reporting what the user saw keeps the number
+checkable against the screen; `syntax_error_count` is what separates "one line
+broke" from "the whole program did".
+
+**What the buckets mean, and why the split is worth a GA4 registration:**
+
+| `syntax_key` | Means | The work it implies |
+|---|---|---|
+| `parser_error` | abaplint does not recognise the syntax | support more syntax |
+| `check_syntax` | parsed, then the semantic pass rejected it — **anything** from a missing DB table to a type mismatch | **not decidable from this key alone** |
+| `unknown_types` | a type we do not have. **`STRING_TABLE` is one** | carry more standard artifacts |
+| `implement_methods` | structural, e.g. a `CLASS` with no implementation | genuinely the user's bug |
+
+`parser_error` and `unknown_types` point at opposite investments, and before
+this parameter existed the metric could not tell them apart. Do not assume the
+answer is "LLMs write broken ABAP": `STRING_TABLE` is a type every ABAP
+developer expects to exist, and here it is a `syntax_error`.
+
+**`check_syntax` is the bucket to be careful with, and it will probably be
+large.** abaplint raises it from ~72 files across its whole semantic pass, so
+it carries missing lookups (`Database table or view "x" not found`,
+`Class or type "x" not found`) *and* ordinary type errors
+(`Into must be table typed`, `Field x does not exist in table row structure`)
+under one key. **A big `check_syntax` share therefore says nothing about
+whether the work is "carry more of the SAP standard" or "the user's code is
+wrong"** — those are the two answers it merges. Splitting it needs a second
+signal that does not exist yet (#56); until then, read `check_syntax` as
+"we do not know" rather than as evidence for either.
+
+Two traps, both the same shape as the `transpile_*` ones: filter by
+`outcome = syntax_error` and not just `event_name`, or `(not set)` dominates
+the report; and a *new value* of `syntax_key` needs no GA4 change, while a new
+*parameter* does.
 
 Only Playground is instrumented. `handleValidate` catches the same throws but
 `validate_result` carries no `transpile_reason`; that is a scope call, not an
@@ -306,7 +388,18 @@ GA4 treat a fragment change as a page view.
 - Monaco is loaded lazily, so it must not be imported from the entry chunk. `src/components/EditorPanel.tsx` imports `./MonacoEditor` dynamically at the first idle moment and shows `EditorSkeleton` (a real textarea) until then. Importing Monaco anywhere eagerly puts 2.7 MB back into the entry chunk and undoes it — check `npm run build` output: `index-*.js` should stay around 350 kB with a separate `MonacoEditor-*.js`.
 - The skeleton is deliberately not a `<Suspense fallback>`. A fallback is a separate subtree, so React unmounts and remounts the textarea when switching — dropping focus, caret and in-flight IME composition.
 - Web Worker imports use Vite's `?worker` suffix.
-- Transpiler input is ABAP 7.02 syntax base; higher syntax needs downport rules first.
+- **The syntax version is `open-abap`, not 7.02.** `@abaplint/transpiler`'s
+  exported `config.syntax.version` is what `abaplintWorker.ts` feeds `Config`,
+  and it reads `open-abap` — verify with
+  `node -e 'console.log(require("@abaplint/transpiler").config.syntax)'` rather
+  than trusting this line. This matters because "we pin 7.02" is the obvious
+  explanation for a `syntax_error` rate of 32%, and it is the wrong one: modern
+  expressions parse. What fails is the semantic pass, and part of that is
+  artifacts we do not carry — `STRING_TABLE`, a DDIC table, a `CL_*` class —
+  because open-abap-core holds a fraction of the SAP standard. Downport rules
+  address none of it. How much of the 32% is that missing-artifact half rather
+  than ordinary type errors is **not yet known**: abaplint files both under
+  `check_syntax` (see #56).
 - DB operations (SELECT etc.) require in-memory DB simulation in browser.
 - Security headers (CSP, HSTS, etc.) live in `public/_headers` — Cloudflare Pages-specific format. `vite preview` does NOT apply them, so CSP-related breakage only shows in production. Test with Playwright + production build before claiming a deploy is safe.
 - **Cloudflare Pages 308-redirects `/x.html` to `/x`.** The extensionless URL is the only one that serves 200, so it is the one every `rel="canonical"`, `og:url`, `sitemap.xml` entry and internal `href` must use. Declaring the `.html` form told Google the canonical was a redirecting URL, and Search Console duly indexed both forms of the same page as separate URLs. `/docs/index.html` redirects to `/docs/`, so directory pages keep the trailing slash. `vite preview` resolves extensionless URLs to the `.html` file too, so this is verifiable locally — but the redirect itself only exists in production.

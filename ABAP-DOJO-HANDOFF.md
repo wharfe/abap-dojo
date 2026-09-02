@@ -33,7 +33,14 @@
 
 ### 制約事項
 
-- トランスパイラの入力は **ABAP 7.02構文** が基本。高い構文はabaplintのdownportルールで自動変換可能
+- **実装上の訂正（2026-09-02 実測）**: トランスパイラの構文バージョンは 7.02 ではなく
+  **`open-abap`**（`@abaplint/transpiler` の `config.syntax.version`）。したがって
+  「7.02 固定だから新しい構文が弾かれる」は成立せず、downport ルールは今の失敗の答えではない。
+  実際に詰まるのは構文ではなく**意味解析** — `STRING_TABLE`・DDIC テーブル・`CL_*` クラスが
+  open-abap-core に無い、という欠落が `syntax_error`（全 Run の 32%）に落ちている。
+  ただし **「32% の主成分が標準アーティファクトの欠落」とはまだ言えない**: abaplint は
+  型不整合なども同じ `check_syntax` キーで発行するため、欠落と純粋なコードの誤りが1つの
+  バケツに混ざる。内訳の判定には別の signal が必要（#56）
 - DB操作（SELECT等）はインメモリDBシミュレーション（`@abaplint/database-sqlite`相当をブラウザで）
 - SAP標準クラス・関数モジュールは未実装のものが多い。open-abap-coreで基本的なもののみ
 
