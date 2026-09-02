@@ -50,11 +50,14 @@ describe("isKnownRuleKey", () => {
 
   /**
    * Guards the reflection this module depends on. `ArtifactsRules.getRules()`
-   * instantiates every export of abaplint's rules barrel and reads
-   * `getMetadata().key`; a bundler that mangles class names, or an abaplint
-   * refactor, could quietly return far fewer. A collapsed set is safe — every
-   * key gets dropped — but it would look identical to "syntax errors stopped
-   * carrying keys", so pin the order of magnitude here where it is diagnosable.
+   * walks the exports of abaplint's rules barrel, instantiates each one and
+   * keeps those with a `getMetadata`. Nothing here reads a `constructor.name`,
+   * so name mangling is not the risk — `keepNames` is what the *transpile*
+   * classifier needs, not this one. What can quietly cut this set down is a
+   * missing export, tree-shaking of the barrel, or abaplint changing how it
+   * enumerates. A collapsed set is safe (every key gets dropped) but would
+   * look identical to "syntax errors stopped carrying keys", so pin the order
+   * of magnitude here where it is diagnosable.
    */
   it("reflects a full rule set, not a collapsed one", () => {
     expect(ArtifactsRules.getRules().length).toBeGreaterThan(150);

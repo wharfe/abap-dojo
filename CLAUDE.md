@@ -256,7 +256,8 @@ you at the wrong work:
 
 ### `syntax_error` carries its own diagnosis too
 
-`syntax_error` is now the largest failure by an order of magnitude, so it gets
+`syntax_error` is now the largest failure by a wide margin — five times
+`runtime_error`, the next one, and nineteen times `transpile_error` — so it gets
 the same treatment: `run_result` carries `syntax_key` (which abaplint rule
 reported the issue) and `syntax_error_count` (how many Error-severity issues
 the parse produced), both set on no other outcome, both produced by
@@ -298,14 +299,25 @@ broke" from "the whole program did".
 | `syntax_key` | Means | The work it implies |
 |---|---|---|
 | `parser_error` | abaplint does not recognise the syntax | support more syntax |
-| `check_syntax` | parsed, then a lookup failed — a DB table, a `CL_*` class | carry more standard artifacts |
+| `check_syntax` | parsed, then the semantic pass rejected it — **anything** from a missing DB table to a type mismatch | **not decidable from this key alone** |
 | `unknown_types` | a type we do not have. **`STRING_TABLE` is one** | carry more standard artifacts |
 | `implement_methods` | structural, e.g. a `CLASS` with no implementation | genuinely the user's bug |
 
-Those are opposite investments, and before this parameter existed the metric
-could not tell them apart. Do not assume the answer is "LLMs write broken
-ABAP": `STRING_TABLE` is a type every ABAP developer expects to exist, and here
-it is a `syntax_error`.
+`parser_error` and `unknown_types` point at opposite investments, and before
+this parameter existed the metric could not tell them apart. Do not assume the
+answer is "LLMs write broken ABAP": `STRING_TABLE` is a type every ABAP
+developer expects to exist, and here it is a `syntax_error`.
+
+**`check_syntax` is the bucket to be careful with, and it will probably be
+large.** abaplint raises it from ~72 files across its whole semantic pass, so
+it carries missing lookups (`Database table or view "x" not found`,
+`Class or type "x" not found`) *and* ordinary type errors
+(`Into must be table typed`, `Field x does not exist in table row structure`)
+under one key. **A big `check_syntax` share therefore says nothing about
+whether the work is "carry more of the SAP standard" or "the user's code is
+wrong"** — those are the two answers it merges. Splitting it needs a second
+signal that does not exist yet (#56); until then, read `check_syntax` as
+"we do not know" rather than as evidence for either.
 
 Two traps, both the same shape as the `transpile_*` ones: filter by
 `outcome = syntax_error` and not just `event_name`, or `(not set)` dominates
@@ -382,9 +394,12 @@ GA4 treat a fragment change as a page view.
   `node -e 'console.log(require("@abaplint/transpiler").config.syntax)'` rather
   than trusting this line. This matters because "we pin 7.02" is the obvious
   explanation for a `syntax_error` rate of 32%, and it is the wrong one: modern
-  expressions parse. What fails is lookup — `STRING_TABLE`, a DDIC table, a
-  `CL_*` class — because open-abap-core carries a fraction of the SAP standard.
-  Downport rules do not address that.
+  expressions parse. What fails is the semantic pass, and part of that is
+  artifacts we do not carry — `STRING_TABLE`, a DDIC table, a `CL_*` class —
+  because open-abap-core holds a fraction of the SAP standard. Downport rules
+  address none of it. How much of the 32% is that missing-artifact half rather
+  than ordinary type errors is **not yet known**: abaplint files both under
+  `check_syntax` (see #56).
 - DB operations (SELECT etc.) require in-memory DB simulation in browser.
 - Security headers (CSP, HSTS, etc.) live in `public/_headers` — Cloudflare Pages-specific format. `vite preview` does NOT apply them, so CSP-related breakage only shows in production. Test with Playwright + production build before claiming a deploy is safe.
 - **Cloudflare Pages 308-redirects `/x.html` to `/x`.** The extensionless URL is the only one that serves 200, so it is the one every `rel="canonical"`, `og:url`, `sitemap.xml` entry and internal `href` must use. Declaring the `.html` form told Google the canonical was a redirecting URL, and Search Console duly indexed both forms of the same page as separate URLs. `/docs/index.html` redirects to `/docs/`, so directory pages keep the trailing slash. `vite preview` resolves extensionless URLs to the `.html` file too, so this is verifiable locally — but the redirect itself only exists in production.

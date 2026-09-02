@@ -78,8 +78,13 @@ export interface TranspileDiagnostics {
  *
  * Which keys actually show up, measured against real broken ABAP:
  *   - `parser_error`      syntax abaplint does not recognise (`print(lv).`)
- *   - `check_syntax`      resolved fine grammatically, then failed to look
- *                         something up — a missing DB table, an unknown class
+ *   - `check_syntax`      parsed, then the semantic pass rejected it. A broad
+ *                         bucket: abaplint raises this key from ~72 files, so
+ *                         a missing DB table and `Into must be table typed`
+ *                         arrive under the same name. **Do not read a large
+ *                         `check_syntax` share as either "we are missing SAP
+ *                         artifacts" or "the user's code is wrong"** — it
+ *                         merges exactly those two answers. See #56
  *   - `unknown_types`     a type we do not carry. `STRING_TABLE` is one, which
  *                         is why this bucket matters: it separates "the user
  *                         wrote nonsense" from "we are missing standard SAP
