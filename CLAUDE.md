@@ -137,6 +137,27 @@ Product-usage events live in `src/utils/analytics.ts`. Two rules:
    Trade-off: if the custom domain is ever detached and the site is served from
    `*.pages.dev`, measurement silently drops to zero.
 
+### Verifying what production actually sends, without sending it
+
+The standing rule is that a live production run needs explicit permission every time. GA4 has a
+way out that costs nothing: **block the tag script, keep the inline snippet.**
+
+`index.html` defines `window.gtag` inline as `dataLayer.push(arguments)` and loads
+`googletagmanager.com/gtag/js` separately (lines ~92-98). Abort that one request in Playwright and
+`gtag()` still runs — every call lands in `window.dataLayer` and **nothing is transmitted**:
+
+```js
+await page.route('**/googletagmanager.com/**', r => r.abort())
+await page.goto('https://abapdojo.com/')
+const events = await page.evaluate(() => window.dataLayer)
+```
+
+So you can read the exact parameters the **production bundle** sends, from production, with zero
+writes to the GA4 property. This is the verification to reach for before asking to run for real —
+it checks the thing local dev cannot (local leaves `window.gtag` undefined, so `track()` no-ops).
+What it does **not** cover: whether GA4 accepts and stores the event, and whether the custom
+definitions are registered (see the section above).
+
 `url_code_open` counts page loads whose `#code=` parameter *decoded*, not
 shared-link arrivals — the app writes `#code=` into the user's own URL on share
 and on mode switch, so a reload is indistinguishable. It also differs from the
@@ -400,6 +421,24 @@ GA4 treat a fragment change as a page view.
   address none of it. How much of the 32% is that missing-artifact half rather
   than ordinary type errors is **not yet known**: abaplint files both under
   `check_syntax` (see #56).
+- **`src/index.css` is a bare `@import "tailwindcss"` with no `source(none)`, so Tailwind v4
+  scans every file on disk — not the files in the build.** An ordinary English word in a comment
+  can therefore become a utility class in production CSS (`lowercase`, `shrink`; measured
+  2026-09-02, twice in one session — see #44 and the note in `src/types/messages.ts`).
+
+  Two consequences when you try to isolate which change caused a CSS size delta:
+
+  - **`git stash` does not give you a baseline.** Stash leaves untracked files on disk, and disk
+    is what v4 scans, so a new untracked `*.ts` keeps contributing classes after the stash.
+    Isolate by **moving the files out of the repo** (`mv src/workers/foo.ts /tmp/x/`), then build.
+  - **Diff the CSS with the rules split onto lines**, or a one-rule delta is invisible inside one
+    long line (verified 2026-09-03 by deleting a real rule and watching it appear):
+
+    ```bash
+    diff <(tr "}" "\n" < before.css) <(tr "}" "\n" < after.css)
+    # > .shrink{flex-shrink:1
+    ```
+
 - DB operations (SELECT etc.) require in-memory DB simulation in browser.
 - Security headers (CSP, HSTS, etc.) live in `public/_headers` — Cloudflare Pages-specific format. `vite preview` does NOT apply them, so CSP-related breakage only shows in production. Test with Playwright + production build before claiming a deploy is safe.
 - **Cloudflare Pages 308-redirects `/x.html` to `/x`.** The extensionless URL is the only one that serves 200, so it is the one every `rel="canonical"`, `og:url`, `sitemap.xml` entry and internal `href` must use. Declaring the `.html` form told Google the canonical was a redirecting URL, and Search Console duly indexed both forms of the same page as separate URLs. `/docs/index.html` redirects to `/docs/`, so directory pages keep the trailing slash. `vite preview` resolves extensionless URLs to the `.html` file too, so this is verifiable locally — but the redirect itself only exists in production.
