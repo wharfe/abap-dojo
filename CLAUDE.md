@@ -137,7 +137,7 @@ Product-usage events live in `src/utils/analytics.ts`. Two rules:
    Trade-off: if the custom domain is ever detached and the site is served from
    `*.pages.dev`, measurement silently drops to zero.
 
-### Verifying what production actually sends, without sending it
+### Reading the parameters production hands to `gtag`, without sending them
 
 The standing rule is that a live production run needs explicit permission every time. GA4 has a
 way out that costs nothing: **block the tag script, keep the inline snippet.**
@@ -152,11 +152,18 @@ await page.goto('https://abapdojo.com/')
 const events = await page.evaluate(() => window.dataLayer)
 ```
 
-So you can read the exact parameters the **production bundle** sends, from production, with zero
-writes to the GA4 property. This is the verification to reach for before asking to run for real —
-it checks the thing local dev cannot (local leaves `window.gtag` undefined, so `track()` no-ops).
-What it does **not** cover: whether GA4 accepts and stores the event, and whether the custom
-definitions are registered (see the section above).
+So you can read what the **production bundle** passes to `gtag()` — the application-defined
+parameters `analytics.ts` produced — from production, with zero writes to the GA4 property. This is
+the verification to reach for before asking to run for real: it checks the thing local dev cannot
+(local leaves `window.gtag` undefined, so `track()` no-ops).
+
+**It stops at the call arguments.** Everything `gtag.js` itself would do is absent because the tag
+never loads: merging config/global/event scopes, automatically collected parameters, Enhanced
+Measurement's extra events, hash/history settings, and any transformation, drop, or destination
+routing configured in the GA4 admin. So this does **not** verify the final network payload, and it
+does not tell you whether GA4 accepts and stores the event, nor whether the custom definitions are
+registered (see the section above). To check the wire format instead, load the real tag and abort
+the request to the collection endpoint — a different test, not this one.
 
 `url_code_open` counts page loads whose `#code=` parameter *decoded*, not
 shared-link arrivals — the app writes `#code=` into the user's own URL on share
@@ -422,15 +429,18 @@ GA4 treat a fragment change as a page view.
   than ordinary type errors is **not yet known**: abaplint files both under
   `check_syntax` (see #56).
 - **`src/index.css` is a bare `@import "tailwindcss"` with no `source(none)`, so Tailwind v4
-  scans every file on disk — not the files in the build.** An ordinary English word in a comment
-  can therefore become a utility class in production CSS (`lowercase`, `shrink`; measured
-  2026-09-02, twice in one session — see #44 and the note in `src/types/messages.ts`).
+  automatically detects sources — it scans the project's non-ignored files rather than the files
+  the build imports** (`.gitignore`d paths, `node_modules`, CSS, binaries and common lockfiles are
+  excluded). An ordinary English word in a comment can therefore become a utility class in
+  production CSS (`lowercase`, `shrink`; measured 2026-09-02, twice in one session — see #44 and
+  the note in `src/types/messages.ts`).
 
   Two consequences when you try to isolate which change caused a CSS size delta:
 
-  - **`git stash` does not give you a baseline.** Stash leaves untracked files on disk, and disk
-    is what v4 scans, so a new untracked `*.ts` keeps contributing classes after the stash.
-    Isolate by **moving the files out of the repo** (`mv src/workers/foo.ts /tmp/x/`), then build.
+  - **A plain `git stash` does not give you a baseline.** It leaves untracked files on disk, and
+    disk is what v4 detects from, so a new untracked `*.ts` keeps contributing classes after the
+    stash. Either stash them too (`git stash -u`) or **move the files out of the repo**
+    (`mv src/workers/foo.ts /tmp/x/`) before building.
   - **Diff the CSS with the rules split onto lines**, or a one-rule delta is invisible inside one
     long line (verified 2026-09-03 by deleting a real rule and watching it appear):
 
