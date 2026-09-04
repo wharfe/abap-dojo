@@ -26,7 +26,7 @@
  * so if abaplint renames one, `key` goes quiet while `errorCount` keeps
  * reporting. We lose detail; we never leak source.
  */
-import { ArtifactsRules } from "@abaplint/core";
+import { ArtifactsRules, Statements } from "@abaplint/core";
 import type { SyntaxDiagnostics } from "../types/diagnostics";
 
 /**
@@ -52,6 +52,71 @@ const RULE_KEYS: ReadonlySet<string> = new Set([
   ...NON_RULE_KEYS,
 ]);
 
+/**
+ * The leading keyword of every statement abaplint knows how to parse.
+ *
+ * This is the second closed set in this file, and it exists for a different
+ * value than `RULE_KEYS`. `parser_error` is the largest syntax bucket, and its
+ * key alone says only "abaplint did not recognise this" — never which syntax,
+ * so it cannot tell "support more ABAP" from "the user typed nonsense". The
+ * identifying token IS in the message, exactly as in transpileDiagnostics.ts:
+ *
+ *   `Statement does not exist in ABAPopen-abap(or a parser error), "FOO"`
+ *
+ * — but unlike `transpile_node`, the value in that slot is the user's own
+ * source. `FOO` and `ZSECRET` and `lv_password` all arrive the same way. So it
+ * travels only if it is a member of this set, which abaplint enumerates and
+ * the user cannot extend: 176 keywords, drawn from the 317 statement classes
+ * (`CALL FUNCTION` and `CALL METHOD` both reduce to `CALL`).
+ *
+ * The empty string is dropped deliberately. At least one matcher answers `""`,
+ * and a set containing it would admit an empty token — the one value that
+ * passes a membership test without meaning anything.
+ */
+export const STATEMENT_KEYWORDS: ReadonlySet<string> = new Set(
+  Object.values(Statements).flatMap((Statement) =>
+    new Statement()
+      .getMatcher()
+      .first()
+      .filter((keyword) => keyword !== ""),
+  ),
+);
+
+/** True if `token` is a leading keyword of a statement abaplint can parse. */
+export function isKnownStatementKeyword(token: string): boolean {
+  return STATEMENT_KEYWORDS.has(token);
+}
+
+/**
+ * The failing statement's first token, from the one `parser_error` message
+ * that carries it.
+ *
+ * `parser_error` is four messages, not one (see abaplint's
+ * `rules/parser_error.js`), and matching on the key alone gets two of them
+ * wrong. `Macro recursion detected involving "X"` also ends in a quoted token,
+ * so it would report a macro's name as a statement we cannot parse;
+ * `Statement too long, refactor statement` and `Pragmas not allowed in v700`
+ * carry no token, so they would silently swell the absent bucket with a third
+ * unrelated cause.
+ * Hence the whole sentence is matched, not just the tail. The middle is
+ * wildcarded because abaplint interpolates the configured version there
+ * (`the configured ABAP version`, `ABAPopen-abap`).
+ *
+ * The anchors are not the safety property and must not be read as one: the
+ * user's source is interpolated into this same message and can contain quotes,
+ * so a crafted program can steer which characters land in the slot. That is
+ * fine, and it is the argument `transpile_node` rests on — whatever comes out
+ * is then tested against `STATEMENT_KEYWORDS`, so the only strings that can
+ * leave the browser are abaplint's own 176 keywords. Steering changes which
+ * keyword is reported, never whether the user's text can be one.
+ */
+const UNKNOWN_STATEMENT =
+  /^Statement does not exist in .*\(or a parser error\), "([^"]*)"$/;
+
+function unparsedToken(message: string): string | undefined {
+  return UNKNOWN_STATEMENT.exec(message)?.[1];
+}
+
 /** True if `key` is one abaplint can attach to an issue. */
 export function isKnownRuleKey(key: string): boolean {
   return RULE_KEYS.has(key);
@@ -72,9 +137,47 @@ export function isKnownRuleKey(key: string): boolean {
 export function classifySyntaxError(
   firstKey: string,
   errorCount: number,
+  firstMessage: string,
 ): SyntaxDiagnostics {
+  const key = isKnownRuleKey(firstKey) ? firstKey : undefined;
   return {
-    key: isKnownRuleKey(firstKey) ? firstKey : undefined,
+    key,
     errorCount,
+    // `parser_error` only. The other keys interpolate different things into
+    // that trailing slot — `unknown_types` puts a type name there, and
+    // `check_syntax` a table or class name — none of which is drawn from a set
+    // abaplint enumerates. Widening this to them is #56's problem, not a
+    // one-line change here.
+    statement: key === "parser_error" ? knownKeyword(firstMessage) : undefined,
   };
+}
+
+/**
+ * Every ABAP statement keyword is ASCII, so case folding is restricted to
+ * tokens that already are. `"\u0131".toUpperCase()` is `"I"` — a dotless i
+ * folds `\u0131f` into `IF`, and `\u0131f x.` really does reach here as that
+ * token. Nothing leaks (`IF` is abaplint's own word either way), but the
+ * parameter would report that we cannot parse `IF` when nobody wrote `IF`,
+ * which is the analytic meaning this whole module exists to keep honest.
+ */
+const ASCII_TOKEN = /^[A-Za-z][A-Za-z0-9-]*$/;
+
+function knownKeyword(message: string): string | undefined {
+  const token = unparsedToken(message);
+  if (token === undefined || !ASCII_TOKEN.test(token)) return undefined;
+  // ABAP is case-insensitive and abaplint quotes the token exactly as the user
+  // typed it, so `write` and `WRITE` are the same statement and the same
+  // finding. LLMs write lower-case ABAP routinely; testing the raw token would
+  // drop most real keywords AND make the resulting emptiness read as "not
+  // ABAP", which is the opposite of what happened.
+  //
+  // Case-folding user input before a membership test does not widen what can
+  // travel: `zsecret` folds to `ZSECRET`, which is not a member either. And
+  // what is emitted is the folded string, which `has` proved byte-identical to
+  // a member of the set — so the value leaving here is one of abaplint's own
+  // 176 keywords, not a string the user shaped. `toUpperCase` rather than
+  // `toLocaleUpperCase`: the locale-aware one maps `i` to `İ` under a Turkish
+  // locale and would silently stop recognising `IF`.
+  const keyword = token.toUpperCase();
+  return isKnownStatementKeyword(keyword) ? keyword : undefined;
 }

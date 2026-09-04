@@ -210,7 +210,13 @@ renaming a parameter:
 
 | Register as custom **dimension** (text) | Register as custom **metric** (number) |
 |---|---|
-| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length`, `syntax_error_count` |
+| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key`, `syntax_statement`, `syntax_error_count` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
+
+`syntax_error_count` is registered as a **dimension**, not a metric, and that is
+deliberate rather than a mistake to fix: its values top out around 19, so the
+distribution is readable and more useful than a sum (measured 2026-09-04: 181
+events at 1, 82 at 2, 42 at 3, tailing off — about half of all syntax errors are
+a single error). The `duration_ms` warning below does not apply to it.
 
 Do not register `duration_ms` as a dimension — it is near-unique per event and
 makes the report unusable. Note `outcome` is shared by `run_result` and
@@ -365,6 +371,103 @@ membership test buys is still the whole privacy argument — only a key abaplint
 itself attaches can travel — but the only thing that actually fails closed is
 the hardcoded `structure` entry. Do not read a healthy `syntax_key` as evidence
 that our vocabulary is still in sync with abaplint's.
+
+### `parser_error` says *that* we failed, `syntax_statement` says *at what*
+
+`parser_error` is the largest bucket inside the largest failure, and on its own
+it is close to useless for deciding work: it means "abaplint did not recognise
+this" and stops. That merges the two answers that point at opposite
+investments — a form of `WRITE` we cannot parse, and a line of JavaScript
+somebody pasted in.
+
+So `run_result` also carries `syntax_statement` on `parser_error` **only**: the
+leading keyword of the statement that failed, produced by
+`src/workers/syntaxDiagnostics.ts`.
+
+The privacy argument is the third instance of the same one, and this time the
+slot genuinely holds the user's source. abaplint's message is
+`Statement does not exist in the configured ABAP version(or a parser error), "FOO"`,
+and that quoted token is whatever the user typed. It travels only if it is a
+member of the set of leading keywords abaplint enumerates from its own 317
+statement classes at runtime — 176 of them, `CALL FUNCTION` and `CALL METHOD`
+both reducing to `CALL`. **That membership test is the guarantee.** The
+end-of-line anchor is not: the user's source is interpolated into the same
+message and can contain quotes, so a crafted program can steer which characters
+land in the slot. It does not matter — steering changes *which real ABAP
+keyword* is reported, never whether the user's own text can be one.
+`STATEMENT_KEYWORD` in `analytics.ts` is a shape backstop and would not stop a
+leak alone: `ZSECRET` satisfies it.
+
+One trap in building that set: at least one matcher answers `""` for its first
+token, and a set containing the empty string admits an empty token — the one
+value that passes a membership test while meaning nothing. It is dropped
+explicitly.
+
+**The token is case-folded before the test, and that is load-bearing.** ABAP is
+case-insensitive and abaplint quotes the token exactly as the user typed it, so
+`write` and `WRITE` are one finding. LLMs write lower-case ABAP routinely, so
+testing the raw token would drop most real keywords — and, because of the rule
+below, would hide exactly the keywords this parameter exists to surface. Folding does not widen what can travel (`zsecret` folds to `ZSECRET`,
+still not a member), and what is emitted is the folded string that `has` proved
+identical to a set member, so the value leaving the browser is abaplint's own
+keyword rather than a string the user shaped. `toUpperCase`, never
+`toLocaleUpperCase`: the locale-aware one maps `i` to `İ` under a Turkish
+locale and would silently stop recognising `IF`. Folding is also restricted to
+tokens that are already ASCII, because Unicode case mapping runs the other way
+too — `"ı".toUpperCase()` is `"I"`, so `ıf x.` would otherwise be recorded as
+`IF`. No source escapes either way; what breaks is the parameter's meaning,
+which would claim we cannot parse a keyword nobody wrote.
+
+**What it separates is "abaplint knows this leading keyword" from "it does
+not" — NOT "ABAP" from "pasted non-ABAP".** That distinction sounds pedantic
+and is the difference between reading the report correctly and picking the
+wrong work, because ABAP and JavaScript share most of their keywords. Measured
+against the real Registry:
+
+| the user wrote | `syntax_statement` | what it really means |
+|---|---|---|
+| `WRITE 'a'` with no period | `WRITE` | ours — a statement every ABAP developer uses, in a form we cannot parse |
+| `class Foo {}` | `CLASS` | **JavaScript, reported identically** |
+| `if (x) { y(); }` | `IF` | JavaScript |
+| `function f() {}` | `FUNCTION` | JavaScript |
+| `return x;` | `RETURN` | JavaScript |
+| `FROBNICATE zsecret_table.` | *(absent)* | not in the vocabulary |
+| `SELCT * FROM mara.` | *(absent)* | a typo |
+| `const x = 5.` | *(absent)* | JavaScript — but only because `CONST` happens not to be an ABAP statement keyword |
+
+Of the JS keywords worth checking, `CLASS` `IF` `DO` `FUNCTION` `RETURN`
+`WHILE` `IMPORT` `EXPORT` `NEW` `DELETE` `TRY` `CATCH` `CASE` `BREAK`
+`CONTINUE` `ELSE` all collide, while `CONST` `THROW` `FOR` `VAR` `LET`
+`SWITCH` do not. Which side a paste lands on is an accident of vocabulary
+overlap, not a judgement about the code.
+
+So a high `IF` or `CLASS` count is **not** evidence that we should teach the
+parser more about `IF`. Confirm what people are actually writing before acting
+on this parameter — it narrows the question from 155 undifferentiated
+`parser_error` events to a named keyword, and that is all it does. Separating
+pasted JavaScript from real ABAP needs a second signal that does not exist
+(the same shape as #56, one branch over).
+
+**`(not set)` has at least four causes and cannot distinguish them**: a typo of
+a real ABAP word (`SELCT`), a word from another language that happens not to
+collide (`const`), an identifier the user invented (`frobnicate`), and a
+`parser_error` of a different message shape. That last one is not negligible:
+`parser_error` is four different messages, not one. abaplint's rule emits the unknown-statement one this
+parameter is about, plus `Statement too long, refactor statement`,
+`Macro recursion detected involving "X"` and `Pragmas not allowed in v700`. The
+macro one also ends in a quoted token, so keying on `parser_error` alone would
+report a macro's name as a statement we cannot parse. The classifier therefore
+matches the whole sentence, wildcarding only the version abaplint interpolates
+into the middle.
+
+So do not read `(not set)` as a residue to be emptied the way
+`transpile_reason`'s `other` is (#43) — but do not read it as an answer either.
+It is the bucket this parameter declines to describe, and no share of it can be
+attributed to any one cause from this measurement alone.
+
+The usual two traps apply: filter by `outcome = syntax_error` **and**
+`syntax_key = parser_error`, or `(not set)` swamps the report for a third
+reason; and a new *value* needs no GA4 change while a new *parameter* does.
 
 `syntax_key` is the key of `errors[0]` — the same issue whose message the user
 is shown — deliberately, not the "most interesting" one. abaplint promises no
