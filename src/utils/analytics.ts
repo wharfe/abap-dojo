@@ -352,6 +352,14 @@ function refine(name: EventName, clean: Record<string, string | number>): void {
     if (clean.outcome === outcome) continue;
     for (const param of params) delete clean[param];
   }
+  // `syntax_statement` is narrower than its outcome: it describes the one
+  // `parser_error` message that names an unparsed statement, and says nothing
+  // about a `check_syntax` or `unknown_types` failure. The worker's classifier
+  // already scopes it, and that is exactly why it is repeated here — this
+  // module's stance is that the runtime is the boundary, not the caller, and a
+  // rule enforced only in the producer is a rule one refactor away from being
+  // enforced nowhere.
+  if (clean.syntax_key !== "parser_error") delete clean.syntax_statement;
 }
 
 /**

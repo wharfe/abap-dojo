@@ -4,7 +4,12 @@ import { Buffer } from "buffer";
 
 import { Registry, MemoryFile, Config, ArtifactsRules } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
-import { classifySyntaxError, isKnownStatementKeyword, isKnownRuleKey } from "./syntaxDiagnostics";
+import {
+  classifySyntaxError,
+  isKnownStatementKeyword,
+  isKnownRuleKey,
+  STATEMENT_KEYWORDS,
+} from "./syntaxDiagnostics";
 import { sanitizeParams } from "../utils/analytics";
 
 describe("isKnownRuleKey", () => {
@@ -292,6 +297,92 @@ describe("syntax_statement", () => {
         errors[0].getMessage(),
       ).statement,
     ).toBe(expected);
+  });
+
+  /**
+   * `parser_error` is not one message shape. abaplint's parser_error rule emits
+   * four (build/src/rules/parser_error.js): the unknown-statement one this
+   * parameter is about, "Statement too long, refactor statement",
+   * `Macro recursion detected involving "X"`, and "Pragmas not allowed in v700".
+   * Two of those are the trap — the macro one ALSO ends in a quoted token, so
+   * keying on `parser_error` alone reports a macro's name as though it were a
+   * statement we cannot parse, and the too-long one has no token at all, so it
+   * lands in the same absence that is documented to mean "not ABAP".
+   */
+  it.each([
+    ["a macro recursion", 'Macro recursion detected involving "WRITE"'],
+    ["a statement that is too long", "Statement too long, refactor statement"],
+    ["a pragma rejection", "Pragmas not allowed in v700"],
+  ])("ignores %s, which shares the parser_error key", (_name, message) => {
+    expect(
+      classifySyntaxError("parser_error", 1, message).statement,
+    ).toBeUndefined();
+  });
+
+  it("accepts the unknown-statement message across ABAP version strings", () => {
+    for (const version of ["the configured ABAP version", "ABAPopen-abap"]) {
+      expect(
+        classifySyntaxError(
+          "parser_error",
+          1,
+          `Statement does not exist in ${version}(or a parser error), "WRITE"`,
+        ).statement,
+      ).toBe("WRITE");
+    }
+  });
+
+  /**
+   * `"ı".toUpperCase()` is `"I"`, so a dotless i folds a non-ABAP token into a
+   * real keyword: `ıf x.` really does parse to a token of `"ı" + "f"`. No
+   * source escapes — `IF` is still abaplint's own word — but the parameter
+   * would claim we cannot parse `IF` when the user never wrote it. Folding is
+   * therefore restricted to ASCII.
+   */
+  it("does not fold non-ASCII tokens into ASCII keywords", () => {
+    expect(
+      classifySyntaxError(
+        "parser_error",
+        1,
+        'Statement does not exist in x(or a parser error), "\u0131f"',
+      ).statement,
+    ).toBeUndefined();
+  });
+
+  /**
+   * The same guard `RULE_KEYS` gets: every member of the enumerated set has to
+   * survive the analytics shape, or a keyword abaplint adds later goes quiet
+   * in reports with nothing failing. Checking a handful of representatives
+   * would not catch that.
+   */
+  it("passes every enumerated keyword through the analytics shape", () => {
+    const rejected = [...STATEMENT_KEYWORDS].filter(
+      (syntax_statement) =>
+        sanitizeParams("run_result", {
+          outcome: "syntax_error",
+          syntax_key: "parser_error",
+          syntax_statement,
+        }).syntax_statement !== syntax_statement,
+    );
+    expect(rejected).toEqual([]);
+  });
+
+  it("drops the statement when the key is not parser_error, at the sanitizer too", () => {
+    expect(
+      sanitizeParams("run_result", {
+        outcome: "syntax_error",
+        syntax_key: "check_syntax",
+        syntax_statement: "WRITE",
+      }).syntax_statement,
+    ).toBeUndefined();
+
+    // And with no key at all — the worker never does this, which is the point:
+    // the boundary must not depend on the producer being correct.
+    expect(
+      sanitizeParams("run_result", {
+        outcome: "syntax_error",
+        syntax_statement: "WRITE",
+      }).syntax_statement,
+    ).toBeUndefined();
   });
 
   it("only admits keywords abaplint itself enumerates", () => {

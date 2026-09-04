@@ -413,7 +413,11 @@ still not a member), and what is emitted is the folded string that `has` proved
 identical to a set member, so the value leaving the browser is abaplint's own
 keyword rather than a string the user shaped. `toUpperCase`, never
 `toLocaleUpperCase`: the locale-aware one maps `i` to `İ` under a Turkish
-locale and would silently stop recognising `IF`.
+locale and would silently stop recognising `IF`. Folding is also restricted to
+tokens that are already ASCII, because Unicode case mapping runs the other way
+too — `"ı".toUpperCase()` is `"I"`, so `ıf x.` would otherwise be recorded as
+`IF`. No source escapes either way; what breaks is the parameter's meaning,
+which would claim we cannot parse a keyword nobody wrote.
 
 **Absence is a finding, not a gap.** Measured against the real Registry:
 
@@ -424,12 +428,20 @@ locale and would silently stop recognising `IF`.
 | `const x = 5.` | *(absent)* | not ABAP |
 | `SELCT * FROM mara.` | *(absent)* | a typo |
 
-On `parser_error` the message always ends with a quoted token, so `(not set)`
-there means "the token was not ABAP vocabulary" rather than "extraction
-failed". Do not read it as a residue to be emptied the way `transpile_reason`'s
-`other` is (#43) — a large `(not set)` share is the answer that visitors are
-pasting non-ABAP, and the work that implies is a better error message, not more
-parser coverage.
+`(not set)` there means "not ABAP vocabulary" **or** "not this message shape",
+and the second half is not negligible: `parser_error` is four different
+messages, not one. abaplint's rule emits the unknown-statement one this
+parameter is about, plus `Statement too long, refactor statement`,
+`Macro recursion detected involving "X"` and `Pragmas not allowed in v700`. The
+macro one also ends in a quoted token, so keying on `parser_error` alone would
+report a macro's name as a statement we cannot parse. The classifier therefore
+matches the whole sentence, wildcarding only the version abaplint interpolates
+into the middle.
+
+With that caveat, do not read `(not set)` as a residue to be emptied the way
+`transpile_reason`'s `other` is (#43) — a large share of it is the answer that
+visitors are pasting non-ABAP, and the work that implies is a better error
+message, not more parser coverage.
 
 The usual two traps apply: filter by `outcome = syntax_error` **and**
 `syntax_key = parser_error`, or `(not set)` swamps the report for a third

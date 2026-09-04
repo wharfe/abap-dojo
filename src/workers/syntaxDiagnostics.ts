@@ -73,7 +73,7 @@ const RULE_KEYS: ReadonlySet<string> = new Set([
  * and a set containing it would admit an empty token — the one value that
  * passes a membership test without meaning anything.
  */
-const STATEMENT_KEYWORDS: ReadonlySet<string> = new Set(
+export const STATEMENT_KEYWORDS: ReadonlySet<string> = new Set(
   Object.values(Statements).flatMap((Statement) =>
     new Statement()
       .getMatcher()
@@ -88,19 +88,32 @@ export function isKnownStatementKeyword(token: string): boolean {
 }
 
 /**
- * The token abaplint quotes at the end of a `parser_error` message.
+ * The failing statement's first token, from the one `parser_error` message
+ * that carries it.
  *
- * Anchored at the end because that is where abaplint puts it, but the anchor
- * is not the safety property and must not be read as one: the user's source is
- * interpolated into the same message and can contain quotes, so a crafted
- * program can steer which characters land here. That is fine, and it is the
- * same argument `transpile_node` rests on — whatever comes out is then tested
- * against `STATEMENT_KEYWORDS`, so the only strings that can ever leave the
- * browser are 176 English ABAP keywords. Steering the extraction changes which
- * keyword is reported, never whether the user's own text can be one.
+ * `parser_error` is four messages, not one (see abaplint's
+ * `rules/parser_error.js`), and matching on the key alone gets two of them
+ * wrong. `Macro recursion detected involving "X"` also ends in a quoted token,
+ * so it would report a macro's name as a statement we cannot parse;
+ * `Statement too long, refactor statement` and `Pragmas not allowed in v700`
+ * carry no token, so they would land in the absence that means "not ABAP".
+ * Hence the whole sentence is matched, not just the tail. The middle is
+ * wildcarded because abaplint interpolates the configured version there
+ * (`the configured ABAP version`, `ABAPopen-abap`).
+ *
+ * The anchors are not the safety property and must not be read as one: the
+ * user's source is interpolated into this same message and can contain quotes,
+ * so a crafted program can steer which characters land in the slot. That is
+ * fine, and it is the argument `transpile_node` rests on — whatever comes out
+ * is then tested against `STATEMENT_KEYWORDS`, so the only strings that can
+ * leave the browser are abaplint's own 176 keywords. Steering changes which
+ * keyword is reported, never whether the user's text can be one.
  */
-function quotedTail(message: string): string | undefined {
-  return /"([^"]*)"\s*$/.exec(message)?.[1];
+const UNKNOWN_STATEMENT =
+  /^Statement does not exist in .*\(or a parser error\), "([^"]*)"$/;
+
+function unparsedToken(message: string): string | undefined {
+  return UNKNOWN_STATEMENT.exec(message)?.[1];
 }
 
 /** True if `key` is one abaplint can attach to an issue. */
@@ -138,9 +151,19 @@ export function classifySyntaxError(
   };
 }
 
+/**
+ * Every ABAP statement keyword is ASCII, so case folding is restricted to
+ * tokens that already are. `"\u0131".toUpperCase()` is `"I"` — a dotless i
+ * folds `\u0131f` into `IF`, and `\u0131f x.` really does reach here as that
+ * token. Nothing leaks (`IF` is abaplint's own word either way), but the
+ * parameter would report that we cannot parse `IF` when nobody wrote `IF`,
+ * which is the analytic meaning this whole module exists to keep honest.
+ */
+const ASCII_TOKEN = /^[A-Za-z][A-Za-z0-9-]*$/;
+
 function knownKeyword(message: string): string | undefined {
-  const token = quotedTail(message);
-  if (token === undefined) return undefined;
+  const token = unparsedToken(message);
+  if (token === undefined || !ASCII_TOKEN.test(token)) return undefined;
   // ABAP is case-insensitive and abaplint quotes the token exactly as the user
   // typed it, so `write` and `WRITE` are the same statement and the same
   // finding. LLMs write lower-case ABAP routinely; testing the raw token would
