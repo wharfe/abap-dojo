@@ -40,6 +40,16 @@ build is not deployed to Pages, so it does not get Pages' `_headers`).
   base64url. Hand-rolling these is how one page shipped with a payload that could
   not be decoded; `src/staticPages.test.ts` now fails on it either way.
 
+- `npm run build:runtime` — regenerate `src/sandbox/runtime-bundle.js` from the
+  installed `@abaplint/runtime`. **Run it after every `@abaplint/runtime` bump.**
+  The bundle is a committed build artifact, so npm can move the transpiler while
+  the runtime it emits calls into stays frozen in the repo: that is exactly how
+  `SKIP` nearly shipped as a runtime crash — the transpiler learned to emit
+  `abap.statements.skip()` against a bundle built before the statement existed.
+  `src/sandbox/runtime-bundle.test.ts` transpiles *and then executes*, so a
+  bundle that has fallen behind fails there rather than in the sandbox.
+  `--check` exits non-zero without writing, for a quick "is this stale?".
+
 ## Code Style
 
 - 2-space indentation, no tabs
@@ -270,6 +280,16 @@ you at the wrong work:
    `unsupported_statement` count does not mean we support the statement. When
    adding a reason, check whether the message is a `throw` or a `Chunk` string;
    only the first kind can ever reach the classifier.
+
+   **A dependency bump can move a statement across this line, and it did.**
+   Upgrading `@abaplint/transpiler` 2.13.1 -> 2.13.74 added handlers for
+   `FORMAT`, `NEW-PAGE` and `CALL SELECTION-SCREEN`, but all three are handlers
+   that emit a `throw` into the generated JS. They therefore stop appearing as
+   `transpile_error` with a `transpile_node` and start appearing as
+   `runtime_error` with no diagnosis at all — the user's experience is
+   unchanged, and ours gets worse (see #45). `SKIP` moved the other way and is
+   genuinely fixed. So a fall in `transpile_error` after a bump is not by itself
+   good news: check which of the two kinds of handler landed.
 2. **Filter by `outcome = transpile_error`, not just `event_name`.** Both
    parameters are absent on the other ~98% of `run_result` events, so a
    `run_result` × `transpile_node` exploration renders `(not set)` as its

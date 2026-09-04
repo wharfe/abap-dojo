@@ -7,6 +7,7 @@
     "dev": "vite",
     "build:docs-css": "tailwindcss -i ./src/docs.css -o ./public/docs/style.css --minify",
     "build": "tsc -b && npm run build:docs-css && vite build",
+    "build:runtime": "node scripts/build-runtime-bundle.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
@@ -15,9 +16,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@abaplint/core": "^2.118.6",
-    "@abaplint/runtime": "^2.13.1",
-    "@abaplint/transpiler": "^2.13.1",
+    "@abaplint/core": "^2.120.42",
+    "@abaplint/runtime": "^2.13.74",
+    "@abaplint/transpiler": "^2.13.74",
     "@monaco-editor/react": "^4.7.0",
     "buffer": "^6.0.3",
     "monaco-editor": "^0.55.1",
@@ -37,6 +38,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "esbuild": "^0.27.7",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
