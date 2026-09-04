@@ -419,14 +419,35 @@ too — `"ı".toUpperCase()` is `"I"`, so `ıf x.` would otherwise be recorded a
 `IF`. No source escapes either way; what breaks is the parameter's meaning,
 which would claim we cannot parse a keyword nobody wrote.
 
-**Absence is a finding, not a gap.** Measured against the real Registry:
+**What it separates is "abaplint knows this leading keyword" from "it does
+not" — NOT "ABAP" from "pasted non-ABAP".** That distinction sounds pedantic
+and is the difference between reading the report correctly and picking the
+wrong work, because ABAP and JavaScript share most of their keywords. Measured
+against the real Registry:
 
-| the user wrote | `syntax_statement` | what it means |
+| the user wrote | `syntax_statement` | what it really means |
 |---|---|---|
-| `WRITE 'a'` with no period | `WRITE` | **ours** — a statement every ABAP developer uses, in a form we cannot parse |
-| `FROBNICATE zsecret_table.` | *(absent)* | not ABAP |
-| `const x = 5.` | *(absent)* | not ABAP |
+| `WRITE 'a'` with no period | `WRITE` | ours — a statement every ABAP developer uses, in a form we cannot parse |
+| `class Foo {}` | `CLASS` | **JavaScript, reported identically** |
+| `if (x) { y(); }` | `IF` | JavaScript |
+| `function f() {}` | `FUNCTION` | JavaScript |
+| `return x;` | `RETURN` | JavaScript |
+| `FROBNICATE zsecret_table.` | *(absent)* | not in the vocabulary |
 | `SELCT * FROM mara.` | *(absent)* | a typo |
+| `const x = 5.` | *(absent)* | JavaScript — but only because `CONST` happens not to be an ABAP statement keyword |
+
+Of the JS keywords worth checking, `CLASS` `IF` `DO` `FUNCTION` `RETURN`
+`WHILE` `IMPORT` `EXPORT` `NEW` `DELETE` `TRY` `CATCH` `CASE` `BREAK`
+`CONTINUE` `ELSE` all collide, while `CONST` `THROW` `FOR` `VAR` `LET`
+`SWITCH` do not. Which side a paste lands on is an accident of vocabulary
+overlap, not a judgement about the code.
+
+So a high `IF` or `CLASS` count is **not** evidence that we should teach the
+parser more about `IF`. Confirm what people are actually writing before acting
+on this parameter — it narrows the question from 155 undifferentiated
+`parser_error` events to a named keyword, and that is all it does. Separating
+pasted JavaScript from real ABAP needs a second signal that does not exist
+(the same shape as #56, one branch over).
 
 `(not set)` there means "not ABAP vocabulary" **or** "not this message shape",
 and the second half is not negligible: `parser_error` is four different

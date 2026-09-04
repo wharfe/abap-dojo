@@ -242,19 +242,33 @@ describe("syntax_statement", () => {
   });
 
   /**
-   * Steering the extraction is possible — the user's source is interpolated
-   * into the same message and may contain quotes — and it is supposed to be
-   * harmless. Whatever the anchor lands on is still tested for membership, so
-   * the worst a crafted program achieves is reporting a different real ABAP
-   * keyword about itself.
+   * Extraction is fail-closed, which is stronger than the membership test
+   * alone. Both of these carry the real message prefix — an earlier version of
+   * this test did not, so it proved only that an off-shape message is
+   * rejected, which is a different and weaker claim. With the prefix present,
+   * a second quoted run still fails to match, because `([^"]*)"$` requires the
+   * quoted token to be the last thing on the line.
+   *
+   * Even if it did match, nothing user-controlled escapes: whatever comes out
+   * is tested against STATEMENT_KEYWORDS, so the worst a crafted program can
+   * do is have a different real ABAP keyword reported about itself.
    */
-  it("cannot be steered into emitting the user's own text", () => {
+  it.each([
+    [
+      "a second quoted run after the token",
+      'Statement does not exist in x(or a parser error), "WRITE", "ZSECRET"',
+    ],
+    [
+      "a quote inside the token itself",
+      'Statement does not exist in x(or a parser error), "WRI"TE"',
+    ],
+    [
+      "trailing text after the closing quote",
+      'Statement does not exist in x(or a parser error), "WRITE" and more',
+    ],
+  ])("refuses to extract from %s", (_name, message) => {
     expect(
-      classifySyntaxError(
-        "parser_error",
-        1,
-        'Statement does not exist, "WRITE", "ZSECRET"',
-      ).statement,
+      classifySyntaxError("parser_error", 1, message).statement,
     ).toBeUndefined();
   });
 
@@ -279,8 +293,22 @@ describe("syntax_statement", () => {
     ["the same statement in mixed case", "Write 'a'\nWrite 'b'.", "WRITE"],
     ["an invented statement", "FROBNICATE zsecret_table.", undefined],
     ["an invented statement in lower case", "frobnicate zsecret.", undefined],
-    ["JavaScript pasted into ABAP", "const x = 5.", undefined],
     ["a misspelled keyword", "SELCT * FROM mara.", undefined],
+    // The limit of what this parameter can tell you, pinned so nobody reads
+    // the rows above as "ABAP vs not ABAP". ABAP and JavaScript share a lot of
+    // keywords, and abaplint reports the first token either way — so pasted JS
+    // is indistinguishable here from ABAP we failed to parse.
+    ["JavaScript that collides with ABAP: class", "class Foo {}", "CLASS"],
+    ["JavaScript that collides with ABAP: if", "if (x) {\n  y();\n}", "IF"],
+    ["JavaScript that collides with ABAP: function", "function f() {}", "FUNCTION"],
+    ["JavaScript that collides with ABAP: return", "return x;", "RETURN"],
+    ["JavaScript that collides with ABAP: try", "try { f(); }", "TRY"],
+    // Not every JS keyword collides — `const`, `throw`, `for`, `var`, `let`
+    // and `switch` are not ABAP statement keywords, so those land in the
+    // absence. Which side a paste falls on is an accident of vocabulary
+    // overlap, not a judgement about the code, which is the whole point.
+    ["JavaScript that does not collide: const", "const x = 5.", undefined],
+    ["JavaScript that does not collide: throw", "throw new Error();", undefined],
   ])("reports %s", async (_name, source, expected) => {
     const reg = new Registry(new Config(JSON.stringify(transpilerConfig)));
     reg.addFile(new MemoryFile("ztest.prog.abap", source));

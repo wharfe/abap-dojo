@@ -348,18 +348,26 @@ const OUTCOME_ONLY_PARAMS: ReadonlyArray<
  */
 function refine(name: EventName, clean: Record<string, string | number>): void {
   if (name !== "run_result") return;
-  for (const [outcome, params] of OUTCOME_ONLY_PARAMS) {
-    if (clean.outcome === outcome) continue;
-    for (const param of params) delete clean[param];
-  }
-  // `syntax_statement` is narrower than its outcome: it describes the one
+  // Key scope BEFORE outcome scope, and the order is load-bearing. Run the
+  // other way round, the outcome strip removes `syntax_key` first, this test
+  // then sees it missing and removes `syntax_statement` for the wrong reason —
+  // and the two rules become indistinguishable, so neither can be tested
+  // independently and dropping either one changes nothing observable. Checking
+  // the key the caller actually claimed keeps them separate: each rule can
+  // reject the parameter on its own, and a test can tell which one did.
+  //
+  // `syntax_statement` is narrower than its outcome. It describes the one
   // `parser_error` message that names an unparsed statement, and says nothing
   // about a `check_syntax` or `unknown_types` failure. The worker's classifier
   // already scopes it, and that is exactly why it is repeated here — this
   // module's stance is that the runtime is the boundary, not the caller, and a
-  // rule enforced only in the producer is a rule one refactor away from being
-  // enforced nowhere.
+  // rule enforced only in the producer is one refactor from being enforced
+  // nowhere.
   if (clean.syntax_key !== "parser_error") delete clean.syntax_statement;
+  for (const [outcome, params] of OUTCOME_ONLY_PARAMS) {
+    if (clean.outcome === outcome) continue;
+    for (const param of params) delete clean[param];
+  }
 }
 
 /**

@@ -259,6 +259,7 @@ describe("sanitizeParams", () => {
           duration_ms: 30,
           syntax_key: "parser_error",
           syntax_error_count: 4,
+          syntax_statement: "WRITE",
         }),
       ).toEqual({ outcome, duration_ms: 30 });
     }
@@ -276,6 +277,7 @@ describe("sanitizeParams", () => {
       transpile_node: "Multiply",
       syntax_key: "parser_error",
       syntax_error_count: 4,
+      syntax_statement: "WRITE",
     };
 
     expect(sanitizeUnchecked("run_result", { ...both, outcome: "syntax_error" })).toEqual({
@@ -283,6 +285,7 @@ describe("sanitizeParams", () => {
       duration_ms: 30,
       syntax_key: "parser_error",
       syntax_error_count: 4,
+      syntax_statement: "WRITE",
     });
 
     expect(
