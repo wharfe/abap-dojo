@@ -3,11 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "build:docs-css": "tailwindcss -i ./src/docs.css -o ./public/docs/style.css --minify",
     "build": "tsc -b && npm run build:docs-css && vite build",
     "build:runtime": "node scripts/build-runtime-bundle.mjs",
+    "build:runtime:check": "node scripts/build-runtime-bundle.mjs --check",
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",

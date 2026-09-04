@@ -220,12 +220,47 @@ OutputStreamer.prototype.finish = function () {
 };
 // Returns only the buffered, not-yet-terminated tail of the current line —
 // NOT the whole run's output. Nothing in this file calls it (the runtime
-// only ever calls `add` and `isEmpty`); it exists for tests to assert what
+// calls `add`, `isEmpty` and `get`); it exists for tests to assert what
 // survives a `clear()`. `getTrimmed` used to exist as a byte-for-byte
 // duplicate of this method under a different name, which read as though it
 // applied some extra trimming — it did not.
 OutputStreamer.prototype.getPendingTail = function () {
   return this.partial;
+};
+/**
+ * The runtime's own console (MemoryConsole) keeps every byte the program wrote
+ * and returns it here. This one cannot: it streams output out and forgets it,
+ * which is the whole point of MAX_LINES / MAX_OUTPUT_BYTES.
+ *
+ * What the runtime actually wants from `get()` is the current line number —
+ * `SKIP TO LINE n` is the only caller, and it reads
+ * `console.get().split("\n").length` (@abaplint/runtime statements/skip.js).
+ * So this returns a string with the same number of line breaks as the output
+ * so far, followed by the real unterminated tail. `total` counts one per "\n"
+ * seen, so `total + 1` is the line the cursor is on, exactly as a full-text
+ * split would say.
+ *
+ * The count is NOT capped at MAX_LINES, even though display is. The direction
+ * of an error here decides whether it is harmless: `skip` computes
+ * `n - currentLine` and clamps the result at zero, so over-reporting the line
+ * makes it do nothing, while under-reporting makes it emit blank lines the
+ * program never asked for. Capping only ever under-reports. Measured: after
+ * 12,000 lines, a capped count answered 10,001, so `SKIP TO LINE 12000` —
+ * which should do nothing, the cursor being past line 12,000 already —
+ * emitted 1,999 blank lines and inflated `output_lines` by the same amount.
+ * `total` keeps counting past MAX_OUTPUT_BYTES too (see `add`), so a runaway
+ * loop reaches this. The cost is a transient string proportional to the lines
+ * produced, allocated only when a program actually uses `SKIP TO LINE`.
+ *
+ * One divergence from the full text remains: a time-based promotion in `add`
+ * can add a line break the program never wrote, the same way it inflates
+ * `output_lines` (see the note in CLAUDE.md).
+ *
+ * Adding this method is not optional decoration — without it `SKIP TO LINE n`
+ * throws `TypeError: console.get is not a function` inside the sandbox.
+ */
+OutputStreamer.prototype.get = function () {
+  return new Array(this.total + 1).join("\n") + this.partial;
 };
 OutputStreamer.prototype.isEmpty = function () {
   return this.empty;

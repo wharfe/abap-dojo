@@ -28,6 +28,7 @@ interface Streamer {
   isEmpty(): boolean;
   getPendingTail(): string;
   finish(): void;
+  get(): string;
   total: number;
   emitted: number;
   lastFlush: number;
@@ -185,6 +186,31 @@ describe("OutputStreamer", () => {
         `[output truncated: ${streamer.total - 10_000} more lines]`,
       );
       expect(streamer.total).toBeGreaterThan(streamer.emitted);
+    });
+  });
+
+  // `get()` exists for one caller: @abaplint/runtime's `SKIP TO LINE n`, which
+  // reads `console.get().split("\n").length` to learn the current line. The
+  // direction of any error matters more than its size — over-reporting the
+  // line makes `skip` clamp to zero and do nothing, while under-reporting it
+  // makes `skip` emit blank lines the program never asked for.
+  describe("get() reports the current line for SKIP TO LINE", () => {
+    it("counts every line, including past MAX_LINES where display stops", () => {
+      const { streamer } = makeStreamer();
+      streamer.add("x\n".repeat(12000));
+
+      // What `SKIP TO LINE n` computes as the current line.
+      expect(streamer.get().split("\n").length).toBe(streamer.total + 1);
+      expect(streamer.total).toBe(12000);
+    });
+
+    it("never under-reports, so SKIP TO LINE n behind the cursor stays a no-op", () => {
+      const { streamer } = makeStreamer();
+      streamer.add("x\n".repeat(12000));
+
+      // The runtime's own arithmetic: lines = n - currentLine, clamped at 0.
+      const currentLine = streamer.get().split("\n").length;
+      expect(Math.max(0, 12000 - currentLine)).toBe(0);
     });
   });
 

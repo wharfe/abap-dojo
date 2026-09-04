@@ -27,6 +27,13 @@ jobs:
 
       - run: npm run typecheck
 
+      # src/sandbox/runtime-bundle.js is a committed build artifact, so npm can
+      # move @abaplint/runtime while the bundle stays frozen in the repo. The
+      # test suite catches the drift only once some statement happens to need a
+      # runtime method the stale bundle lacks; this compares the whole thing.
+      # Deterministic here because `npm ci` installs the lockfile's esbuild.
+      - run: npm run build:runtime:check
+
       - run: npm test
 
       # e2e is the only suite that can catch #28 (a threading bug): jsdom has
