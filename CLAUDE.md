@@ -40,6 +40,35 @@ build is not deployed to Pages, so it does not get Pages' `_headers`).
   base64url. Hand-rolling these is how one page shipped with a payload that could
   not be decoded; `src/staticPages.test.ts` now fails on it either way.
 
+- `npm run build:runtime` — regenerate `src/sandbox/runtime-bundle.js` from the
+  installed `@abaplint/runtime`. **Run it after every `@abaplint/runtime` bump.**
+  The bundle is a committed build artifact, so npm can move the transpiler while
+  the runtime it emits calls into stays frozen in the repo: that is exactly how
+  `SKIP` nearly shipped as a runtime crash — the transpiler learned to emit
+  `abap.statements.skip()` against a bundle built before the statement existed.
+  Forgetting it is guarded in two places, and they catch different things:
+  `npm run build:runtime:check` (`--check`, wired into CI) rebuilds and compares
+  byte-for-byte, so it sees *any* drift; `src/sandbox/runtime-bundle.test.ts`
+  transpiles *and then executes*, so it sees the drift that actually breaks a
+  program, and also compares the bundle's banner against the installed
+  `@abaplint/runtime` version. Neither alone is enough — the behavioural tests
+  can only notice a stale bundle once some statement they run needs a runtime
+  method it lacks.
+
+  That test executes against the **real `OutputStreamer` from `executor.js`**,
+  not a mock, and it has to stay that way. Its first version used a hand-written
+  fake console that happened to have a `get()` method; `SKIP TO LINE n` is the
+  one statement the runtime implements by calling `console.get()`, and the real
+  streamer had no such method — so the mock was green while the sandbox threw
+  `TypeError: this.context.console.get is not a function`. The console contract
+  between `@abaplint/runtime` and `executor.js` is the thing under test, and a
+  mock cannot hold it. Check that contract after every runtime bump with
+  `grep -o 'console\.[a-zA-Z]*(' src/sandbox/runtime-bundle.js | sort -u`: it
+  currently prints `add`, `dir`, `get`, `isEmpty`, `log`. Only `add`, `get` and
+  `isEmpty` are calls on the console *we inject* — `log`/`dir` are the runtime
+  using the host's own global `console` — so the grep is a candidate list to
+  read, not an answer.
+
 ## Code Style
 
 - 2-space indentation, no tabs
@@ -270,6 +299,30 @@ you at the wrong work:
    `unsupported_statement` count does not mean we support the statement. When
    adding a reason, check whether the message is a `throw` or a `Chunk` string;
    only the first kind can ever reach the classifier.
+
+   **A dependency bump can move a statement across this line, and it did.**
+   Upgrading `@abaplint/transpiler` 2.13.1 -> 2.13.74 added handlers for
+   `FORMAT`, `NEW-PAGE` and `CALL SELECTION-SCREEN`, but all three are handlers
+   that emit a `throw` into the generated JS. They therefore stop appearing as
+   `transpile_error` with a `transpile_node` and start appearing as
+   `runtime_error` with no diagnosis at all, so our measurement gets worse
+   (see #45). The user's experience changes too, though less: the program now
+   *runs* up to the embedded throw, so any `WRITE` before it is displayed
+   first, where previously the run died during transpilation and printed
+   nothing. `SKIP` moved the other way and is genuinely fixed. So a fall in
+   `transpile_error` after a bump is not by itself good news: check which of
+   the two kinds of handler landed.
+
+   **The bump did not clear the rest of #55, and the numbers there are still
+   the numbers.** Measured against 2.13.74: `SKIP`, `SKIP n` and `ULINE`
+   transpile cleanly now, but `NEW-LINE` (20 events — the second-largest
+   bucket in #55), `PRINT-CONTROL` (4) and `POSITION` (1) still throw at
+   transpile time and still arrive as `transpile_error` with a
+   `transpile_node`. `FORMAT` did **not** get the no-op #55 asked for; it got
+   an embedded throw, which is the opposite direction. Re-run the
+   classification before trusting any of this
+   (`transpile` each statement and look for `throw new Error` in the emitted
+   chunk vs. a throw out of `Transpiler.run` itself).
 2. **Filter by `outcome = transpile_error`, not just `event_name`.** Both
    parameters are absent on the other ~98% of `run_result` events, so a
    `run_result` × `transpile_node` exploration renders `(not set)` as its
