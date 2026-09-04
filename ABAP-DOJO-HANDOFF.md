@@ -27,9 +27,20 @@
 
 | npmパッケージ | 用途 | ブラウザ対応 |
 |---|---|---|
-| `@abaplint/core` (v2.115.x) | ABAPパーサー + 163ルールのリンター | ✅ |
-| `@abaplint/transpiler` (v2.12.x) | ABAP → JavaScript トランスパイラ | ✅ |
-| `@abaplint/runtime` (v2.12.x) | トランスパイルされたABAPの実行ランタイム | ✅ |
+| `@abaplint/core` | ABAPパーサー + リンター | ✅ |
+| `@abaplint/transpiler` | ABAP → JavaScript トランスパイラ | ✅ |
+| `@abaplint/runtime` | トランスパイルされたABAPの実行ランタイム | ✅ |
+
+**バージョンをここに書かない。** 正本は `package.json` と `package-lock.json`。
+2026-09-04 に、lockfile が transpiler を 73 リリース・core を 36 リリース分
+止めたまま `package.json` の範囲指定は最新を許可している、という状態を発見した
+（#55 / PR #59）。doc に値を書いても止まっていることには気づけず、
+むしろ「これで正しい」と誤認させる。
+
+さらに `@abaplint/runtime` だけは npm ではなく `src/sandbox/runtime-bundle.js`
+（commit 済みのビルド成果物）としても存在するため、**npm を上げただけでは
+実行時が古いまま**になる。上げたら `npm run build:runtime` を必ず走らせる
+（詳細と検知手段は CLAUDE.md）。
 
 ### 制約事項
 
