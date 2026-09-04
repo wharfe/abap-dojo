@@ -140,7 +140,20 @@ export function classifySyntaxError(
 
 function knownKeyword(message: string): string | undefined {
   const token = quotedTail(message);
-  return token !== undefined && isKnownStatementKeyword(token)
-    ? token
-    : undefined;
+  if (token === undefined) return undefined;
+  // ABAP is case-insensitive and abaplint quotes the token exactly as the user
+  // typed it, so `write` and `WRITE` are the same statement and the same
+  // finding. LLMs write lower-case ABAP routinely; testing the raw token would
+  // drop most real keywords AND make the resulting emptiness read as "not
+  // ABAP", which is the opposite of what happened.
+  //
+  // Case-folding user input before a membership test does not widen what can
+  // travel: `zsecret` folds to `ZSECRET`, which is not a member either. And
+  // what is emitted is the folded string, which `has` proved byte-identical to
+  // a member of the set — so the value leaving here is one of abaplint's own
+  // 176 keywords, not a string the user shaped. `toUpperCase` rather than
+  // `toLocaleUpperCase`: the locale-aware one maps `i` to `İ` under a Turkish
+  // locale and would silently stop recognising `IF`.
+  const keyword = token.toUpperCase();
+  return isKnownStatementKeyword(keyword) ? keyword : undefined;
 }

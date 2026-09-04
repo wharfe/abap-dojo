@@ -403,6 +403,18 @@ token, and a set containing the empty string admits an empty token — the one
 value that passes a membership test while meaning nothing. It is dropped
 explicitly.
 
+**The token is case-folded before the test, and that is load-bearing.** ABAP is
+case-insensitive and abaplint quotes the token exactly as the user typed it, so
+`write` and `WRITE` are one finding. LLMs write lower-case ABAP routinely, so
+testing the raw token would drop most real keywords — and, because of the rule
+below, would make that emptiness read as "not ABAP" when the truth was the
+opposite. Folding does not widen what can travel (`zsecret` folds to `ZSECRET`,
+still not a member), and what is emitted is the folded string that `has` proved
+identical to a set member, so the value leaving the browser is abaplint's own
+keyword rather than a string the user shaped. `toUpperCase`, never
+`toLocaleUpperCase`: the locale-aware one maps `i` to `İ` under a Turkish
+locale and would silently stop recognising `IF`.
+
 **Absence is a finding, not a gap.** Measured against the real Registry:
 
 | the user wrote | `syntax_statement` | what it means |

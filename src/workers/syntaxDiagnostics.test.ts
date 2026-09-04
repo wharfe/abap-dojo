@@ -210,6 +210,7 @@ describe("syntax_statement", () => {
     ["a customer namespace object", "ZSECRET"],
     ["a customer table", "ZCUST_SECRET"],
     ["a variable name", "lv_password"],
+    ["a lower-case customer object", "zsecret"],
     ["an empty token", ""],
   ])("drops %s", (_name, token) => {
     expect(
@@ -264,7 +265,15 @@ describe("syntax_statement", () => {
    */
   it.each([
     ["a real statement we could not parse", "WRITE 'a'\nWRITE 'b'.", "WRITE"],
+    // ABAP is case-insensitive and abaplint quotes the token exactly as
+    // written, so these are the same finding as the row above. LLMs write
+    // lower-case ABAP routinely; dropping them would leave the parameter
+    // mostly empty AND make that emptiness read as "not ABAP", which is the
+    // opposite of the truth.
+    ["the same statement in lower case", "write 'a'\nwrite 'b'.", "WRITE"],
+    ["the same statement in mixed case", "Write 'a'\nWrite 'b'.", "WRITE"],
     ["an invented statement", "FROBNICATE zsecret_table.", undefined],
+    ["an invented statement in lower case", "frobnicate zsecret.", undefined],
     ["JavaScript pasted into ABAP", "const x = 5.", undefined],
     ["a misspelled keyword", "SELCT * FROM mara.", undefined],
   ])("reports %s", async (_name, source, expected) => {
