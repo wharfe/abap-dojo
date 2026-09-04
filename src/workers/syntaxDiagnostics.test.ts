@@ -4,7 +4,7 @@ import { Buffer } from "buffer";
 
 import { Registry, MemoryFile, Config, ArtifactsRules } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
-import { classifySyntaxError, isKnownRuleKey } from "./syntaxDiagnostics";
+import { classifySyntaxError, isKnownStatementKeyword, isKnownRuleKey } from "./syntaxDiagnostics";
 import { sanitizeParams } from "../utils/analytics";
 
 describe("isKnownRuleKey", () => {
@@ -91,10 +91,13 @@ describe("isKnownRuleKey", () => {
 
 describe("classifySyntaxError", () => {
   it("keeps a recognised key and the error count", () => {
-    expect(classifySyntaxError("parser_error", 3)).toEqual({
-      key: "parser_error",
-      errorCount: 3,
-    });
+    expect(classifySyntaxError("parser_error", 3, "no quoted token here")).toEqual(
+      {
+        key: "parser_error",
+        errorCount: 3,
+        statement: undefined,
+      },
+    );
   });
 
   /**
@@ -105,9 +108,13 @@ describe("classifySyntaxError", () => {
    * does not name, and anything our own code passes by mistake.
    */
   it("drops an unrecognised key but still reports the count", () => {
-    expect(classifySyntaxError("zcust_secret", 2)).toEqual({
+    expect(classifySyntaxError("zcust_secret", 2, 'unknown, "WRITE"')).toEqual({
       key: undefined,
       errorCount: 2,
+      // Dropped with the key: `statement` is scoped to `parser_error`, so an
+      // unrecognised key cannot carry one even when the token is a real
+      // keyword.
+      statement: undefined,
     });
   });
 });
@@ -122,14 +129,16 @@ describe("classifySyntaxError", () => {
 describe("keys produced by real ABAP", () => {
   const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
 
-  async function firstErrorKey(source: string): Promise<[string, number]> {
+  async function firstErrorKey(
+    source: string,
+  ): Promise<[string, number, string]> {
     const reg = new Registry(abaplintConfig);
     reg.addFile(new MemoryFile("ztest.prog.abap", source));
     await reg.parseAsync();
     const errors = reg
       .findIssues()
       .filter((i) => i.getSeverity().toString() === "Error");
-    return [errors[0].getKey(), errors.length];
+    return [errors[0].getKey(), errors.length, errors[0].getMessage()];
   }
 
   const cases: Array<[string, string, string]> = [
@@ -148,9 +157,9 @@ describe("keys produced by real ABAP", () => {
 
   for (const [name, source, expected] of cases) {
     it(`reports ${expected} for ${name}`, async () => {
-      const [key, count] = await firstErrorKey(source);
+      const [key, count, message] = await firstErrorKey(source);
       expect(key).toBe(expected);
-      expect(classifySyntaxError(key, count)).toEqual({
+      expect(classifySyntaxError(key, count, message)).toMatchObject({
         key: expected,
         errorCount: count,
       });
@@ -169,5 +178,117 @@ describe("keys produced by real ABAP", () => {
     const [missingType] = await firstErrorKey("DATA lt TYPE string_table.\nWRITE lines( lt ).");
     const [brokenSyntax] = await firstErrorKey("DATA lv = 1.\nprint(lv).");
     expect(missingType).not.toBe(brokenSyntax);
+  });
+});
+
+/**
+ * `syntax_statement`: the half of a `parser_error` the key cannot express.
+ *
+ * The membership test against abaplint's own statement keywords is the privacy
+ * guarantee, so these cases are about proving it holds in both directions — a
+ * real keyword travels, and anything the user invented does not, whatever it
+ * looks like.
+ */
+describe("syntax_statement", () => {
+  it("reports the keyword when abaplint names a statement it knows", () => {
+    expect(
+      classifySyntaxError(
+        "parser_error",
+        1,
+        'Statement does not exist in ABAPopen-abap(or a parser error), "WRITE"',
+      ).statement,
+    ).toBe("WRITE");
+  });
+
+  /**
+   * The case the whole membership test exists for. Every one of these is a
+   * plausible thing to find in the quoted slot, and none of them is abaplint's
+   * vocabulary — so none of them may leave the browser.
+   */
+  it.each([
+    ["an invented statement", "FOO"],
+    ["a customer namespace object", "ZSECRET"],
+    ["a customer table", "ZCUST_SECRET"],
+    ["a variable name", "lv_password"],
+    ["an empty token", ""],
+  ])("drops %s", (_name, token) => {
+    expect(
+      classifySyntaxError(
+        "parser_error",
+        1,
+        `Statement does not exist in ABAPopen-abap(or a parser error), "${token}"`,
+      ).statement,
+    ).toBeUndefined();
+  });
+
+  it("is absent on every key other than parser_error", () => {
+    for (const key of ["check_syntax", "unknown_types", "structure"]) {
+      expect(
+        classifySyntaxError(key, 1, 'something, "WRITE"').statement,
+      ).toBeUndefined();
+    }
+  });
+
+  it("survives a message with no quoted token at all", () => {
+    expect(
+      classifySyntaxError("parser_error", 1, "no quotes here").statement,
+    ).toBeUndefined();
+  });
+
+  /**
+   * Steering the extraction is possible — the user's source is interpolated
+   * into the same message and may contain quotes — and it is supposed to be
+   * harmless. Whatever the anchor lands on is still tested for membership, so
+   * the worst a crafted program achieves is reporting a different real ABAP
+   * keyword about itself.
+   */
+  it("cannot be steered into emitting the user's own text", () => {
+    expect(
+      classifySyntaxError(
+        "parser_error",
+        1,
+        'Statement does not exist, "WRITE", "ZSECRET"',
+      ).statement,
+    ).toBeUndefined();
+  });
+
+  /**
+   * The end-to-end half, and the case for the parameter existing at all. Every
+   * one of these is a `parser_error`, so `syntax_key` says the same thing
+   * about all four and cannot tell them apart. `syntax_statement` splits them
+   * along the line the work actually follows: `WRITE` is a form of a statement
+   * every ABAP developer uses and we failed to parse it, while the other three
+   * are not ABAP at all and no amount of parser work would help.
+   *
+   * Measured against the real Registry, not hand-written messages.
+   */
+  it.each([
+    ["a real statement we could not parse", "WRITE 'a'\nWRITE 'b'.", "WRITE"],
+    ["an invented statement", "FROBNICATE zsecret_table.", undefined],
+    ["JavaScript pasted into ABAP", "const x = 5.", undefined],
+    ["a misspelled keyword", "SELCT * FROM mara.", undefined],
+  ])("reports %s", async (_name, source, expected) => {
+    const reg = new Registry(new Config(JSON.stringify(transpilerConfig)));
+    reg.addFile(new MemoryFile("ztest.prog.abap", source));
+    await reg.parseAsync();
+    const errors = reg
+      .findIssues()
+      .filter((i) => i.getSeverity().toString() === "Error");
+
+    expect(errors[0].getKey()).toBe("parser_error");
+    expect(
+      classifySyntaxError(
+        errors[0].getKey(),
+        errors.length,
+        errors[0].getMessage(),
+      ).statement,
+    ).toBe(expected);
+  });
+
+  it("only admits keywords abaplint itself enumerates", () => {
+    expect(isKnownStatementKeyword("WRITE")).toBe(true);
+    expect(isKnownStatementKeyword("DATA")).toBe(true);
+    expect(isKnownStatementKeyword("ZSECRET")).toBe(false);
+    expect(isKnownStatementKeyword("")).toBe(false);
   });
 });

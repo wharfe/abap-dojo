@@ -210,7 +210,13 @@ renaming a parameter:
 
 | Register as custom **dimension** (text) | Register as custom **metric** (number) |
 |---|---|
-| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length`, `syntax_error_count` |
+| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key`, `syntax_statement`, `syntax_error_count` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
+
+`syntax_error_count` is registered as a **dimension**, not a metric, and that is
+deliberate rather than a mistake to fix: its values top out around 19, so the
+distribution is readable and more useful than a sum (measured 2026-09-04: 181
+events at 1, 82 at 2, 42 at 3, tailing off — about half of all syntax errors are
+a single error). The `duration_ms` warning below does not apply to it.
 
 Do not register `duration_ms` as a dimension — it is near-unique per event and
 makes the report unusable. Note `outcome` is shared by `run_result` and
@@ -365,6 +371,57 @@ membership test buys is still the whole privacy argument — only a key abaplint
 itself attaches can travel — but the only thing that actually fails closed is
 the hardcoded `structure` entry. Do not read a healthy `syntax_key` as evidence
 that our vocabulary is still in sync with abaplint's.
+
+### `parser_error` says *that* we failed, `syntax_statement` says *at what*
+
+`parser_error` is the largest bucket inside the largest failure, and on its own
+it is close to useless for deciding work: it means "abaplint did not recognise
+this" and stops. That merges the two answers that point at opposite
+investments — a form of `WRITE` we cannot parse, and a line of JavaScript
+somebody pasted in.
+
+So `run_result` also carries `syntax_statement` on `parser_error` **only**: the
+leading keyword of the statement that failed, produced by
+`src/workers/syntaxDiagnostics.ts`.
+
+The privacy argument is the third instance of the same one, and this time the
+slot genuinely holds the user's source. abaplint's message is
+`Statement does not exist in the configured ABAP version(or a parser error), "FOO"`,
+and that quoted token is whatever the user typed. It travels only if it is a
+member of the set of leading keywords abaplint enumerates from its own 317
+statement classes at runtime — 176 of them, `CALL FUNCTION` and `CALL METHOD`
+both reducing to `CALL`. **That membership test is the guarantee.** The
+end-of-line anchor is not: the user's source is interpolated into the same
+message and can contain quotes, so a crafted program can steer which characters
+land in the slot. It does not matter — steering changes *which real ABAP
+keyword* is reported, never whether the user's own text can be one.
+`STATEMENT_KEYWORD` in `analytics.ts` is a shape backstop and would not stop a
+leak alone: `ZSECRET` satisfies it.
+
+One trap in building that set: at least one matcher answers `""` for its first
+token, and a set containing the empty string admits an empty token — the one
+value that passes a membership test while meaning nothing. It is dropped
+explicitly.
+
+**Absence is a finding, not a gap.** Measured against the real Registry:
+
+| the user wrote | `syntax_statement` | what it means |
+|---|---|---|
+| `WRITE 'a'` with no period | `WRITE` | **ours** — a statement every ABAP developer uses, in a form we cannot parse |
+| `FROBNICATE zsecret_table.` | *(absent)* | not ABAP |
+| `const x = 5.` | *(absent)* | not ABAP |
+| `SELCT * FROM mara.` | *(absent)* | a typo |
+
+On `parser_error` the message always ends with a quoted token, so `(not set)`
+there means "the token was not ABAP vocabulary" rather than "extraction
+failed". Do not read it as a residue to be emptied the way `transpile_reason`'s
+`other` is (#43) — a large `(not set)` share is the answer that visitors are
+pasting non-ABAP, and the work that implies is a better error message, not more
+parser coverage.
+
+The usual two traps apply: filter by `outcome = syntax_error` **and**
+`syntax_key = parser_error`, or `(not set)` swamps the report for a third
+reason; and a new *value* needs no GA4 change while a new *parameter* does.
 
 `syntax_key` is the key of `errors[0]` — the same issue whose message the user
 is shown — deliberately, not the "most interesting" one. abaplint promises no

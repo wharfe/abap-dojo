@@ -96,4 +96,19 @@ export interface SyntaxDiagnostics {
   key?: string;
   /** How many Error-severity issues the parse produced. Always present. */
   errorCount: number;
+  /**
+   * The leading keyword of the statement abaplint could not parse — `WRITE`,
+   * `SELECT`, `DATA`. Present only on `key === "parser_error"`, and only when
+   * the token abaplint quoted is a member of the set of statement keywords it
+   * enumerates at runtime. That membership test is the privacy guarantee: the
+   * slot it comes from holds the user's own source, so `FOO`, `ZSECRET` and
+   * `lv_password` arrive there identically and all three are dropped.
+   *
+   * Why `parser_error` needs it: the key says "abaplint did not recognise
+   * this" and stops. `WRITE` means we are missing a form of a statement every
+   * ABAP developer uses; `FOO` (reported as absent) means the user typed
+   * something that is not ABAP at all. Those want opposite work, and the key
+   * alone merges them — the same failure `check_syntax` has, one branch over.
+   */
+  statement?: string;
 }

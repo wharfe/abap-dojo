@@ -69,7 +69,11 @@ async function handleTranspile(
         // The message above is what the user reads and it embeds their source;
         // this is the half we are allowed to count. `first` is deliberately the
         // same issue in both, so the metric can be checked against the screen.
-        syntaxDiagnostics: classifySyntaxError(first.getKey(), errors.length),
+        syntaxDiagnostics: classifySyntaxError(
+          first.getKey(),
+          errors.length,
+          first.getMessage(),
+        ),
         requestId,
       };
     }

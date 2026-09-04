@@ -202,6 +202,7 @@ function App() {
         transpile_node: diagnostics?.node,
         syntax_key: syntaxDiagnostics?.key,
         syntax_error_count: syntaxDiagnostics?.errorCount,
+        syntax_statement: syntaxDiagnostics?.statement,
       });
     },
     [disarmPlaygroundWatchdog],

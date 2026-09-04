@@ -26,7 +26,7 @@
  * so if abaplint renames one, `key` goes quiet while `errorCount` keeps
  * reporting. We lose detail; we never leak source.
  */
-import { ArtifactsRules } from "@abaplint/core";
+import { ArtifactsRules, Statements } from "@abaplint/core";
 import type { SyntaxDiagnostics } from "../types/diagnostics";
 
 /**
@@ -52,6 +52,57 @@ const RULE_KEYS: ReadonlySet<string> = new Set([
   ...NON_RULE_KEYS,
 ]);
 
+/**
+ * The leading keyword of every statement abaplint knows how to parse.
+ *
+ * This is the second closed set in this file, and it exists for a different
+ * value than `RULE_KEYS`. `parser_error` is the largest syntax bucket, and its
+ * key alone says only "abaplint did not recognise this" — never which syntax,
+ * so it cannot tell "support more ABAP" from "the user typed nonsense". The
+ * identifying token IS in the message, exactly as in transpileDiagnostics.ts:
+ *
+ *   `Statement does not exist in ABAPopen-abap(or a parser error), "FOO"`
+ *
+ * — but unlike `transpile_node`, the value in that slot is the user's own
+ * source. `FOO` and `ZSECRET` and `lv_password` all arrive the same way. So it
+ * travels only if it is a member of this set, which abaplint enumerates and
+ * the user cannot extend: 176 keywords, drawn from the 317 statement classes
+ * (`CALL FUNCTION` and `CALL METHOD` both reduce to `CALL`).
+ *
+ * The empty string is dropped deliberately. At least one matcher answers `""`,
+ * and a set containing it would admit an empty token — the one value that
+ * passes a membership test without meaning anything.
+ */
+const STATEMENT_KEYWORDS: ReadonlySet<string> = new Set(
+  Object.values(Statements).flatMap((Statement) =>
+    new Statement()
+      .getMatcher()
+      .first()
+      .filter((keyword) => keyword !== ""),
+  ),
+);
+
+/** True if `token` is a leading keyword of a statement abaplint can parse. */
+export function isKnownStatementKeyword(token: string): boolean {
+  return STATEMENT_KEYWORDS.has(token);
+}
+
+/**
+ * The token abaplint quotes at the end of a `parser_error` message.
+ *
+ * Anchored at the end because that is where abaplint puts it, but the anchor
+ * is not the safety property and must not be read as one: the user's source is
+ * interpolated into the same message and can contain quotes, so a crafted
+ * program can steer which characters land here. That is fine, and it is the
+ * same argument `transpile_node` rests on — whatever comes out is then tested
+ * against `STATEMENT_KEYWORDS`, so the only strings that can ever leave the
+ * browser are 176 English ABAP keywords. Steering the extraction changes which
+ * keyword is reported, never whether the user's own text can be one.
+ */
+function quotedTail(message: string): string | undefined {
+  return /"([^"]*)"\s*$/.exec(message)?.[1];
+}
+
 /** True if `key` is one abaplint can attach to an issue. */
 export function isKnownRuleKey(key: string): boolean {
   return RULE_KEYS.has(key);
@@ -72,9 +123,24 @@ export function isKnownRuleKey(key: string): boolean {
 export function classifySyntaxError(
   firstKey: string,
   errorCount: number,
+  firstMessage: string,
 ): SyntaxDiagnostics {
+  const key = isKnownRuleKey(firstKey) ? firstKey : undefined;
   return {
-    key: isKnownRuleKey(firstKey) ? firstKey : undefined,
+    key,
     errorCount,
+    // `parser_error` only. The other keys interpolate different things into
+    // that trailing slot — `unknown_types` puts a type name there, and
+    // `check_syntax` a table or class name — none of which is drawn from a set
+    // abaplint enumerates. Widening this to them is #56's problem, not a
+    // one-line change here.
+    statement: key === "parser_error" ? knownKeyword(firstMessage) : undefined,
   };
+}
+
+function knownKeyword(message: string): string | undefined {
+  const token = quotedTail(message);
+  return token !== undefined && isKnownStatementKeyword(token)
+    ? token
+    : undefined;
 }

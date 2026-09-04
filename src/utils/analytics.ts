@@ -109,6 +109,7 @@ export interface EventMap {
      */
     syntax_key?: string;
     syntax_error_count?: number;
+    syntax_statement?: string;
   };
   /** Validate pressed in AI Validator mode. */
   validate_click: { line_count: number };
@@ -203,6 +204,24 @@ const RULE_KEY: ParamSpec = {
   pattern: /^[a-z0-9][a-z0-9_]{0,39}$/,
 };
 
+/**
+ * The leading keyword of an ABAP statement, e.g. `WRITE`, `SELECT`, `ENDLOOP`.
+ * Upper case with hyphens allowed (`NEW-LINE`), which is why it reuses neither
+ * `AST_NODE` (PascalCase) nor `RULE_KEY` (snake_case).
+ *
+ * As with both of those, this is a shape backstop and not the guarantee. The
+ * worker has already tested the value for membership in the 176 keywords
+ * abaplint enumerates from its own statement classes and dropped anything
+ * else — that test is what stops the user's source travelling, and this
+ * pattern would not: `ZSECRET` satisfies it. The longest real keyword is 14
+ * characters (`ENDENHANCEMENT`); the bound is loose so a longer one abaplint
+ * adds later goes quiet in reports rather than failing to be reported at all.
+ */
+const STATEMENT_KEYWORD: ParamSpec = {
+  kind: "id",
+  pattern: /^[A-Z][A-Z0-9-]{0,29}$/,
+};
+
 const COUNT: ParamSpec = { kind: "count" };
 
 /**
@@ -230,6 +249,7 @@ const EVENT_PARAMS: { readonly [K in EventName]: Readonly<SpecsFor<K>> } = {
     transpile_node: AST_NODE,
     syntax_key: RULE_KEY,
     syntax_error_count: COUNT,
+    syntax_statement: STATEMENT_KEYWORD,
   },
   validate_click: { line_count: COUNT },
   validate_result: {
@@ -309,7 +329,7 @@ const OUTCOME_ONLY_PARAMS: ReadonlyArray<
   readonly [RunOutcome, ReadonlyArray<keyof EventMap["run_result"]>]
 > = [
   ["transpile_error", ["transpile_reason", "transpile_node"]],
-  ["syntax_error", ["syntax_key", "syntax_error_count"]],
+  ["syntax_error", ["syntax_key", "syntax_error_count", "syntax_statement"]],
 ];
 
 /**
