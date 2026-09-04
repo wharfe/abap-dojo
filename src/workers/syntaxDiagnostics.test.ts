@@ -273,12 +273,16 @@ describe("syntax_statement", () => {
   });
 
   /**
-   * The end-to-end half, and the case for the parameter existing at all. Every
-   * one of these is a `parser_error`, so `syntax_key` says the same thing
-   * about all four and cannot tell them apart. `syntax_statement` splits them
-   * along the line the work actually follows: `WRITE` is a form of a statement
-   * every ABAP developer uses and we failed to parse it, while the other three
-   * are not ABAP at all and no amount of parser work would help.
+   * The end-to-end half. Every one of these is a `parser_error`, so
+   * `syntax_key` says the same thing about all of them; `syntax_statement`
+   * names a keyword for some and nothing for others.
+   *
+   * What that split is NOT is "ABAP we should fix" versus "not ABAP" — see the
+   * colliding JavaScript rows below, which report keywords just as `WRITE`
+   * does. Nor is the absent side one thing: `SELCT` is a typo of real ABAP,
+   * `frobnicate` is an invented word, and `const` is JavaScript that happens
+   * not to collide. The parameter cannot tell those apart and these rows are
+   * here to keep that visible.
    *
    * Measured against the real Registry, not hand-written messages.
    */
@@ -287,8 +291,7 @@ describe("syntax_statement", () => {
     // ABAP is case-insensitive and abaplint quotes the token exactly as
     // written, so these are the same finding as the row above. LLMs write
     // lower-case ABAP routinely; dropping them would leave the parameter
-    // mostly empty AND make that emptiness read as "not ABAP", which is the
-    // opposite of the truth.
+    // mostly empty, hiding exactly the keywords it exists to surface.
     ["the same statement in lower case", "write 'a'\nwrite 'b'.", "WRITE"],
     ["the same statement in mixed case", "Write 'a'\nWrite 'b'.", "WRITE"],
     ["an invented statement", "FROBNICATE zsecret_table.", undefined],
@@ -335,7 +338,8 @@ describe("syntax_statement", () => {
    * Two of those are the trap — the macro one ALSO ends in a quoted token, so
    * keying on `parser_error` alone reports a macro's name as though it were a
    * statement we cannot parse, and the too-long one has no token at all, so it
-   * lands in the same absence that is documented to mean "not ABAP".
+   * carries no token at all, adding a fourth unrelated cause to the absent
+   * bucket.
    */
   it.each([
     ["a macro recursion", 'Macro recursion detected involving "WRITE"'],

@@ -105,10 +105,16 @@ export interface SyntaxDiagnostics {
    * `lv_password` arrive there identically and all three are dropped.
    *
    * Why `parser_error` needs it: the key says "abaplint did not recognise
-   * this" and stops. `WRITE` means we are missing a form of a statement every
-   * ABAP developer uses; `FOO` (reported as absent) means the user typed
-   * something that is not ABAP at all. Those want opposite work, and the key
-   * alone merges them — the same failure `check_syntax` has, one branch over.
+   * this" and stops, so 155 events in two days were one undifferentiated
+   * bucket. This narrows them to a named keyword — and that is ALL it does.
+   *
+   * It does not say whether the user was writing ABAP. ABAP shares most of its
+   * keywords with JavaScript, so `class Foo {}` reports `CLASS` exactly as a
+   * `CLASS` we failed to parse would. And absence has several causes it cannot
+   * tell apart: a typo of a real ABAP word (`SELCT`), a word from another
+   * language that happens not to collide (`const`), an identifier the user
+   * invented, or a `parser_error` of one of the other three message shapes.
+   * Read it as "which keyword", never as "whose fault".
    */
   statement?: string;
 }

@@ -96,7 +96,8 @@ export function isKnownStatementKeyword(token: string): boolean {
  * wrong. `Macro recursion detected involving "X"` also ends in a quoted token,
  * so it would report a macro's name as a statement we cannot parse;
  * `Statement too long, refactor statement` and `Pragmas not allowed in v700`
- * carry no token, so they would land in the absence that means "not ABAP".
+ * carry no token, so they would silently swell the absent bucket with a third
+ * unrelated cause.
  * Hence the whole sentence is matched, not just the tail. The middle is
  * wildcarded because abaplint interpolates the configured version there
  * (`the configured ABAP version`, `ABAPopen-abap`).

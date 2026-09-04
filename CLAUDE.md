@@ -407,8 +407,7 @@ explicitly.
 case-insensitive and abaplint quotes the token exactly as the user typed it, so
 `write` and `WRITE` are one finding. LLMs write lower-case ABAP routinely, so
 testing the raw token would drop most real keywords — and, because of the rule
-below, would make that emptiness read as "not ABAP" when the truth was the
-opposite. Folding does not widen what can travel (`zsecret` folds to `ZSECRET`,
+below, would hide exactly the keywords this parameter exists to surface. Folding does not widen what can travel (`zsecret` folds to `ZSECRET`,
 still not a member), and what is emitted is the folded string that `has` proved
 identical to a set member, so the value leaving the browser is abaplint's own
 keyword rather than a string the user shaped. `toUpperCase`, never
@@ -449,9 +448,11 @@ on this parameter — it narrows the question from 155 undifferentiated
 pasted JavaScript from real ABAP needs a second signal that does not exist
 (the same shape as #56, one branch over).
 
-`(not set)` there means "not ABAP vocabulary" **or** "not this message shape",
-and the second half is not negligible: `parser_error` is four different
-messages, not one. abaplint's rule emits the unknown-statement one this
+**`(not set)` has at least four causes and cannot distinguish them**: a typo of
+a real ABAP word (`SELCT`), a word from another language that happens not to
+collide (`const`), an identifier the user invented (`frobnicate`), and a
+`parser_error` of a different message shape. That last one is not negligible:
+`parser_error` is four different messages, not one. abaplint's rule emits the unknown-statement one this
 parameter is about, plus `Statement too long, refactor statement`,
 `Macro recursion detected involving "X"` and `Pragmas not allowed in v700`. The
 macro one also ends in a quoted token, so keying on `parser_error` alone would
@@ -459,10 +460,10 @@ report a macro's name as a statement we cannot parse. The classifier therefore
 matches the whole sentence, wildcarding only the version abaplint interpolates
 into the middle.
 
-With that caveat, do not read `(not set)` as a residue to be emptied the way
-`transpile_reason`'s `other` is (#43) — a large share of it is the answer that
-visitors are pasting non-ABAP, and the work that implies is a better error
-message, not more parser coverage.
+So do not read `(not set)` as a residue to be emptied the way
+`transpile_reason`'s `other` is (#43) — but do not read it as an answer either.
+It is the bucket this parameter declines to describe, and no share of it can be
+attributed to any one cause from this measurement alone.
 
 The usual two traps apply: filter by `outcome = syntax_error` **and**
 `syntax_key = parser_error`, or `(not set)` swamps the report for a third
