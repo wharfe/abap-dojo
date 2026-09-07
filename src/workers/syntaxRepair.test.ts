@@ -1,0 +1,261 @@
+import { describe, it, expect } from "vitest";
+import { Buffer } from "buffer";
+(globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
+
+import { Config } from "@abaplint/core";
+import { config as transpilerConfig } from "@abaplint/transpiler";
+import {
+  errorCounter,
+  doubleQuoteCandidates,
+  findSyntaxRepair,
+} from "./syntaxRepair";
+import { repairHint } from "../utils/repairHint";
+import { sanitizeParams } from "../utils/analytics";
+
+/**
+ * The same construction abaplintWorker.ts uses, from the same imported
+ * `transpilerConfig`. The syntax version is `open-abap`, not 7.02, and the
+ * distinction matters here: several of the counterexamples below are 7.40
+ * syntax that a 7.02 configuration would reject for unrelated reasons, which
+ * would make them pass this file while proving nothing.
+ */
+const config = new Config(JSON.stringify(transpilerConfig));
+const errorsIn = errorCounter(config, "ztest.prog.abap");
+
+/** Search the way the worker does: count the source, then look for better. */
+async function repairOf(source: string) {
+  const before = await errorsIn(source);
+  return findSyntaxRepair(source, before, errorsIn);
+}
+
+describe("doubleQuoteCandidates", () => {
+  it("rewrites one line per candidate, in row order", () => {
+    const source = `REPORT z.\nWRITE "a".\nWRITE "b".`;
+    expect(doubleQuoteCandidates(source)).toEqual([
+      { line: 2, source: `REPORT z.\nWRITE 'a'.\nWRITE "b".` },
+      { line: 3, source: `REPORT z.\nWRITE "a".\nWRITE 'b'.` },
+    ]);
+  });
+
+  it("doubles an apostrophe inside the rewritten text", () => {
+    // `WRITE 'it's here'.` does not parse, so without this the one user whose
+    // string contains an apostrophe is the one who gets no hint.
+    expect(doubleQuoteCandidates(`WRITE "it's here".`)[0].source).toBe(
+      `WRITE 'it''s here'.`,
+    );
+  });
+
+  it("takes the first pair on a line, not the last", () => {
+    expect(doubleQuoteCandidates(`WRITE "a" && "b".`)[0].source).toBe(
+      `WRITE 'a' && "b".`,
+    );
+  });
+
+  it("ignores a line with an unpaired quote", () => {
+    expect(doubleQuoteCandidates(`WRITE "a.`)).toEqual([]);
+  });
+
+  it("stops at the budget rather than parsing the whole file again", () => {
+    const source = Array.from({ length: 40 }, (_, i) => `WRITE "${i}".`).join(
+      "\n",
+    );
+    expect(doubleQuoteCandidates(source)).toHaveLength(10);
+  });
+});
+
+describe("findSyntaxRepair search", () => {
+  it("reports nothing when the source had no error to improve on", async () => {
+    const never = () => Promise.reject(new Error("must not re-parse"));
+    expect(await findSyntaxRepair(`WRITE "a".`, 0, never)).toBeUndefined();
+  });
+
+  it("reports the line of the first candidate that scores better", async () => {
+    const source = `WRITE "a".\nWRITE "b".\nWRITE "c".`;
+    const scores = new Map([
+      [`'a'`, 2],
+      [`'b'`, 1],
+      [`'c'`, 0],
+    ]);
+    const stub = (candidate: string) =>
+      Promise.resolve(
+        [...scores].find(([mark]) => candidate.includes(mark))?.[1] ?? 2,
+      );
+    expect(await findSyntaxRepair(source, 2, stub)).toEqual({
+      kind: "double_quote",
+      line: 2,
+    });
+  });
+
+  it("reports nothing when no candidate scores better", async () => {
+    const same = () => Promise.resolve(2);
+    expect(await findSyntaxRepair(`WRITE "a".`, 2, same)).toBeUndefined();
+  });
+});
+
+/**
+ * abaplint is the judge, so these are the cases that decide whether the
+ * feature is right. Each `quiet` case is a counterexample that a line-scanning
+ * implementation gets wrong — they are the reason this module re-parses
+ * instead of reading the source, and they must keep passing for that reason
+ * and not by accident.
+ */
+describe("findSyntaxRepair against the real parser", () => {
+  it("finds a misused quote on the last line", async () => {
+    expect(await repairOf(`REPORT z.\nWRITE 'ok'.\nWRITE "hello".`)).toEqual({
+      kind: "double_quote",
+      line: 3,
+    });
+  });
+
+  it("finds one that abaplint reported on a later row", async () => {
+    // The comment swallows the rest of row 2, so abaplint joins row 3 onto it
+    // and reports `check_syntax` there. Anchoring to the error's own row would
+    // point at a line the user did not mistype.
+    expect(await repairOf(`REPORT z.\nWRITE "hello".\nWRITE 'ok'.`)).toEqual({
+      kind: "double_quote",
+      line: 2,
+    });
+  });
+
+  it("finds one in a program with no REPORT line", async () => {
+    expect(await repairOf(`WRITE "hello".`)).toEqual({
+      kind: "double_quote",
+      line: 1,
+    });
+  });
+
+  it("cannot reach a comment that ate a chained operand (#68)", async () => {
+    // Both of these parse, run, and print less than the user wrote:
+    // the first prints nothing, the second prints `a` and drops `b`. abaplint
+    // reports no error at all, so there is no score for a repair to improve
+    // and this module is structurally unable to help — see #68, which needs a
+    // signal that is not an error count. Pinned so the limit stays a decision
+    // rather than a surprise to whoever reads the hint and expects it here.
+    expect(await repairOf(`REPORT z.\nWRITE: "hello".`)).toBeUndefined();
+    expect(await repairOf(`REPORT z.\nWRITE: 'a', "b".`)).toBeUndefined();
+  });
+
+  it("repairs a string that contains an apostrophe", async () => {
+    expect(await repairOf(`REPORT z.\nWRITE "it's here".`)).toEqual({
+      kind: "double_quote",
+      line: 2,
+    });
+  });
+
+  it("keeps quiet on a correct end-of-line comment", async () => {
+    expect(await repairOf(`REPORT z.\nWRITE 'a'. " note`)).toBeUndefined();
+  });
+
+  it("keeps quiet on a correct full-line comment", async () => {
+    expect(
+      await repairOf(`REPORT z.\n* he said "hello" here\nWRITE 'a'.`),
+    ).toBeUndefined();
+  });
+
+  it("keeps quiet on a comment holding an apostrophe and a quote", async () => {
+    // The apostrophe opens no literal, so a scanner that strips `'...'` first
+    // leaves the `"` exposed and warns about correct ABAP.
+    expect(
+      await repairOf(`REPORT z.\n* don't use "x" here\nWRITE 'a'.`),
+    ).toBeUndefined();
+  });
+
+  it("keeps quiet on a string template containing quotes", async () => {
+    expect(await repairOf(`REPORT z.\nWRITE |He said "hi"|.`)).toBeUndefined();
+  });
+
+  it("keeps quiet on a comment inside a multi-line statement", async () => {
+    expect(
+      await repairOf(`REPORT z.\nDATA lv TYPE i.\nlv = 1 " the first\n  + 2.`),
+    ).toBeUndefined();
+  });
+
+  it("keeps quiet when an unrelated error is what failed the run", async () => {
+    // `STRING_TABLE` is absent from open-abap-core, so an ordinary program can
+    // carry an Error-severity issue while parsing perfectly. An
+    // "are there errors?" gate would open here and warn about the comment.
+    expect(
+      await repairOf(
+        `REPORT z.\nDATA lt TYPE STRING_TABLE.\n* he said "hello"\nWRITE 'a'.`,
+      ),
+    ).toBeUndefined();
+  });
+
+  /**
+   * The cases above where the program is otherwise correct never reach the
+   * re-parse: they have no error at all, and `findSyntaxRepair` returns early.
+   * These do. A broken program that also contains an ordinary comment is the
+   * common shape — `syntax_error` is around 30% of all runs — and it is the
+   * only shape where the choice between judging by re-parse and judging by
+   * reading the line is observable. Deleting these leaves the design
+   * untested.
+   */
+  describe("with an unrelated error also present", () => {
+    const broken = (line: string) =>
+      `REPORT z.\nDATA lt TYPE STRING_TABLE.\n${line}\nWRITE 'b'.`;
+
+    it("keeps quiet on an end-of-line comment holding a pair", async () => {
+      expect(await repairOf(broken(`WRITE 'a'. " note "x" here`))).toBeUndefined();
+    });
+
+    it("keeps quiet on a full-line comment holding a pair", async () => {
+      expect(await repairOf(broken(`* he said "hello" here`))).toBeUndefined();
+    });
+
+    it("keeps quiet on a string template holding a pair", async () => {
+      expect(await repairOf(broken(`WRITE |He said "hi"|.`))).toBeUndefined();
+    });
+
+    it("still finds a misused quote", async () => {
+      expect(await repairOf(broken(`WRITE "hello".`))).toEqual({
+        kind: "double_quote",
+        line: 3,
+      });
+    });
+  });
+
+  it("keeps quiet on a program that parses", async () => {
+    expect(await repairOf(`REPORT z.\nWRITE 'a'.`)).toBeUndefined();
+  });
+
+  it("keeps quiet on a correct comment that holds a quoted pair", async () => {
+    // The repair would remove the end-of-line comment entirely, which is the
+    // way a plain error count could reward an edit that fixes nothing.
+    expect(
+      await repairOf(`REPORT z.\nWRITE 'a'. " see "x" now`),
+    ).toBeUndefined();
+    expect(
+      await repairOf(`REPORT z.\n* use "a" or "b"\nWRITE 'a'.`),
+    ).toBeUndefined();
+  });
+});
+
+describe("repairHint", () => {
+  it("names the row the edit belongs on", () => {
+    expect(repairHint({ kind: "double_quote", line: 7 })).toContain("line 7");
+  });
+});
+
+describe("syntax_repair as a parameter", () => {
+  it("survives sanitizing on a syntax_error", () => {
+    expect(
+      sanitizeParams("run_result", {
+        outcome: "syntax_error",
+        duration_ms: 1,
+        output_lines: 0,
+        syntax_repair: "double_quote",
+      }),
+    ).toMatchObject({ syntax_repair: "double_quote" });
+  });
+
+  it("is stripped from any other outcome", () => {
+    expect(
+      sanitizeParams("run_result", {
+        outcome: "success",
+        duration_ms: 1,
+        output_lines: 0,
+        syntax_repair: "double_quote",
+      }),
+    ).not.toHaveProperty("syntax_repair");
+  });
+});

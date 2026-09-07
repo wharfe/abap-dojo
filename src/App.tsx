@@ -18,7 +18,12 @@ import { track, lineCount, type RunOutcome } from "./utils/analytics";
 import { scheduleIdle } from "./utils/scheduleIdle";
 import { computeSummary } from "./utils/validationSummary";
 import type { LintIssue, WorkerResponse } from "./types/messages";
-import type { TranspileDiagnostics, SyntaxDiagnostics } from "./types/diagnostics";
+import type {
+  TranspileDiagnostics,
+  SyntaxDiagnostics,
+  SyntaxRepair,
+} from "./types/diagnostics";
+import { repairHint } from "./utils/repairHint";
 import type { Sample } from "./samples";
 import type { AppMode, StageResult, ValidationStage } from "./types/validation";
 import AbaplintWorker from "./workers/abaplintWorker?worker";
@@ -177,6 +182,9 @@ function App() {
       // failure it is holding, and so a value meant for one outcome cannot ride
       // along on the other.
       syntaxDiagnostics?: SyntaxDiagnostics,
+      // Also syntax_error only. Separate from `syntaxDiagnostics` because only
+      // its `kind` may be measured — `line` belongs to the hint in `message`.
+      syntaxRepair?: SyntaxRepair,
     ) => {
       disarmPlaygroundWatchdog();
       playgroundRequestIdRef.current = "";
@@ -203,6 +211,7 @@ function App() {
         syntax_key: syntaxDiagnostics?.key,
         syntax_error_count: syntaxDiagnostics?.errorCount,
         syntax_statement: syntaxDiagnostics?.statement,
+        syntax_repair: syntaxRepair?.kind,
       });
     },
     [disarmPlaygroundWatchdog],
@@ -283,11 +292,16 @@ function App() {
         ) {
           const isSyntax = data.kind === "syntax";
           const label = isSyntax ? "Syntax error" : "Transpile error";
+          const repair = isSyntax ? data.repair : undefined;
+          const head = data.line
+            ? `${label} (L${data.line}): ${data.message}`
+            : `${label}: ${data.message}`;
           endRun(
             isSyntax ? "syntax_error" : "transpile_error",
-            data.line
-              ? `${label} (L${data.line}): ${data.message}`
-              : `${label}: ${data.message}`,
+            // abaplint names neither the quote nor the argument it swallowed,
+            // so the message above cannot be acted on by someone who does not
+            // already know ABAP comment syntax. Say what to change and where.
+            repair ? `${head}\n\n${repairHint(repair)}` : head,
             undefined,
             // "set on no other outcome" is the documented invariant, so enforce
             // it here rather than trusting the worker to keep omitting it: both
@@ -296,6 +310,7 @@ function App() {
             // the other's measurements.
             isSyntax ? undefined : data.diagnostics,
             isSyntax ? data.syntaxDiagnostics : undefined,
+            repair,
           );
         }
       }

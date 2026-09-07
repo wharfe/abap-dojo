@@ -118,3 +118,38 @@ export interface SyntaxDiagnostics {
    */
   statement?: string;
 }
+
+/**
+ * A single-line edit that makes a failing parse succeed.
+ *
+ * This is the third measurable half on the syntax branch, and it exists
+ * because the other two stop one step short of an answer. `syntax_key` says
+ * `parser_error`; `syntax_statement` narrows that to `WRITE`; neither says
+ * what is wrong with the WRITE — and measured over 2026-09-04..07, `WRITE` was
+ * 87 of the ~292 `parser_error` events, the largest identified bucket by far.
+ *
+ * Probing it locally showed the keyword was a red herring: all 20 real `WRITE`
+ * forms parse (`WRITE / x`, `WRITE 5(10) x`, `WRITE x COLOR 3`, ...). What
+ * fails is punctuation borrowed from another language, and the commonest is
+ * the double quote — which in ABAP starts a comment, so `WRITE "hello".`
+ * silently loses its own argument and abaplint reports only that a statement
+ * it cannot name went missing.
+ *
+ * The value is produced by re-parsing, never by reading the line: see
+ * src/workers/syntaxRepair.ts for why a regex over the source cannot tell a
+ * misused quote from `* he said "hello"` or from `WRITE |He said "hi"|.`
+ */
+export const SYNTAX_REPAIRS = ["double_quote"] as const;
+
+export type SyntaxRepairKind = (typeof SYNTAX_REPAIRS)[number];
+
+export interface SyntaxRepair {
+  /** Which repair worked. An enum, so nothing the user writes can be sent. */
+  kind: SyntaxRepairKind;
+  /**
+   * The 1-based row the edit was made on, for the hint shown in the browser.
+   * Never sent: a line number is not source, but it is not evidence of
+   * anything either, and `run_result` already carries the counts that are.
+   */
+  line: number;
+}
