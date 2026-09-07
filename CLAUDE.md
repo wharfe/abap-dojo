@@ -210,7 +210,7 @@ renaming a parameter:
 
 | Register as custom **dimension** (text) | Register as custom **metric** (number) |
 |---|---|
-| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key`, `syntax_statement`, `syntax_error_count` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
+| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key`, `syntax_statement`, `syntax_error_count`, `syntax_repair` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
 
 `syntax_error_count` is registered as a **dimension**, not a metric, and that is
 deliberate rather than a mistake to fix: its values top out around 19, so the
@@ -507,6 +507,106 @@ Two traps, both the same shape as the `transpile_*` ones: filter by
 `outcome = syntax_error` and not just `event_name`, or `(not set)` dominates
 the report; and a *new value* of `syntax_key` needs no GA4 change, while a new
 *parameter* does.
+
+### `syntax_repair` says what to change, and it is the only one that does
+
+`syntax_key` answers "which rule", `syntax_statement` answers "which keyword",
+and the pair still does not say what is wrong with the line. Measured
+2026-09-04..07, `WRITE` was 87 of ~292 `parser_error` events — the largest
+identified bucket — and probing it locally showed the keyword was a red
+herring: all 20 real forms of the statement parse (`WRITE / x`,
+`WRITE 5(10) x`, `WRITE x COLOR 3`, `WRITE x DECIMALS 2`, ...). What fails is
+punctuation borrowed from another language.
+
+So `run_result` also carries `syntax_repair` on `syntax_error` **only**: which
+one-line edit would have made the parse succeed. It is an enum with one member
+today, `double_quote`, so unlike the three parameters above it needs no
+membership test — nothing the user writes can reach the wire through it.
+
+**The value is produced by re-parsing, never by reading the line, and that is
+not a style preference.** A scanner that decides "comment or string?" from the
+text of one line is wrong on ordinary ABAP, and not at the margins:
+
+| the user wrote | a line scanner says | the truth |
+|---|---|---|
+| `WRITE "hello".` | misused quote | misused quote |
+| `* he said "hello" here` | misused quote | a full-line comment |
+| `WRITE 'a'. " note "x" now` | misused quote | an end-of-line comment |
+| `WRITE \|He said "hi"\|.` | misused quote | a 7.40 string template |
+| `lo->m( iv = 1 " first` | misused quote | a comment inside a statement |
+
+`src/workers/syntaxRepair.ts` therefore makes no judgement about the line: it
+rewrites one `"..."` pair as `'...'`, hands the edited source back to abaplint,
+and keeps the edit only if abaplint's own error count went down. Each of the
+four correct programs above stays quiet because the rewrite removes no error.
+
+**One candidate rewrites every pair at once, and it is not an optimisation.**
+It reaches two shapes nothing else does. abaplint collapses consecutive
+swallowed statements into a *single* error, so with two misused quotes on
+adjacent lines no one-line edit lowers the count; and a line can be wrong
+twice (`WRITE "a" && "b".`), where fixing half of it leaves the parse exactly
+as broken. Between them that is probably the commonest shape in pasted output.
+
+**That candidate reports no line, deliberately — every time it wins, even
+where it touched a single row.** The score says the rewrite fixed the parse
+and attributes that to none of the edits in particular (a single row can hold
+several pairs), so the row it could name is just the first quoted row in the
+file — put a correct
+`* note "x"` above the real mistake and that row is the comment. The hint
+drops the row instead (`SyntaxRepair.line` is optional), because a confident
+wrong row is worse than none. The all-at-once candidate goes last so a
+single-line diagnosis, which *can* name the row, still wins where there is
+one.
+
+Three traps if you touch it:
+
+1. **The score is the plain Error-severity count, and probing it under
+   `Config.getDefault()` will mislead you.** This worker configures abaplint
+   from `@abaplint/transpiler`'s own `config`, which enables almost no style
+   rules — `implicit_start_of_selection`, `check_comments` and `keyword_case`
+   all fire under the default config and none of them fire here. A probe run
+   against the default config inverted the answer once while choosing how to
+   take the score.
+2. **The `WRITE: "hello".` and `WRITE: 'a', "b".` forms are out of reach by
+   construction.** A comment that eats a chained operand leaves a program that
+   parses, runs, and prints less than the user wrote, with abaplint reporting
+   nothing at all — so there is no error count for a repair to improve, and
+   the run is counted as `success`. That failure is invisible to this whole
+   section. See #68.
+3. **A dropped `\r` makes the whole feature silent, with nothing to notice.**
+   The source is split on `\n` alone, so under CRLF every line ends in `\r` —
+   and JavaScript's `.` does not match `\r`, so a tail of `.*$` produced zero
+   candidates for anyone pasting from a CRLF editor. There is no EOL
+   normalisation anywhere in the app. Keep the regex tail as `[\s\S]*`.
+
+**The parameter counts repairs that worked, not mistakes the user made, and
+those come apart.** External review found this program, where the comment is
+correct ABAP and the real mistake is CONCATENATE's missing second operand:
+
+```abap
+CONCATENATE " explanatory note "
+  'a' INTO result.
+```
+
+Rewriting the comment removes the error, so the search fires and
+`syntax_repair` counts it. Structurally it is the same program as
+`WRITE "hello".` — a quote swallows the rest of a statement, and rewriting it
+makes the statement parse — so no amount of parsing separates them; only
+intent does, and we do not have it. This is why the hint offers the fix
+**conditionally** ("if you meant that as literal data") instead of asserting
+what the user meant: the misfire is then harmless to read. Do not "fix" that
+wording into a verdict.
+
+The search costs a bounded number of extra parses, and only on the Run path
+after a failure — never on `lint`, which fires on every keystroke. It is
+skipped entirely above 64 kB of source: the candidate cap bounds the parses
+but not the work, and the 20s watchdog ends the *display* without interrupting
+this worker, so an unbounded search would outlive the run it belonged to.
+
+Reading it: filter by `outcome = syntax_error`, same trap as the rest. A
+falling `syntax_repair` share is the intended outcome (the hint reaches people
+and they stop making the mistake), which means it cannot be read on its own —
+compare it against `syntax_statement = WRITE` over the same period.
 
 Only Playground is instrumented. `handleValidate` catches the same throws but
 `validate_result` carries no `transpile_reason`; that is a scope call, not an

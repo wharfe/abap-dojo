@@ -12,8 +12,22 @@ import { detectPitfalls } from "../rules/detector";
 import { pitfallToLintIssue } from "../rules/pitfallToLintIssue";
 import { classifyTranspileError } from "./transpileDiagnostics";
 import { classifySyntaxError } from "./syntaxDiagnostics";
+import {
+  errorCounter,
+  countErrors,
+  findSyntaxRepair,
+} from "./syntaxRepair";
 
 const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
+
+/**
+ * The one in-memory filename every parse in this worker uses. Named once so a
+ * repair candidate is judged under the same conditions as the source it
+ * repairs — abaplint derives the object name and type from it.
+ */
+const SOURCE_FILENAME = "ztest.prog.abap";
+
+const errorsIn = errorCounter(abaplintConfig, SOURCE_FILENAME);
 
 function mapSeverity(s: string): LintIssue["severity"] {
   if (s === "Error") return "error";
@@ -35,9 +49,13 @@ function issueToLintIssue(issue: Issue): LintIssue {
   };
 }
 
+function isError(issue: Issue): boolean {
+  return issue.getSeverity().toString() === "Error";
+}
+
 async function handleLint(source: string): Promise<WorkerResponse> {
   const reg = new Registry(abaplintConfig);
-  reg.addFile(new MemoryFile("ztest.prog.abap", source));
+  reg.addFile(new MemoryFile(SOURCE_FILENAME, source));
   await reg.parseAsync();
   const issues = reg.findIssues().map(issueToLintIssue);
   // The LLM-pitfall rules run here as well as in AI Validator mode: they are
@@ -53,19 +71,31 @@ async function handleTranspile(
 ): Promise<WorkerResponse> {
   try {
     const reg = new Registry(abaplintConfig);
-    reg.addFile(new MemoryFile("ztest.prog.abap", source));
+    reg.addFile(new MemoryFile(SOURCE_FILENAME, source));
     await reg.parseAsync();
 
     // Check for parser errors first
     const issues = reg.findIssues();
-    const errors = issues.filter((i) => i.getSeverity().toString() === "Error");
+    const errors = issues.filter(isError);
     if (errors.length > 0) {
       const first = errors[0];
+      // Computed before the response is built, and `findSyntaxRepair` swallows
+      // its own parse failures, so this cannot reach the catch below: the
+      // syntax verdict is already correct at this point and a hint that fails
+      // must not turn it into a `transpile_error`.
+      //
+      // Costs a bounded number of extra parses, and only on the Run path after
+      // a failure the user is already waiting on. Never on `lint`, which runs
+      // on every keystroke. It is not scoped to the parse-failure keys: any
+      // Error-severity outcome gets the search, which is a superset of what
+      // can ever match and one fewer rule to keep in step with abaplint.
+      const repair = await findSyntaxRepair(source, countErrors(issues), errorsIn);
       return {
         type: "transpile-error",
         kind: "syntax",
         message: first.getMessage(),
         line: first.getStart().getRow(),
+        repair,
         // The message above is what the user reads and it embeds their source;
         // this is the half we are allowed to count. `first` is deliberately the
         // same issue in both, so the metric can be checked against the screen.
@@ -112,7 +142,7 @@ function postStageResult(stage: ValidationStage, result: StageResult): void {
 
 async function handleValidate(source: string): Promise<void> {
   const reg = new Registry(abaplintConfig);
-  reg.addFile(new MemoryFile("ztest.prog.abap", source));
+  reg.addFile(new MemoryFile(SOURCE_FILENAME, source));
 
   // Stage 1: Syntax
   postProgress("syntax", "running");

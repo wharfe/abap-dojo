@@ -31,7 +31,12 @@
  * caller pass `page_location` (see RESERVED_NAMES) to "fix SPA tracking".
  */
 import type { AppMode } from "../types/validation";
-import { TRANSPILE_REASONS, type TranspileReason } from "../types/diagnostics";
+import {
+  TRANSPILE_REASONS,
+  SYNTAX_REPAIRS,
+  type TranspileReason,
+  type SyntaxRepairKind,
+} from "../types/diagnostics";
 
 /**
  * Every way a run can end. The set is exhaustive on purpose: `run_click` and
@@ -110,6 +115,20 @@ export interface EventMap {
     syntax_key?: string;
     syntax_error_count?: number;
     syntax_statement?: string;
+    /**
+     * Only on `outcome: "syntax_error"` — which one-line edit would have made
+     * the parse succeed, when one did. An enum with a single member today
+     * (`double_quote`), so unlike the three parameters above it needs no
+     * membership test: nothing the user writes can reach the wire through it.
+     *
+     * It exists because `syntax_key` and `syntax_statement` stop one step
+     * short. They said `parser_error` and `WRITE`, and `WRITE` turned out to
+     * be a red herring — every real form of the statement parses. This is the
+     * parameter that says whether the failure was punctuation borrowed from
+     * another language, and it is the only way to tell "the hint we now show
+     * is not reaching people" from "this was never the common mistake".
+     */
+    syntax_repair?: SyntaxRepairKind;
   };
   /** Validate pressed in AI Validator mode. */
   validate_click: { line_count: number };
@@ -250,6 +269,7 @@ const EVENT_PARAMS: { readonly [K in EventName]: Readonly<SpecsFor<K>> } = {
     syntax_key: RULE_KEY,
     syntax_error_count: COUNT,
     syntax_statement: STATEMENT_KEYWORD,
+    syntax_repair: { kind: "enum", values: SYNTAX_REPAIRS },
   },
   validate_click: { line_count: COUNT },
   validate_result: {
@@ -329,7 +349,10 @@ const OUTCOME_ONLY_PARAMS: ReadonlyArray<
   readonly [RunOutcome, ReadonlyArray<keyof EventMap["run_result"]>]
 > = [
   ["transpile_error", ["transpile_reason", "transpile_node"]],
-  ["syntax_error", ["syntax_key", "syntax_error_count", "syntax_statement"]],
+  [
+    "syntax_error",
+    ["syntax_key", "syntax_error_count", "syntax_statement", "syntax_repair"],
+  ],
 ];
 
 /**

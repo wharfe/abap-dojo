@@ -14,6 +14,13 @@ import { defineConfig, devices } from "@playwright/test";
  * opaque-origin (sandboxed, no allow-same-origin) iframe has a history of
  * engine-specific behaviour, and Chromium-only coverage cannot rule out Run
  * being entirely broken (`load_error`) on WebKit or Firefox.
+ *
+ * One suite opts out of WebKit — `e2e/syntaxHint.spec.ts`, whose every test
+ * needs a run to reach a terminal result, which WebKit does not do reliably
+ * (#47: the transpile worker intermittently never answers). The policy above
+ * is still served: `sandbox.spec.ts` is the suite that would catch Run being
+ * broken outright, and it still runs on all three. Prefer a per-file opt-out
+ * with its issue number over dropping an engine here.
  */
 export default defineConfig({
   testDir: "./e2e",

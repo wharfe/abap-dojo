@@ -1,6 +1,10 @@
 // src/types/messages.ts
 import type { ValidationStage, StageResult } from "./validation";
-import type { TranspileDiagnostics, SyntaxDiagnostics } from "./diagnostics";
+import type {
+  TranspileDiagnostics,
+  SyntaxDiagnostics,
+  SyntaxRepair,
+} from "./diagnostics";
 
 export interface LintIssue {
   message: string;
@@ -60,6 +64,14 @@ export type WorkerResponse =
       line?: number;
       diagnostics?: TranspileDiagnostics;
       syntaxDiagnostics?: SyntaxDiagnostics;
+      /**
+       * Accompanies `kind: "syntax"` only, and only when a one-line edit made
+       * abaplint stop complaining — see src/workers/syntaxRepair.ts. Unlike
+       * the two fields above it is not purely a measurement: `kind` is the
+       * half that may be counted, `line` is there so the browser can say which
+       * row to look at. Neither carries source.
+       */
+      repair?: SyntaxRepair;
     }
   | { type: "validate-progress"; stage: ValidationStage; status: "running" | "skipped" }
   | { type: "validate-stage-result"; stage: ValidationStage; result: StageResult };

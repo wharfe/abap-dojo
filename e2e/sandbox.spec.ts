@@ -1,18 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-
-const EDITOR = ".monaco-editor, textarea";
-
-/** Replace the editor contents with `source`. */
-async function typeProgram(page: Page, source: string): Promise<void> {
-  await page.waitForSelector(EDITOR, { timeout: 30_000 });
-  await page.click(EDITOR);
-  await page.keyboard.press("ControlOrMeta+A");
-  // insertText (not type): Monaco's own keydown handling (autoclosing quotes,
-  // electric characters) races with per-keystroke automation and drops or
-  // duplicates characters under CDP. insertText delivers the text as a single
-  // paste-like input event, which Monaco applies atomically to its model.
-  await page.keyboard.insertText(source);
-}
+import { typeProgram } from "./helpers";
 
 /**
  * Poll the page with a SHORT per-call timeout. This is the whole trick: a
