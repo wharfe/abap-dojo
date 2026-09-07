@@ -44,7 +44,9 @@ import type { SyntaxRepair } from "../types/diagnostics";
 /**
  * The row, when the search can name one.
  *
- * It cannot when the rewrite that fixed the parse touched several places:
+ * It cannot when the rewrite that fixed the parse was the all-at-once one —
+ * every time, including where that rewrite touched a single row, because that
+ * row can hold several pairs and none of them is singled out. The reason is
  * abaplint reports one error for a run of swallowed statements, so the search
  * knows the rewrite worked and not which part of it did. Saying "line 2"
  * because row 2 held the first quote in the file is a confident answer to a

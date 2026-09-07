@@ -114,7 +114,9 @@ function asTextLiteral(inner: string): string {
 export interface RepairCandidate {
   /**
    * 1-based row the edit was made on, or `undefined` for the candidate that
-   * rewrites everything — there the search cannot say which row mattered.
+   * rewrites everything — always undefined there, even when it happened to
+   * touch one row, because that row can hold several pairs and the score
+   * attributes the improvement to none of them in particular.
    */
   line?: number;
   /** The whole source with the edit applied. */

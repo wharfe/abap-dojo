@@ -151,13 +151,15 @@ export interface SyntaxRepair {
    * Never sent: a line number is not source, but it is not evidence of
    * anything either, and `run_result` already carries the counts that are.
    *
-   * **Absent when more than one row had to be rewritten together**, which
-   * happens because abaplint collapses consecutive swallowed statements into
-   * one error (see syntaxRepair.ts). The search then knows the rewrite fixed
-   * the parse but not which of the rewritten rows did it — and naming the
-   * first one is worse than naming none: put a correct comment above two
-   * misused quotes and the first row is the comment. The hint drops the row
-   * rather than point at a line that was never wrong.
+   * **Absent whenever the rewrite-everything candidate is the one that
+   * worked** — always, even where that candidate touched a single row,
+   * because a row can hold several pairs and the search does not know which
+   * of them mattered any more than it knows which row did. It gets there
+   * because abaplint collapses consecutive swallowed statements into one
+   * error (see syntaxRepair.ts), so the score cannot attribute the
+   * improvement to any one edit. Naming the first is worse than naming none:
+   * put a correct comment above two misused quotes and the first row is the
+   * comment. The hint drops the row rather than point somewhere never wrong.
    */
   line?: number;
 }

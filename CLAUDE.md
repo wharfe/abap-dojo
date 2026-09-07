@@ -547,9 +547,11 @@ adjacent lines no one-line edit lowers the count; and a line can be wrong
 twice (`WRITE "a" && "b".`), where fixing half of it leaves the parse exactly
 as broken. Between them that is probably the commonest shape in pasted output.
 
-**That candidate reports no line, deliberately.** The rewrite touched several
-places and the search does not know which of them mattered, so the row it
-could name is just the first quoted row in the file — put a correct
+**That candidate reports no line, deliberately — every time it wins, even
+where it touched a single row.** The score says the rewrite fixed the parse
+and attributes that to none of the edits in particular (a single row can hold
+several pairs), so the row it could name is just the first quoted row in the
+file — put a correct
 `* note "x"` above the real mistake and that row is the comment. The hint
 drops the row instead (`SyntaxRepair.line` is optional), because a confident
 wrong row is worse than none. The all-at-once candidate goes last so a

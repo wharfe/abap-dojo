@@ -346,6 +346,44 @@ describe("findSyntaxRepair against the real parser", () => {
     ).toEqual({ kind: "double_quote", line: 3 });
   });
 
+  /**
+   * The rewrite-everything candidate is the newest and least constrained part
+   * of the search — it changes several places at once, so it has the widest
+   * surface for firing on something that was never wrong. These are the
+   * shapes that surface asks for.
+   */
+  describe("the rewrite-everything candidate does not widen what fires", () => {
+    it("keeps quiet on an odd number of quotes", async () => {
+      expect(await repairOf(`REPORT z.\nWRITE "a" "b" "c".`)).toBeUndefined();
+    });
+
+    it("keeps quiet on a double quote inside a text literal", async () => {
+      expect(
+        await repairOf(
+          `REPORT z.\nDATA lt TYPE STRING_TABLE.\nWRITE 'he said "hi" ok'.`,
+        ),
+      ).toBeUndefined();
+    });
+
+    it("keeps quiet when rewriting everything makes the parse worse", async () => {
+      expect(
+        await repairOf(
+          `REPORT z.\nWRITE 'a'. " note "x" and "y"\nFROBNICATE q.`,
+        ),
+      ).toBeUndefined();
+    });
+
+    it("keeps quiet on two correct comments beside an unrelated error", async () => {
+      // Two quoted lines, so the candidate exists; an unrelated error, so the
+      // search actually runs. Both conditions are needed to exercise it.
+      expect(
+        await repairOf(
+          `REPORT z.\nDATA lt TYPE STRING_TABLE.\n* note "a"\n* note "b"\nWRITE 'ok'.`,
+        ),
+      ).toBeUndefined();
+    });
+  });
+
   it("keeps quiet on a program that parses", async () => {
     expect(await repairOf(`REPORT z.\nWRITE 'a'.`)).toBeUndefined();
   });
