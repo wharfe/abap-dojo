@@ -55,10 +55,18 @@ describe("doubleQuoteCandidates", () => {
     );
   });
 
-  it("takes the first pair on a line, not the last", () => {
+  it("takes the first pair on a line for the single-line candidate", () => {
     expect(doubleQuoteCandidates(`WRITE "a" && "b".`)[0].source).toBe(
       `WRITE 'a' && "b".`,
     );
+  });
+
+  it("rewrites every pair on a line for the all-at-once candidate", () => {
+    // A line can be wrong twice. Fixing one half leaves the parse exactly as
+    // broken, so a candidate that stopped at the first pair could never score
+    // better and `WRITE "a" && "b".` was unreachable.
+    const candidates = doubleQuoteCandidates(`WRITE "a" && "b".`);
+    expect(candidates.at(-1)).toEqual({ source: `WRITE 'a' && 'b'.` });
   });
 
   it("ignores a line with an unpaired quote", () => {
@@ -71,16 +79,22 @@ describe("doubleQuoteCandidates", () => {
     );
     // Ten one-line candidates plus the everything-at-once one.
     expect(doubleQuoteCandidates(source)).toHaveLength(11);
-    expect(doubleQuoteCandidates(source).at(-1)).toMatchObject({ line: 1 });
   });
 
-  it("adds an everything-at-once candidate, last", () => {
+  it("adds an everything-at-once candidate, last, and with no line", () => {
     const candidates = doubleQuoteCandidates(`WRITE "a".\nWRITE "b".`);
     expect(candidates).toHaveLength(3);
-    expect(candidates.at(-1)).toEqual({
-      line: 1,
-      source: `WRITE 'a'.\nWRITE 'b'.`,
-    });
+    expect(candidates.at(-1)).toEqual({ source: `WRITE 'a'.\nWRITE 'b'.` });
+  });
+
+  it("never names a row on the everything-at-once candidate", () => {
+    // The row it would name is the first quoted line in the FILE, which need
+    // not be one the rewrite fixed: a correct comment above the real mistake
+    // takes that slot. Reported as no row rather than as the wrong one.
+    const candidates = doubleQuoteCandidates(
+      `* harmless "note" here\nWRITE "hello".\nWRITE "world".`,
+    );
+    expect(candidates.at(-1)?.line).toBeUndefined();
   });
 
   it("adds no everything-at-once candidate when there is only one pair", () => {
@@ -191,10 +205,26 @@ describe("findSyntaxRepair against the real parser", () => {
     // no single-line edit lowers the count here and only the
     // everything-at-once candidate reaches it. This is the commonest shape in
     // pasted LLM output, not an edge case.
-    expect(await repairOf(`REPORT z.\nWRITE "hello".\nWRITE "world".`)).toEqual({
+    expect(
+      await repairOf(`REPORT z.\nWRITE "hello".\nWRITE "world".`),
+    ).toEqual({ kind: "double_quote" });
+  });
+
+  it("finds two misused quotes on one line", async () => {
+    // Both halves are wrong; fixing either alone leaves the parse broken, so
+    // only the all-at-once candidate reaches it — and it cannot name a row.
+    expect(await repairOf(`REPORT z.\nWRITE "a" && "b".`)).toEqual({
       kind: "double_quote",
-      line: 2,
     });
+  });
+
+  it("names no row when a harmless comment holds the first quote", async () => {
+    // The row the all-at-once candidate would have named is the comment's.
+    expect(
+      await repairOf(
+        `REPORT z.\n* harmless "note" here\nWRITE "hello".\nWRITE "world".`,
+      ),
+    ).toEqual({ kind: "double_quote" });
   });
 
   it("finds a misused quote in a program pasted with CRLF", async () => {
@@ -335,6 +365,12 @@ describe("findSyntaxRepair against the real parser", () => {
 describe("repairHint", () => {
   it("names the row the edit belongs on", () => {
     expect(repairHint({ kind: "double_quote", line: 7 })).toContain("line 7");
+  });
+
+  it("omits the row when the search cannot justify one", () => {
+    const hint = repairHint({ kind: "double_quote" });
+    expect(hint).not.toContain("line");
+    expect(hint).toContain("everything after it was ignored");
   });
 
   it("offers the fix as a condition, never as a diagnosis of intent", () => {

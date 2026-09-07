@@ -41,12 +41,26 @@ import type { SyntaxRepair } from "../types/diagnostics";
  * for class candidates and an ordinary English word in a string counts: one
  * such word once cost 1.64 kB of production CSS (#44).
  */
+/**
+ * The row, when the search can name one.
+ *
+ * It cannot when the rewrite that fixed the parse touched several places:
+ * abaplint reports one error for a run of swallowed statements, so the search
+ * knows the rewrite worked and not which part of it did. Saying "line 2"
+ * because row 2 held the first quote in the file is a confident answer to a
+ * question that was not asked — and with a correct `* note "x"` above the real
+ * mistake, row 2 is the comment. Say less instead.
+ */
+function where(line: number | undefined): string {
+  return line === undefined ? "" : `on line ${line} `;
+}
+
 export function repairHint(repair: SyntaxRepair): string {
   switch (repair.kind) {
     case "double_quote":
       return (
         `Hint: in ABAP a double quote begins a comment, so everything ` +
-        `after it on line ${repair.line} was ignored. ` +
+        `after it ${where(repair.line)}was ignored. ` +
         `If you meant that as literal data rather than a comment, ` +
         `single quotes are what ABAP uses: WRITE 'hello'.`
       );

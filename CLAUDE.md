@@ -541,11 +541,20 @@ and keeps the edit only if abaplint's own error count went down. Each of the
 four correct programs above stays quiet because the rewrite removes no error.
 
 **One candidate rewrites every pair at once, and it is not an optimisation.**
-abaplint collapses consecutive swallowed statements into a *single* error, so
-with two misused quotes on adjacent lines no one-line edit lowers the count and
-the search would miss what is probably the commonest shape in pasted output.
-The all-at-once candidate goes last, so a single-line diagnosis still wins when
-there is one — it can name the exact row and the other can only name the first.
+It reaches two shapes nothing else does. abaplint collapses consecutive
+swallowed statements into a *single* error, so with two misused quotes on
+adjacent lines no one-line edit lowers the count; and a line can be wrong
+twice (`WRITE "a" && "b".`), where fixing half of it leaves the parse exactly
+as broken. Between them that is probably the commonest shape in pasted output.
+
+**That candidate reports no line, deliberately.** The rewrite touched several
+places and the search does not know which of them mattered, so the row it
+could name is just the first quoted row in the file — put a correct
+`* note "x"` above the real mistake and that row is the comment. The hint
+drops the row instead (`SyntaxRepair.line` is optional), because a confident
+wrong row is worse than none. The all-at-once candidate goes last so a
+single-line diagnosis, which *can* name the row, still wins where there is
+one.
 
 Three traps if you touch it:
 

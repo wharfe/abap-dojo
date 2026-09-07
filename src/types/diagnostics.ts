@@ -150,6 +150,14 @@ export interface SyntaxRepair {
    * The 1-based row the edit was made on, for the hint shown in the browser.
    * Never sent: a line number is not source, but it is not evidence of
    * anything either, and `run_result` already carries the counts that are.
+   *
+   * **Absent when more than one row had to be rewritten together**, which
+   * happens because abaplint collapses consecutive swallowed statements into
+   * one error (see syntaxRepair.ts). The search then knows the rewrite fixed
+   * the parse but not which of the rewritten rows did it — and naming the
+   * first one is worse than naming none: put a correct comment above two
+   * misused quotes and the first row is the comment. The hint drops the row
+   * rather than point at a line that was never wrong.
    */
-  line: number;
+  line?: number;
 }

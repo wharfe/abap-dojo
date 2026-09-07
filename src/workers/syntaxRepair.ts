@@ -85,6 +85,11 @@ const MAX_SOURCE_CHARS = 64 * 1024;
 /**
  * The first `"..."` pair on a line, if it has one.
  *
+ * `ALL_DOUBLE_QUOTED` below is the same idea without the "first": the
+ * all-at-once candidate needs every pair, because a line can be wrong twice
+ * (`WRITE "a" && "b".`) and fixing one of them leaves the parse as broken as
+ * it was.
+ *
  * The tail is `[\s\S]*` rather than `.*` because `.` excludes `\r`, and the
  * source is split on `\n` alone. Under CRLF every line ends in `\r`, so `.*$`
  * matched nothing and the whole feature went silent for anyone who pasted
@@ -92,6 +97,9 @@ const MAX_SOURCE_CHARS = 64 * 1024;
  * input here is always a single line, so `[\s\S]` cannot over-reach.
  */
 const DOUBLE_QUOTED = /^([^"]*)"([^"]*)"([\s\S]*)$/;
+
+/** Every `"..."` pair on a line. See the note above. */
+const ALL_DOUBLE_QUOTED = /"([^"]*)"/g;
 
 /**
  * Rewrite `inner` as an ABAP text literal, doubling any apostrophe it
@@ -104,9 +112,12 @@ function asTextLiteral(inner: string): string {
 }
 
 export interface RepairCandidate {
-  /** 1-based row the edit was made on. */
-  line: number;
-  /** The whole source with that one line rewritten. */
+  /**
+   * 1-based row the edit was made on, or `undefined` for the candidate that
+   * rewrites everything — there the search cannot say which row mattered.
+   */
+  line?: number;
+  /** The whole source with the edit applied. */
   source: string;
 }
 
@@ -125,35 +136,44 @@ export function doubleQuoteCandidates(source: string): RepairCandidate[] {
   const lines = source.split("\n");
   const candidates: RepairCandidate[] = [];
   const all = [...lines];
-  let first = 0;
+  let rewritten = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const match = DOUBLE_QUOTED.exec(lines[i]);
     if (match === null) continue;
-    const [, before, inner, after] = match;
-    const repaired = `${before}${asTextLiteral(inner)}${after}`;
-    all[i] = repaired;
-    if (first === 0) first = i + 1;
+    // The all-at-once line takes EVERY pair, not just the one the single-line
+    // candidate rewrites.
+    all[i] = lines[i].replace(ALL_DOUBLE_QUOTED, (_, inner: string) =>
+      asTextLiteral(inner),
+    );
+    rewritten++;
     if (candidates.length < MAX_CANDIDATES) {
+      const [, before, inner, after] = match;
       const edited = [...lines];
-      edited[i] = repaired;
+      edited[i] = `${before}${asTextLiteral(inner)}${after}`;
       candidates.push({ line: i + 1, source: edited.join("\n") });
     }
   }
 
-  // One more, with every pair rewritten at once, and it is not an
-  // optimisation — it is the only candidate that reaches the commonest shape.
-  // abaplint collapses consecutive swallowed statements into a SINGLE error,
-  // so with two misused quotes on adjacent lines no one-line edit lowers the
-  // count and every candidate above scores the same as the source:
+  // One more, with everything rewritten at once, and it is not an
+  // optimisation — it is the only candidate that reaches two shapes that
+  // matter. abaplint collapses consecutive swallowed statements into a SINGLE
+  // error, so with two misused quotes on adjacent lines no one-line edit
+  // lowers the count; and a line wrong twice needs both halves fixed:
   //
-  //   WRITE "hello".                    before 1, one-line candidate 0  -> found
-  //   WRITE "hello". / WRITE "world".   before 1, every candidate 1     -> missed
+  //   WRITE "hello".                   before 1, one-line candidate 0 -> found
+  //   WRITE "hello". / WRITE "world".  before 1, every one-line one 1 -> missed
+  //   WRITE "a" && "b".                before 1, first-pair-only    1 -> missed
   //
-  // It comes last so a single-line diagnosis wins when there is one: it
-  // names the exact row, and this one can only name the first.
-  if (candidates.length > 1) {
-    candidates.push({ line: first, source: all.join("\n") });
+  // It comes last so a single-line diagnosis wins when there is one, because
+  // that one can name the row and this one CANNOT: the rewrite touched
+  // several places and the search does not know which mattered. Naming the
+  // first is worse than naming none — put a correct `* note "x"` above two
+  // misused quotes and the first is the comment, so the hint would point at a
+  // line that was never wrong.
+  const multi = rewritten > 1 || all.join("\n") !== candidates[0]?.source;
+  if (rewritten > 0 && multi) {
+    candidates.push({ source: all.join("\n") });
   }
 
   return candidates;
