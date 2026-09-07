@@ -176,9 +176,20 @@ way out that costs nothing: **block the tag script, keep the inline snippet.**
 `gtag()` still runs — every call lands in `window.dataLayer` and **nothing is transmitted**:
 
 ```js
-await page.route('**/googletagmanager.com/**', r => r.abort())
+// A REGEX, not a glob. The tag is served from `www.googletagmanager.com`, and
+// Playwright's glob does not cross a `.` inside a host segment, so the obvious
+// `'**/googletagmanager.com/**'` matches NOTHING — the tag loads, the events
+// are transmitted for real, and the check reports success while having proved
+// the opposite of what it claims. Measured against production 2026-09-08:
+//   glob    -> blocked 0, /g/collect sent 1   (a real event written to GA4)
+//   regex   -> blocked 1, /g/collect sent 0
+// Always assert the counts; the abort is silent when it does not fire.
+await page.route(/googletagmanager\.com/, (r) => r.abort())
+let sent = 0
+page.on('request', (r) => { if (/\/g\/collect/.test(r.url())) sent++ })
 await page.goto('https://abapdojo.com/')
 const events = await page.evaluate(() => window.dataLayer)
+// sent must be 0, or the run was not the zero-write one you think it was.
 ```
 
 So you can read what the **production bundle** passes to `gtag()` — the application-defined
