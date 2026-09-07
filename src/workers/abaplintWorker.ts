@@ -79,19 +79,23 @@ async function handleTranspile(
     const errors = issues.filter(isError);
     if (errors.length > 0) {
       const first = errors[0];
+      // Computed before the response is built, and `findSyntaxRepair` swallows
+      // its own parse failures, so this cannot reach the catch below: the
+      // syntax verdict is already correct at this point and a hint that fails
+      // must not turn it into a `transpile_error`.
+      //
+      // Costs a bounded number of extra parses, and only on the Run path after
+      // a failure the user is already waiting on. Never on `lint`, which runs
+      // on every keystroke. It is not scoped to the parse-failure keys: any
+      // Error-severity outcome gets the search, which is a superset of what
+      // can ever match and one fewer rule to keep in step with abaplint.
+      const repair = await findSyntaxRepair(source, countErrors(issues), errorsIn);
       return {
         type: "transpile-error",
         kind: "syntax",
         message: first.getMessage(),
         line: first.getStart().getRow(),
-        // Costs up to MAX_CANDIDATES extra parses, and only on the Run path
-        // after a failure the user is already waiting on. Never on `lint`,
-        // which runs on every keystroke.
-        repair: await findSyntaxRepair(
-          source,
-          countErrors(issues),
-          errorsIn,
-        ),
+        repair,
         // The message above is what the user reads and it embeds their source;
         // this is the half we are allowed to count. `first` is deliberately the
         // same issue in both, so the metric can be checked against the screen.

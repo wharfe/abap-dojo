@@ -539,7 +539,15 @@ text of one line is wrong on ordinary ABAP, and not at the margins:
 rewrites one `"..."` pair as `'...'`, hands the edited source back to abaplint,
 and keeps the edit only if abaplint's own error count went down. Each of the
 four correct programs above stays quiet because the rewrite removes no error.
-Two traps if you touch it:
+
+**One candidate rewrites every pair at once, and it is not an optimisation.**
+abaplint collapses consecutive swallowed statements into a *single* error, so
+with two misused quotes on adjacent lines no one-line edit lowers the count and
+the search would miss what is probably the commonest shape in pasted output.
+The all-at-once candidate goes last, so a single-line diagnosis still wins when
+there is one — it can name the exact row and the other can only name the first.
+
+Three traps if you touch it:
 
 1. **The score is the plain Error-severity count, and probing it under
    `Config.getDefault()` will mislead you.** This worker configures abaplint
@@ -554,9 +562,35 @@ Two traps if you touch it:
    nothing at all — so there is no error count for a repair to improve, and
    the run is counted as `success`. That failure is invisible to this whole
    section. See #68.
+3. **A dropped `\r` makes the whole feature silent, with nothing to notice.**
+   The source is split on `\n` alone, so under CRLF every line ends in `\r` —
+   and JavaScript's `.` does not match `\r`, so a tail of `.*$` produced zero
+   candidates for anyone pasting from a CRLF editor. There is no EOL
+   normalisation anywhere in the app. Keep the regex tail as `[\s\S]*`.
 
-The search costs up to 10 extra parses, and only on the Run path after a
-failure — never on `lint`, which fires on every keystroke.
+**The parameter counts repairs that worked, not mistakes the user made, and
+those come apart.** External review found this program, where the comment is
+correct ABAP and the real mistake is CONCATENATE's missing second operand:
+
+```abap
+CONCATENATE " explanatory note "
+  'a' INTO result.
+```
+
+Rewriting the comment removes the error, so the search fires and
+`syntax_repair` counts it. Structurally it is the same program as
+`WRITE "hello".` — a quote swallows the rest of a statement, and rewriting it
+makes the statement parse — so no amount of parsing separates them; only
+intent does, and we do not have it. This is why the hint offers the fix
+**conditionally** ("if you meant that as literal data") instead of asserting
+what the user meant: the misfire is then harmless to read. Do not "fix" that
+wording into a verdict.
+
+The search costs a bounded number of extra parses, and only on the Run path
+after a failure — never on `lint`, which fires on every keystroke. It is
+skipped entirely above 64 kB of source: the candidate cap bounds the parses
+but not the work, and the 20s watchdog ends the *display* without interrupting
+this worker, so an unbounded search would outlive the run it belonged to.
 
 Reading it: filter by `outcome = syntax_error`, same trap as the rest. A
 falling `syntax_repair` share is the intended outcome (the hint reaches people

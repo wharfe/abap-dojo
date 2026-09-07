@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { typeProgram, runProgram } from "./helpers";
+import { typeProgram, clickRun } from "./helpers";
 
 /**
  * The hint is produced in the abaplint worker, travels on the
@@ -30,7 +30,7 @@ test.skip(
 test("a double quote used as a string quote is explained", async ({ page }) => {
   await page.goto("/");
   await typeProgram(page, `REPORT ztest.\nWRITE "hello".`);
-  await runProgram(page);
+  await clickRun(page);
 
   const output = page.getByText(HINT);
   await expect(output).toBeVisible({ timeout: 30_000 });
@@ -44,7 +44,7 @@ test("the hint points at the row the quote is on, not the row abaplint blamed", 
 }) => {
   await page.goto("/");
   await typeProgram(page, `REPORT ztest.\nWRITE "hello".\nWRITE 'ok'.`);
-  await runProgram(page);
+  await clickRun(page);
 
   await expect(page.getByText(HINT)).toContainText("line 2", {
     timeout: 30_000,
@@ -57,7 +57,7 @@ test("a correct program with comments gets no hint", async ({ page }) => {
     page,
     `REPORT ztest.\n* he said "hello" here\nWRITE 'a'. " and this is a note`,
   );
-  await runProgram(page);
+  await clickRun(page);
 
   await expect(page.getByText(/^a$/m)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(HINT)).toHaveCount(0);
@@ -68,7 +68,7 @@ test("a syntax error we cannot explain gets no invented hint", async ({
 }) => {
   await page.goto("/");
   await typeProgram(page, `REPORT ztest.\nFROBNICATE lv_x.`);
-  await runProgram(page);
+  await clickRun(page);
 
   await expect(page.getByText(/Syntax error/i)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(HINT)).toHaveCount(0);

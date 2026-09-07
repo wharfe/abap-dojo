@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 
 const EDITOR = ".monaco-editor, textarea";
 
@@ -18,10 +18,18 @@ export async function typeProgram(page: Page, source: string): Promise<void> {
   await page.keyboard.insertText(source);
 }
 
-/** Run the current program and wait for the run to finish. */
-export async function runProgram(page: Page): Promise<void> {
+/**
+ * Press Run. Does NOT wait for the run to finish — each test waits for the
+ * thing it is actually asserting.
+ *
+ * An earlier version claimed to wait, by asserting a `/Run/i` button was
+ * visible afterwards. That is vacuous: the label only becomes `Stop` once
+ * React has flushed `setIsRunning(true)`, so the assertion usually resolves
+ * against the pre-click button and returns immediately. It happened not to
+ * produce a false green here, because every negative assertion in this suite
+ * is preceded by a positive wait — but a helper whose contract is stronger
+ * than its behaviour is a false green waiting for its first careless caller.
+ */
+export async function clickRun(page: Page): Promise<void> {
   await page.getByRole("button", { name: /Run/i }).click();
-  await expect(page.getByRole("button", { name: /Run/i })).toBeVisible({
-    timeout: 60_000,
-  });
 }

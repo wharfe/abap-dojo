@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Buffer } from "buffer";
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
-import { Config } from "@abaplint/core";
+import { Config, Registry, MemoryFile, type Issue } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
 import {
   errorCounter,
@@ -28,10 +28,20 @@ async function repairOf(source: string) {
   return findSyntaxRepair(source, before, errorsIn);
 }
 
+/** The Error-severity issues abaplint reports, for asserting on their keys. */
+async function errorsOf(source: string): Promise<readonly Issue[]> {
+  const registry = new Registry(config);
+  registry.addFile(new MemoryFile("ztest.prog.abap", source));
+  await registry.parseAsync();
+  return registry
+    .findIssues()
+    .filter((issue) => issue.getSeverity().toString() === "Error");
+}
+
 describe("doubleQuoteCandidates", () => {
   it("rewrites one line per candidate, in row order", () => {
     const source = `REPORT z.\nWRITE "a".\nWRITE "b".`;
-    expect(doubleQuoteCandidates(source)).toEqual([
+    expect(doubleQuoteCandidates(source).slice(0, 2)).toEqual([
       { line: 2, source: `REPORT z.\nWRITE 'a'.\nWRITE "b".` },
       { line: 3, source: `REPORT z.\nWRITE "a".\nWRITE 'b'.` },
     ]);
@@ -59,7 +69,41 @@ describe("doubleQuoteCandidates", () => {
     const source = Array.from({ length: 40 }, (_, i) => `WRITE "${i}".`).join(
       "\n",
     );
-    expect(doubleQuoteCandidates(source)).toHaveLength(10);
+    // Ten one-line candidates plus the everything-at-once one.
+    expect(doubleQuoteCandidates(source)).toHaveLength(11);
+    expect(doubleQuoteCandidates(source).at(-1)).toMatchObject({ line: 1 });
+  });
+
+  it("adds an everything-at-once candidate, last", () => {
+    const candidates = doubleQuoteCandidates(`WRITE "a".\nWRITE "b".`);
+    expect(candidates).toHaveLength(3);
+    expect(candidates.at(-1)).toEqual({
+      line: 1,
+      source: `WRITE 'a'.\nWRITE 'b'.`,
+    });
+  });
+
+  it("adds no everything-at-once candidate when there is only one pair", () => {
+    expect(doubleQuoteCandidates(`WRITE "a".\nWRITE 'b'.`)).toHaveLength(1);
+  });
+
+  it("finds pairs on CRLF lines", () => {
+    // `.` does not match `\r`, and the source is split on `\n` alone, so a
+    // tail of `.*$` matched nothing under CRLF and the feature was silent for
+    // anyone pasting from an editor that uses it — no error, nothing to see.
+    expect(doubleQuoteCandidates(`REPORT z.\r\nWRITE "a".\r\n`)).toEqual([
+      { line: 2, source: `REPORT z.\r\nWRITE 'a'.\r\n` },
+    ]);
+  });
+
+  it("does not search a source too large to search cheaply", () => {
+    // Each candidate re-parses the whole program, so the candidate cap bounds
+    // the parses and not the work. The 20s watchdog ends the display without
+    // interrupting this worker, so an unbounded search outlives the run it
+    // belonged to.
+    const huge = `WRITE "a".\n`.repeat(10_000);
+    expect(huge.length).toBeGreaterThan(64 * 1024);
+    expect(doubleQuoteCandidates(huge)).toEqual([]);
   });
 });
 
@@ -90,6 +134,18 @@ describe("findSyntaxRepair search", () => {
     const same = () => Promise.resolve(2);
     expect(await findSyntaxRepair(`WRITE "a".`, 2, same)).toBeUndefined();
   });
+
+  it("reports nothing rather than letting a re-parse throw escape", async () => {
+    // Candidates are source this module mangled on purpose, so they reach the
+    // parser in shapes the user's text never would. A throw escaping here
+    // would be caught by handleTranspile's own catch, which would replace a
+    // correct `syntax_error` with a `transpile_error` — the split CLAUDE.md
+    // calls load-bearing, corrupted by the code meant to explain it.
+    const throws = () => Promise.reject(new Error("parser blew up"));
+    await expect(
+      findSyntaxRepair(`WRITE "a".`, 1, throws),
+    ).resolves.toBeUndefined();
+  });
 });
 
 /**
@@ -107,11 +163,42 @@ describe("findSyntaxRepair against the real parser", () => {
     });
   });
 
+  it("covers both keys the same mistake lands in", async () => {
+    // The claim the design rests on: one mistake, two abaplint verdicts,
+    // decided by whether a statement follows it. Asserted as keys rather than
+    // left to a comment, because if abaplint ever files both under one key the
+    // behavioural tests stay green while this coverage quietly disappears.
+    const last = await errorsOf(`REPORT z.\nWRITE "hello".`);
+    const followed = await errorsOf(`REPORT z.\nWRITE "hello".\nWRITE 'ok'.`);
+    expect(last.map((i) => i.getKey())).toContain("parser_error");
+    expect(followed.map((i) => i.getKey())).toContain("check_syntax");
+    // ...and the second is reported on row 3, which the user did not mistype.
+    expect(followed[0].getStart().getRow()).toBe(3);
+  });
+
   it("finds one that abaplint reported on a later row", async () => {
     // The comment swallows the rest of row 2, so abaplint joins row 3 onto it
     // and reports `check_syntax` there. Anchoring to the error's own row would
     // point at a line the user did not mistype.
     expect(await repairOf(`REPORT z.\nWRITE "hello".\nWRITE 'ok'.`)).toEqual({
+      kind: "double_quote",
+      line: 2,
+    });
+  });
+
+  it("finds two misused quotes on adjacent lines", async () => {
+    // abaplint collapses consecutive swallowed statements into ONE error, so
+    // no single-line edit lowers the count here and only the
+    // everything-at-once candidate reaches it. This is the commonest shape in
+    // pasted LLM output, not an edge case.
+    expect(await repairOf(`REPORT z.\nWRITE "hello".\nWRITE "world".`)).toEqual({
+      kind: "double_quote",
+      line: 2,
+    });
+  });
+
+  it("finds a misused quote in a program pasted with CRLF", async () => {
+    expect(await repairOf(`REPORT z.\r\nWRITE "hello".`)).toEqual({
       kind: "double_quote",
       line: 2,
     });
@@ -214,6 +301,21 @@ describe("findSyntaxRepair against the real parser", () => {
     });
   });
 
+  it("fires on a correct comment when rewriting it happens to fix the parse", async () => {
+    // Found by external review. The comment is correct ABAP; the real mistake
+    // is CONCATENATE's missing second operand. Rewriting the comment removes
+    // the error anyway, so the search fires — and it is structurally the same
+    // program as `WRITE "hello".`, so no parse separates them. Pinned as the
+    // accepted limit rather than left to be rediscovered: what makes it
+    // tolerable is repairHint's wording, which offers the fix conditionally
+    // instead of asserting the user meant a literal.
+    expect(
+      await repairOf(
+        `REPORT z.\nDATA result TYPE string.\nCONCATENATE " explanatory note "\n  'a' INTO result.`,
+      ),
+    ).toEqual({ kind: "double_quote", line: 3 });
+  });
+
   it("keeps quiet on a program that parses", async () => {
     expect(await repairOf(`REPORT z.\nWRITE 'a'.`)).toBeUndefined();
   });
@@ -233,6 +335,16 @@ describe("findSyntaxRepair against the real parser", () => {
 describe("repairHint", () => {
   it("names the row the edit belongs on", () => {
     expect(repairHint({ kind: "double_quote", line: 7 })).toContain("line 7");
+  });
+
+  it("offers the fix as a condition, never as a diagnosis of intent", () => {
+    // The search cannot prove the user meant a literal (see the header of
+    // repairHint.ts), so the wording has to stay conditional. A rewrite to
+    // "use single quotes" would read as a verdict on a program where the
+    // comment was correct all along.
+    expect(repairHint({ kind: "double_quote", line: 1 })).toContain(
+      "If you meant that as literal data",
+    );
   });
 });
 

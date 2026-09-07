@@ -62,15 +62,36 @@ import type { SyntaxRepair } from "../types/diagnostics";
  *
  * Each candidate costs one full `parseAsync`, and this runs on the Run path
  * after a failure — never on the lint path, which fires on every keystroke.
- * The cap bounds the worst case (a program with a quote on every line) at ten
- * parses of a Playground-sized program. A file whose only misused quote is
- * below the tenth quoted line gets no hint, which is the right way to fail:
- * silence, not a wrong guess.
+ * The cap bounds the worst case (a program with a quote on every line) at
+ * eleven parses of a Playground-sized program. A file whose only misused
+ * quote is below the tenth quoted line gets no hint, which is the right way
+ * to fail: silence, not a wrong guess.
  */
 const MAX_CANDIDATES = 10;
 
-/** The first `"..."` pair on a line, if it has one. */
-const DOUBLE_QUOTED = /^([^"]*)"([^"]*)"(.*)$/;
+/**
+ * Above this many characters, do not search at all.
+ *
+ * The candidate cap bounds the number of parses but not the work: each parse
+ * is over the whole source, so the cost is the cap times the input. Measured
+ * at ~138 ms for ten parses of a 302-line program, which is nothing against
+ * the 20s watchdog — but that watchdog only ends the *display*, it does not
+ * interrupt this worker, so a large enough paste would occupy it after the
+ * user has already been told the run stalled. 64 kB is far above any program
+ * anyone types and far below the size where that matters.
+ */
+const MAX_SOURCE_CHARS = 64 * 1024;
+
+/**
+ * The first `"..."` pair on a line, if it has one.
+ *
+ * The tail is `[\s\S]*` rather than `.*` because `.` excludes `\r`, and the
+ * source is split on `\n` alone. Under CRLF every line ends in `\r`, so `.*$`
+ * matched nothing and the whole feature went silent for anyone who pasted
+ * from an editor that uses CRLF — with no error and no way to notice. The
+ * input here is always a single line, so `[\s\S]` cannot over-reach.
+ */
+const DOUBLE_QUOTED = /^([^"]*)"([^"]*)"([\s\S]*)$/;
 
 /**
  * Rewrite `inner` as an ABAP text literal, doubling any apostrophe it
@@ -99,16 +120,40 @@ export interface RepairCandidate {
  * rewritten to avoid. Comments cost a re-parse and lose it.
  */
 export function doubleQuoteCandidates(source: string): RepairCandidate[] {
+  if (source.length > MAX_SOURCE_CHARS) return [];
+
   const lines = source.split("\n");
   const candidates: RepairCandidate[] = [];
+  const all = [...lines];
+  let first = 0;
 
-  for (let i = 0; i < lines.length && candidates.length < MAX_CANDIDATES; i++) {
+  for (let i = 0; i < lines.length; i++) {
     const match = DOUBLE_QUOTED.exec(lines[i]);
     if (match === null) continue;
     const [, before, inner, after] = match;
-    const edited = [...lines];
-    edited[i] = `${before}${asTextLiteral(inner)}${after}`;
-    candidates.push({ line: i + 1, source: edited.join("\n") });
+    const repaired = `${before}${asTextLiteral(inner)}${after}`;
+    all[i] = repaired;
+    if (first === 0) first = i + 1;
+    if (candidates.length < MAX_CANDIDATES) {
+      const edited = [...lines];
+      edited[i] = repaired;
+      candidates.push({ line: i + 1, source: edited.join("\n") });
+    }
+  }
+
+  // One more, with every pair rewritten at once, and it is not an
+  // optimisation — it is the only candidate that reaches the commonest shape.
+  // abaplint collapses consecutive swallowed statements into a SINGLE error,
+  // so with two misused quotes on adjacent lines no one-line edit lowers the
+  // count and every candidate above scores the same as the source:
+  //
+  //   WRITE "hello".                    before 1, one-line candidate 0  -> found
+  //   WRITE "hello". / WRITE "world".   before 1, every candidate 1     -> missed
+  //
+  // It comes last so a single-line diagnosis wins when there is one: it
+  // names the exact row, and this one can only name the first.
+  if (candidates.length > 1) {
+    candidates.push({ line: first, source: all.join("\n") });
   }
 
   return candidates;
@@ -137,7 +182,19 @@ export async function findSyntaxRepair(
   if (before === 0) return undefined;
 
   for (const candidate of doubleQuoteCandidates(source)) {
-    if ((await errorsIn(candidate.source)) < before) {
+    // A candidate is source this module mangled on purpose, so it reaches the
+    // parser in shapes the user's own text never would. If one of them throws,
+    // the only correct outcome is "no hint": the caller has already computed
+    // the real verdict and letting the throw out would replace a correct
+    // `syntax_error` with a `transpile_error` — the split CLAUDE.md calls
+    // load-bearing, corrupted by the thing that was meant to explain it.
+    let after: number;
+    try {
+      after = await errorsIn(candidate.source);
+    } catch {
+      return undefined;
+    }
+    if (after < before) {
       return { kind: "double_quote", line: candidate.line };
     }
   }
