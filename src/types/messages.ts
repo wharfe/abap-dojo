@@ -4,6 +4,7 @@ import type {
   TranspileDiagnostics,
   SyntaxDiagnostics,
   SyntaxRepair,
+  SilentLoss,
 } from "./diagnostics";
 
 export interface LintIssue {
@@ -32,7 +33,13 @@ export type WorkerRequest =
 
 export type WorkerResponse =
   | { type: "lint-result"; issues: LintIssue[] }
-  | { type: "transpile-result"; js: string; requestId: string }
+  | {
+      type: "transpile-result";
+      js: string;
+      requestId: string;
+      silentLoss?: SilentLoss;
+      silentLossChecked?: boolean;
+    }
   /**
    * `kind` distinguishes the two very different things that stop a run before
    * any JavaScript exists: `syntax` is the user's own ABAP failing to parse
@@ -72,6 +79,20 @@ export type WorkerResponse =
        * row to look at. Neither carries source.
        */
       repair?: SyntaxRepair;
+      /**
+       * Accompanies `kind: "transpile"` only — a statement the user wrote that
+       * abaplint parsed away without complaint (#68). It rides on this message
+       * as well as on `transpile-result` because the search runs BEFORE
+       * transpilation, so a run whose transpiler threw has an answer too.
+       *
+       * `silentLossChecked` is separate from `silentLoss` and is not
+       * redundant: absent means the search never ran (the parse itself threw,
+       * or the syntax branch above returned first), while `true` with no
+       * `silentLoss` means it ran and found nothing. Analytics needs those
+       * apart or `silent_loss` has no denominator.
+       */
+      silentLoss?: SilentLoss;
+      silentLossChecked?: boolean;
     }
   | { type: "validate-progress"; stage: ValidationStage; status: "running" | "skipped" }
   | { type: "validate-stage-result"; stage: ValidationStage; result: StageResult };

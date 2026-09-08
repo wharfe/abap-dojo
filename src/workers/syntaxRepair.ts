@@ -54,14 +54,29 @@
  * all, so the program parses, runs, and silently prints less than it should.
  * That is #68, and it needs a signal that is not an error count.
  */
-import { Registry, MemoryFile, type Config, type Issue } from "@abaplint/core";
-import type { SyntaxRepair } from "../types/diagnostics";
+import {
+  Registry,
+  MemoryFile,
+  ABAPObject,
+  Comment,
+  Empty,
+  Unknown,
+  type Config,
+  type Issue,
+} from "@abaplint/core";
+import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
 
 /**
  * How many candidate edits are worth a re-parse.
  *
- * Each candidate costs one full `parseAsync`, and this runs on the Run path
- * after a failure — never on the lint path, which fires on every keystroke.
+ * Each candidate costs one full `parseAsync`, and this runs on the Run path —
+ * never on the lint path, which fires on every keystroke.
+ *
+ * "On the Run path after a failure" was true when only `findSyntaxRepair` used
+ * these candidates. `findSilentLoss` searches the same set on the *success*
+ * path, before transpiling, on every run whose parse was clean — the majority
+ * of runs, where the user is not already waiting on an error. That is what the
+ * cap now bounds, and it is why the size cap below matters more than it did.
  * The cap bounds the worst case (a program with a quote on every line) at
  * eleven parses of a Playground-sized program. A file whose only misused
  * quote is below the tenth quoted line gets no hint, which is the right way
@@ -238,20 +253,145 @@ export function countErrors(issues: readonly Issue[]): number {
 }
 
 /**
- * An error counter bound to `config` — the real judge.
+ * How many statements abaplint recognised as something the program does.
+ *
+ * `Comment` and `Empty` are excluded because they are not code; `Unknown` is
+ * excluded because it is code abaplint could not parse, and counting it would
+ * let a rewrite that merely *relocates* a parse failure look like a recovery.
+ *
+ * The three are tested with `instanceof`, never by `constructor.name`. Vite 8's
+ * minifier collapses class names, and `keepNames: true` in vite.config.ts is
+ * all that stands between this app and abaplint booting at all — but the two
+ * failure modes are not comparable. A broken `constructor.name` makes
+ * `transpile_node` go quiet, which is an alarm; here it would make every
+ * statement in every program count as real, the count would never change
+ * between a source and its candidates, and the search would go silent with
+ * nothing to notice. `instanceof` does not depend on the name surviving.
+ */
+export function countRealStatements(registry: Registry): number {
+  let count = 0;
+  for (const object of registry.getObjects()) {
+    if (!(object instanceof ABAPObject)) continue;
+    for (const file of object.getABAPFiles()) {
+      for (const statement of file.getStatements()) {
+        const node = statement.get();
+        if (node instanceof Comment) continue;
+        if (node instanceof Empty) continue;
+        if (node instanceof Unknown) continue;
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+/** What a candidate is judged on, on both branches. */
+export interface Score {
+  /** Error-severity issues, all keys — the #69 search reads only this. */
+  errors: number;
+  /** Statements that are not a comment, a blank line, or unparsable. */
+  real: number;
+}
+
+/**
+ * The scorer bound to `config` — one parse, both numbers.
+ *
+ * Both halves come from the same `parseAsync` deliberately. The comparison the
+ * searches make is between a source and a candidate, so a difference in *how*
+ * a number was taken is indistinguishable from a difference the edit made;
+ * two counters computed two ways is the entire failure mode here (#63). The
+ * filename is the worker's own so a candidate is judged under exactly the
+ * conditions the original parse was.
+ */
+export function statementScorer(
+  config: Config,
+  filename: string,
+): (candidate: string) => Promise<Score> {
+  return async (candidate) => {
+    const registry = new Registry(config);
+    registry.addFile(new MemoryFile(filename, candidate));
+    await registry.parseAsync();
+    return {
+      errors: countErrors(registry.findIssues()),
+      real: countRealStatements(registry),
+    };
+  };
+}
+
+/**
+ * An error counter bound to `config` — the real judge for the #69 search.
  *
  * Exported so the worker and its test share one definition rather than two
- * that drift (the shape of #63). The filename is the worker's own so that a
- * candidate is judged under exactly the conditions the original parse was.
+ * that drift (the shape of #63), and defined through `statementScorer` for the
+ * same reason: the two branches must not disagree about what an error is.
  */
 export function errorCounter(
   config: Config,
   filename: string,
 ): (candidate: string) => Promise<number> {
-  return async (candidate) => {
-    const registry = new Registry(config);
-    registry.addFile(new MemoryFile(filename, candidate));
-    await registry.parseAsync();
-    return countErrors(registry.findIssues());
-  };
+  const score = statementScorer(config, filename);
+  return async (candidate) => (await score(candidate)).errors;
+}
+
+/**
+ * The outcome of a silent-loss search.
+ *
+ * Three states, not two, and the third is the reason this is not just
+ * `SilentLoss | undefined`. The search can give up part way (a candidate this
+ * module mangled on purpose can make the parser throw), and a search that gave
+ * up is not a search that found nothing. The worker marks the search as having
+ * run *before* calling this, so without `completed` an abandoned search would
+ * be reported as `silent_loss: "none"` — "we looked and found nothing" — and
+ * the denominator that parameter exists to provide would be quietly wrong for
+ * exactly the runs where the machinery misbehaved. Found by external review.
+ */
+export type SilentLossSearch =
+  | { completed: true; loss?: SilentLoss }
+  | { completed: false };
+
+/**
+ * The statement a comment ate.
+ *
+ * The sibling of `findSyntaxRepair`, over the same candidates, for the case
+ * where abaplint had nothing to say. `before.errors` is 0 whenever the worker
+ * calls this — it is the `else` of the branch that runs the other search — so
+ * the score that moves is the statement count: a rewrite that turns a comment
+ * back into an operand adds the statement the user actually wrote.
+ *
+ * A candidate is kept only if it introduces no error of its own. That single
+ * condition is what keeps every correct program quiet: rewriting the pair in
+ * `* he said "hello"`, in `"! <p class="shorttext">`, or in `WRITE 'a'. " x "y"`
+ * leaves a comment a comment, so the count does not move; rewriting the one in
+ * `WRITE |He said "hi"|.` breaks the template, so errors go up.
+ *
+ * Like its sibling it swallows a candidate's parse failure. The worker calls
+ * this inside the try whose catch reports a `transpile_error`, so a throw
+ * escaping here would take a program that parses AND transpiles and report it
+ * as a transpiler failure, complete with a diagnosis of a failure that never
+ * happened.
+ */
+export async function findSilentLoss(
+  source: string,
+  before: Score,
+  scoreIn: (candidate: string) => Promise<Score>,
+): Promise<SilentLossSearch> {
+  // `doubleQuoteCandidates` answers `[]` above its size cap, which the loop
+  // below cannot tell from a source with no quoted pairs at all. Reported as a
+  // completed search, a paste nobody looked at would be counted as a paste
+  // with nothing wrong with it.
+  if (source.length > MAX_SOURCE_CHARS) return { completed: false };
+
+  for (const candidate of doubleQuoteCandidates(source)) {
+    let after: Score;
+    try {
+      after = await scoreIn(candidate.source);
+    } catch {
+      return { completed: false };
+    }
+    if (after.errors === before.errors && after.real > before.real) {
+      return { completed: true, loss: { kind: "double_quote", line: candidate.line } };
+    }
+  }
+
+  return { completed: true };
 }

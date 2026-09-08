@@ -163,3 +163,65 @@ export interface SyntaxRepair {
    */
   line?: number;
 }
+
+/**
+ * A statement the user wrote that abaplint parsed away without complaint.
+ *
+ * The third failure shape on this branch, and the only one nobody could see.
+ * `WRITE: "hello".` is a chain whose single operand is eaten by the comment
+ * the double quote opens; what is left is an empty chain, which is legal ABAP.
+ * abaplint reports no issue, the transpiler emits working JS, the run is
+ * counted a `success`, and the program prints nothing. There is no error, no
+ * warning, and no output — so unlike every other failure this app measures,
+ * the user has nothing at all to go on, and neither did we: not one of these
+ * runs was distinguishable in GA4 from a program that had nothing to print.
+ *
+ * Deliberately NOT a member of `SYNTAX_REPAIRS`. That array is the enum of the
+ * registered GA4 dimension `syntax_repair`, whose documented meaning is "the
+ * one-line edit that made a failing parse succeed" and whose readers are told
+ * to filter by `outcome = syntax_error`. Nothing here failed to parse and the
+ * outcome is usually `success`, so a value added there would be read under a
+ * definition that does not hold for it — and GA4 registration is not
+ * retroactive, so the two could never be told apart afterwards.
+ *
+ * It reaches only operands where a text literal is grammatically legal, and
+ * one more shape is out of reach for a different reason: a line whose own
+ * single-quoted literal contains double quotes (`WRITE: 'he said "hi"', "b".`).
+ * The single-line candidate rewrites the FIRST pair on the line, which there
+ * is the one inside the literal, and the all-at-once candidate rewrites that
+ * one too — so neither scores better and the real loss goes unreported. It
+ * fails silent rather than wrong, which is this module's preference, but it is
+ * a limit rather than an accident and `syntaxRepair.test.ts` fixes it in place.
+ *
+ * `none` is a value rather than an absence on purpose: it means the search ran
+ * to the end and found nothing, and absence means it never ran. Without the
+ * distinction, "we looked and found nothing" and "we never looked" would both
+ * arrive as `(not set)` and no rate could be computed from either.
+ *
+ * **The biggest cause of absence is not an accident: every `syntax_error`
+ * run.** The worker returns from the branch that handles Error-severity issues
+ * before this search is reached, so the largest failure bucket in the app
+ * sends nothing here. A search that gave up part way and a source too large to
+ * search are the other two; a run that ended before the parse (`stalled`, or a
+ * Stop pressed before transpiling) is the fourth. Do not read `(not set)` as
+ * "the run stalled".
+ */
+export const SILENT_LOSSES = ["double_quote", "none"] as const;
+
+export type SilentLossKind = (typeof SILENT_LOSSES)[number];
+
+export interface SilentLoss {
+  /** Which shape was found. An enum, so nothing the user writes can be sent. */
+  kind: Exclude<SilentLossKind, "none">;
+  /**
+   * The 1-based row the edit was made on, when the search can name one.
+   *
+   * Absent for the same reason as `SyntaxRepair.line`: the candidate that
+   * rewrites every pair at once is credited by the score as a whole, and a
+   * single row can hold more than one pair. `WRITE: "a" && "b".` is the shape
+   * that needs it — one operand, two pairs, and fixing either half alone
+   * leaves an expression that does not parse, so only the combined rewrite
+   * scores better and none of its edits can be singled out.
+   */
+  line?: number;
+}

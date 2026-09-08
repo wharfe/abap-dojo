@@ -1,4 +1,4 @@
-import type { SyntaxRepair } from "../types/diagnostics";
+import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
 
 /**
  * What to tell someone whose parse failed on punctuation from another
@@ -65,6 +65,58 @@ export function repairHint(repair: SyntaxRepair): string {
         `after it ${where(repair.line)}was ignored. ` +
         `If you meant that as literal data rather than a comment, ` +
         `single quotes are what ABAP uses: WRITE 'hello'.`
+      );
+  }
+}
+
+/**
+ * What to tell someone whose statement was parsed away in silence.
+ *
+ * The sibling of `repairHint`, for the case where nothing failed. There is no
+ * error on screen to attach this to and no missing output to point at — a
+ * chain whose operands were all eaten simply prints nothing, and one that lost
+ * a single operand prints the rest — so this hint is the only thing the user
+ * will ever see about it.
+ *
+ * Worded to stay harmless when it is wrong, on the same reasoning as
+ * `repairHint`: the search proves that rewriting the pair recovers a
+ * statement, never that the user meant a literal.
+ *
+ * **So the sentence about something not running is governed by "if you meant
+ * that as literal data", and must stay that way.** External review produced
+ * the program that forces it:
+ *
+ *   REPORT z.
+ *   WRITE: 'a', " note for maintainers".
+ *
+ * That is not correct ABAP — the comment eats the period, so the chain is
+ * never closed and the parsed statement is `WRITE 'a',` — but nothing the
+ * user wanted was lost either, and the search fires on it all the same.
+ * Structurally it is `WRITE: 'a', "b".`, so no amount of parsing separates
+ * them; only intent does. A flat "a statement was not executed" would be a
+ * false statement about that program.
+ *
+ * What it can say flatly is what is true under both readings: everything
+ * after the quote was read as a comment, INCLUDING the period that would have
+ * ended the statement. That is also the part its sibling cannot say — the
+ * other branch shows the user a red error, and this one shows them a program
+ * that ran.
+ *
+ * Every string here is authored, never assembled from the user's source, and
+ * `line` is a number. Keep the prose clear of bare Tailwind utility names —
+ * `src/index.css` has no `source(none)`, so v4 scans this file and an ordinary
+ * English word in a string can become production CSS (#44).
+ */
+export function silentLossHint(loss: SilentLoss): string {
+  switch (loss.kind) {
+    case "double_quote":
+      return (
+        `Hint: in ABAP a double quote begins a comment, so everything after ` +
+        `the one ${where(loss.line)}was read as a comment — including the ` +
+        `period that would have ended the statement. ` +
+        `If you meant that as literal data rather than a comment, that part ` +
+        `of the statement never ran, and single quotes are what ABAP uses: ` +
+        `WRITE 'hello'.`
       );
   }
 }

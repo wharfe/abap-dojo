@@ -34,8 +34,10 @@ import type { AppMode } from "../types/validation";
 import {
   TRANSPILE_REASONS,
   SYNTAX_REPAIRS,
+  SILENT_LOSSES,
   type TranspileReason,
   type SyntaxRepairKind,
+  type SilentLossKind,
 } from "../types/diagnostics";
 
 /**
@@ -129,6 +131,27 @@ export interface EventMap {
      * is not reaching people" from "this was never the common mistake".
      */
     syntax_repair?: SyntaxRepairKind;
+    /**
+     * On EVERY outcome — whether a statement the user wrote was parsed away in
+     * silence, and this is the one parameter here that is not outcome-scoped.
+     * It cannot be: the failure it describes leaves no error behind, so its
+     * usual outcome is `success`, and the same source can also time out or
+     * throw at runtime for reasons of its own.
+     *
+     * An enum, so nothing the user writes can reach the wire through it, and
+     * deliberately not a member of `SYNTAX_REPAIRS` — see the header of
+     * SilentLoss in types/diagnostics.ts for why sharing that dimension would
+     * be unrecoverable.
+     *
+     * `none` is sent explicitly when the search ran to the end and found
+     * nothing. Absent means it never ran — and the largest cause of that is
+     * every `syntax_error` run, because the worker answers those before the
+     * search is reached. Merge those two and the denominator
+     * is gone — every rate computed from this parameter would be a fraction of
+     * an unknown, which is the `(not set)` trap `transpile_node` is already
+     * documented for.
+     */
+    silent_loss?: SilentLossKind;
   };
   /** Validate pressed in AI Validator mode. */
   validate_click: { line_count: number };
@@ -270,6 +293,7 @@ const EVENT_PARAMS: { readonly [K in EventName]: Readonly<SpecsFor<K>> } = {
     syntax_error_count: COUNT,
     syntax_statement: STATEMENT_KEYWORD,
     syntax_repair: { kind: "enum", values: SYNTAX_REPAIRS },
+    silent_loss: { kind: "enum", values: SILENT_LOSSES },
   },
   validate_click: { line_count: COUNT },
   validate_result: {
