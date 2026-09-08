@@ -11,6 +11,17 @@ interface OutputPanelProps {
    * painted red the way an actual failure is.
    */
   statusMessage: string | null;
+  /**
+   * The #68 hint: a statement the user wrote was parsed away as a comment.
+   *
+   * Its own slot rather than folded into `statusMessage` or `error`, because
+   * it belongs to a run that SUCCEEDED. `endRun` moves any message it is given
+   * into `error` on every outcome except `stopped`, so a hint routed through
+   * either of those would vanish on exactly the runs that also timed out or
+   * threw — and painting it red would tell the user their program failed when
+   * it ran.
+   */
+  silentLossHint: string | null;
   lintIssues: LintIssue[];
   isRunning: boolean;
   activeTab: Tab;
@@ -33,6 +44,7 @@ export function OutputPanel({
   output,
   error,
   statusMessage,
+  silentLossHint,
   lintIssues,
   isRunning,
   activeTab,
@@ -77,6 +89,11 @@ export function OutputPanel({
             {error && (
               <p className="text-red-400 whitespace-pre-wrap">{error}</p>
             )}
+            {silentLossHint && (
+              <p className="text-yellow-400 whitespace-pre-wrap">
+                {silentLossHint}
+              </p>
+            )}
             {output.map((line, i) => (
               <p
                 key={i}
@@ -86,11 +103,18 @@ export function OutputPanel({
                 {line}
               </p>
             ))}
-            {!isRunning && !error && !statusMessage && output.length === 0 && (
-              <p className="text-gray-500">
-                Click Run to execute your ABAP code.
-              </p>
-            )}
+            {/* A silent loss produces no output and no error, so without the
+                hint in this test the placeholder renders directly underneath
+                it and tells the user to press the button they just pressed. */}
+            {!isRunning &&
+              !error &&
+              !statusMessage &&
+              !silentLossHint &&
+              output.length === 0 && (
+                <p className="text-gray-500">
+                  Click Run to execute your ABAP code.
+                </p>
+              )}
           </>
         )}
 

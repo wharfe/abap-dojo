@@ -22,8 +22,9 @@ import type {
   TranspileDiagnostics,
   SyntaxDiagnostics,
   SyntaxRepair,
+  SilentLoss,
 } from "./types/diagnostics";
-import { repairHint } from "./utils/repairHint";
+import { repairHint, silentLossHint } from "./utils/repairHint";
 import type { Sample } from "./samples";
 import type { AppMode, StageResult, ValidationStage } from "./types/validation";
 import AbaplintWorker from "./workers/abaplintWorker?worker";
@@ -111,6 +112,18 @@ function App() {
   // Counts only — never the code or the output text itself.
   const runStartRef = useRef(0);
   const runOutputCountRef = useRef(0);
+  /**
+   * The statement a comment ate, for the run in flight (#68).
+   *
+   * A ref rather than state because `endRun` reads it while reporting, and a
+   * ref because the value arrives from the worker on the transpile round trip
+   * but is only measured when the run ends — which may be several sandbox
+   * messages later. `null` means the search ran and found nothing; `undefined`
+   * means it never ran, and the two must stay apart (see analytics.ts).
+   */
+  const silentLossRef = useRef<SilentLoss | null | undefined>(undefined);
+  /** The same finding, as the hint the user reads. Cleared with every run. */
+  const [silentLossHintText, setSilentLossHintText] = useState<string | null>(null);
   const validateStartRef = useRef(0);
   const validateLineCountRef = useRef(0);
   const wasValidatingRef = useRef(false);
@@ -212,9 +225,37 @@ function App() {
         syntax_error_count: syntaxDiagnostics?.errorCount,
         syntax_statement: syntaxDiagnostics?.statement,
         syntax_repair: syntaxRepair?.kind,
+        // Not outcome-scoped, unlike everything above it: the failure it
+        // describes leaves no error, so it usually rides on a `success`, and
+        // the same program can still time out for reasons of its own. `none`
+        // is sent explicitly; `undefined` (a run that ended before the parse)
+        // sends nothing, and that difference is the denominator.
+        silent_loss:
+          silentLossRef.current === undefined
+            ? undefined
+            : (silentLossRef.current?.kind ?? "none"),
       });
     },
     [disarmPlaygroundWatchdog],
+  );
+
+  /**
+   * Take the #68 answer off a transpile reply.
+   *
+   * Called from inside each requestId guard, never outside one: a late reply
+   * from a superseded run would otherwise write its finding over the run the
+   * user is actually watching, which is the correlation bug #42/#50 exist for.
+   *
+   * `checked` false or absent means the search never ran, and the ref is left
+   * `undefined` so the event omits the parameter rather than claiming `none`.
+   */
+  const recordSilentLoss = useCallback(
+    (checked: boolean | undefined, loss: SilentLoss | undefined) => {
+      if (checked !== true) return;
+      silentLossRef.current = loss ?? null;
+      setSilentLossHintText(loss ? silentLossHint(loss) : null);
+    },
+    [],
   );
 
   /** End the validation, marking its runtime stage with `result`. */
@@ -277,6 +318,7 @@ function App() {
           playgroundRequestIdRef.current &&
           data.requestId === playgroundRequestIdRef.current
         ) {
+          recordSilentLoss(data.silentLossChecked, data.silentLoss);
           // The sandbox owns the deadline from here on.
           disarmPlaygroundWatchdog();
           sandboxRef.current?.execute(data.js, playgroundRequestIdRef.current);
@@ -290,6 +332,7 @@ function App() {
           playgroundRequestIdRef.current &&
           data.requestId === playgroundRequestIdRef.current
         ) {
+          recordSilentLoss(data.silentLossChecked, data.silentLoss);
           const isSyntax = data.kind === "syntax";
           const label = isSyntax ? "Syntax error" : "Transpile error";
           const repair = isSyntax ? data.repair : undefined;
@@ -361,7 +404,7 @@ function App() {
         }
       }
     };
-  }, [disarmPlaygroundWatchdog, disarmValidationWatchdog, endRun]);
+  }, [disarmPlaygroundWatchdog, disarmValidationWatchdog, endRun, recordSilentLoss]);
 
   // Boot the abaplint worker once the browser is idle. Creating it during mount
   // meant parsing 1.8 MB of JavaScript before the page could respond to input,
@@ -544,6 +587,8 @@ function App() {
     playgroundRequestIdRef.current = requestId;
     runStartRef.current = performance.now();
     runOutputCountRef.current = 0;
+    silentLossRef.current = undefined;
+    setSilentLossHintText(null);
     track("run_click", { line_count: lineCount(source) });
     appWorker?.postMessage({ type: "transpile", source, requestId });
     // Nothing else can end the run until the worker replies (or the sandbox
@@ -696,6 +741,7 @@ function App() {
         <div className="h-1/2 md:h-auto md:w-1/2 min-h-0">
           {mode === "playground" ? (
             <OutputPanel
+              silentLossHint={silentLossHintText}
               output={output}
               error={error}
               statusMessage={statusMessage}

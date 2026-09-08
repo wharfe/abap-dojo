@@ -1,0 +1,66 @@
+import { test, expect } from "@playwright/test";
+import { typeProgram, clickRun } from "./helpers";
+
+/**
+ * The #68 hint, end to end.
+ *
+ * This is the one failure in the app that produces no error, no warning and
+ * no output, so it is also the one where every layer below the screen can be
+ * green while the user sees nothing. `syntaxRepair.test.ts` proves the search;
+ * it stops at the module. The hint then has to survive a different worker
+ * message from the #69 one (`transpile-result`, not `transpile-error`), a
+ * `success` outcome, and an OutputPanel branch that renders a placeholder for
+ * exactly the state this program produces — output empty, no error, no status.
+ * Nothing but a real run exercises that combination.
+ */
+const HINT = /double quote begins a comment/i;
+const PLACEHOLDER = /Click Run to execute your ABAP code/i;
+
+/** Same reason as syntaxHint.spec.ts: the WebKit transpile stall, #47. */
+test.skip(
+  ({ browserName }) => browserName === "webkit",
+  "pre-existing intermittent WebKit transpile stall, see #47",
+);
+
+test("a chained WRITE whose only operand was eaten is explained", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await typeProgram(page, `REPORT ztest.\nWRITE: "hello".`);
+  await clickRun(page);
+
+  const hint = page.getByText(HINT);
+  await expect(hint).toBeVisible({ timeout: 30_000 });
+  await expect(hint).toContainText("line 2");
+  // The run succeeded, so nothing must be painted as a failure.
+  await expect(page.getByText(/Syntax error|Transpile error/i)).toHaveCount(0);
+  // And the placeholder must have got out of the way: output is empty and
+  // there is no error, which is precisely when it used to render — directly
+  // under the hint, telling the user to press the button they just pressed.
+  await expect(page.getByText(PLACEHOLDER)).toHaveCount(0);
+});
+
+test("a partly eaten chain still prints what survived, and says so", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await typeProgram(page, `REPORT ztest.\nWRITE: 'a', "b".`);
+  await clickRun(page);
+
+  // `a` is written and `b` is not — the shape that makes "the run produced no
+  // output" useless as a trigger.
+  await expect(page.getByText(/^a$/m)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(HINT)).toBeVisible();
+});
+
+test("a correct program that prints nothing gets no hint", async ({ page }) => {
+  await page.goto("/");
+  await typeProgram(
+    page,
+    `REPORT ztest.\n* a note about "x" and "y"\nDATA lv TYPE i.\nlv = 1.`,
+  );
+  await clickRun(page);
+
+  await expect(page.getByText(PLACEHOLDER)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(HINT)).toHaveCount(0);
+});

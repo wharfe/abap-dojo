@@ -221,7 +221,7 @@ renaming a parameter:
 
 | Register as custom **dimension** (text) | Register as custom **metric** (number) |
 |---|---|
-| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key`, `syntax_statement`, `syntax_error_count`, `syntax_repair` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
+| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key`, `syntax_statement`, `syntax_error_count`, `syntax_repair`, `silent_loss` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
 
 `syntax_error_count` is registered as a **dimension**, not a metric, and that is
 deliberate rather than a mistake to fix: its values top out around 19, so the
@@ -582,8 +582,8 @@ Three traps if you touch it:
    construction.** A comment that eats a chained operand leaves a program that
    parses, runs, and prints less than the user wrote, with abaplint reporting
    nothing at all — so there is no error count for a repair to improve, and
-   the run is counted as `success`. That failure is invisible to this whole
-   section. See #68.
+   the run is counted as `success`. That failure is invisible to this
+   parameter; `silent_loss` below is the one that sees it (#68).
 3. **A dropped `\r` makes the whole feature silent, with nothing to notice.**
    The source is split on `\n` alone, so under CRLF every line ends in `\r` —
    and JavaScript's `.` does not match `\r`, so a tail of `.*$` produced zero
@@ -618,6 +618,70 @@ Reading it: filter by `outcome = syntax_error`, same trap as the rest. A
 falling `syntax_repair` share is the intended outcome (the hint reaches people
 and they stop making the mistake), which means it cannot be read on its own —
 compare it against `syntax_statement = WRITE` over the same period.
+
+### `silent_loss` sees the failure that leaves no trace at all
+
+`WRITE: "hello".` is a chain whose only operand the comment eats. What is left
+is an empty chain, which is legal ABAP: abaplint reports nothing, the
+transpiler emits working JS, the run is a `success`, and the program prints
+nothing. No error, no warning, no output — the only failure in this app where
+the user has *nothing* to go on, and until now neither did we. Every one of
+these runs was indistinguishable in GA4 from a program with nothing to print.
+
+`run_result` therefore carries `silent_loss`, produced by `findSilentLoss` in
+`src/workers/syntaxRepair.ts`. It is found the same way `syntax_repair` is —
+rewrite one `"..."` pair as a text literal, hand it back to abaplint, keep the
+edit only if the verdict improved — with a different score, because the error
+count cannot move when it starts at zero. The score that moves is the number of
+statements abaplint recognised as code: a rewrite that turns a comment back
+into an operand adds the statement the user actually wrote. Correct programs
+stay quiet because rewriting the pair in `* he said "hello"` or
+`"! <p class="shorttext">` leaves a comment a comment, and rewriting the one in
+`WRITE |He said "hi"|.` breaks the template.
+
+**Four things to know before reading it:**
+
+1. **It is not outcome-scoped, and it is the only parameter here that isn't.**
+   The failure leaves no error, so it usually rides on a `success`; the same
+   program can also time out or throw for reasons of its own. Do not filter by
+   `outcome` the way the `syntax_*` and `transpile_*` parameters require.
+2. **`none` is a value; absence is not.** `none` means the search ran and found
+   nothing. Absent means it never ran — a run that ended before the parse
+   (`stalled`, or a Stop pressed before transpiling). Merge them and the
+   denominator is gone. This is the `(not set)` trap `transpile_node` is
+   already documented for, headed off in advance.
+3. **A small number is not evidence of a small problem, and not evidence of a
+   broken detector either — most of this shape is already caught elsewhere.**
+   Measured against the real config: the same mistake inside `IF`, `LOOP`,
+   `FORM`, `WHILE`, `DO` or `METHOD` produces a `structure` error, and two of
+   them on separate lines produce `check_syntax`. Both go down the
+   `syntax_error` path, where the #69 search already finds the repair and shows
+   a hint. **Only a chain written at the top level of a report is silent**, and
+   that is the whole population of `silent_loss`.
+4. **It reaches only operands where a text literal is grammatically legal.**
+   `WRITE:`, `SKIP:` and `APPEND:` chains are found; `DATA: lv1 TYPE i,
+   "lv2 TYPE i".` and `CLEAR: lv, "lv".` are not, because `'lv2 TYPE i'` is not
+   a declaration, so the candidate fails to parse and is discarded. Those stay
+   silent by construction and `syntaxRepair.test.ts` fixes that fact in place —
+   a green suite is not a claim that #68 is fully solved.
+
+`SILENT_LOSSES` is deliberately **not** part of `SYNTAX_REPAIRS`. That array is
+the enum of the registered `syntax_repair` dimension, whose documented meaning
+is "the one-line edit that made a failing parse succeed" and whose readers are
+told to filter by `outcome = syntax_error`. Nothing here failed to parse.
+Sharing the dimension would put two definitions behind one name, and GA4
+registration is not retroactive, so they could never be separated afterwards.
+
+The search runs on the Run path only, after a parse that produced no errors and
+before transpilation — so the answer exists whether the transpiler then
+succeeds or throws. It costs the same bounded number of extra parses as its
+sibling (10 candidates, skipped above 64 kB), but unlike its sibling it runs on
+runs that are going to *succeed*: measured 2026-09-08, +97 ms on a 165-line
+class with 40 ABAPDoc comments, +147 ms on 150 lines of end-of-line comments
+containing quote pairs. A pre-filter to avoid that was written and thrown away
+— it dropped three real shapes (a `WRITE:` header line with its operands
+below, a comment line inside a chain) and did not help the chained-declaration
+case anyway, which is the one this feature is about.
 
 Only Playground is instrumented. `handleValidate` catches the same throws but
 `validate_result` carries no `transpile_reason`; that is a scope call, not an

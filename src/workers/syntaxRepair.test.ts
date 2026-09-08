@@ -6,10 +6,12 @@ import { Config, Registry, MemoryFile, type Issue } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
 import {
   errorCounter,
+  statementScorer,
   doubleQuoteCandidates,
   findSyntaxRepair,
+  findSilentLoss,
 } from "./syntaxRepair";
-import { repairHint } from "../utils/repairHint";
+import { repairHint, silentLossHint } from "../utils/repairHint";
 import { sanitizeParams } from "../utils/analytics";
 
 /**
@@ -26,6 +28,13 @@ const errorsIn = errorCounter(config, "ztest.prog.abap");
 async function repairOf(source: string) {
   const before = await errorsIn(source);
   return findSyntaxRepair(source, before, errorsIn);
+}
+
+const scoreIn = statementScorer(config, "ztest.prog.abap");
+
+/** Search the way the worker does on the branch where abaplint said nothing. */
+async function silentLossOf(source: string) {
+  return findSilentLoss(source, await scoreIn(source), scoreIn);
 }
 
 /** The Error-severity issues abaplint reports, for asserting on their keys. */
@@ -443,5 +452,156 @@ describe("syntax_repair as a parameter", () => {
         syntax_repair: "double_quote",
       }),
     ).not.toHaveProperty("syntax_repair");
+  });
+});
+
+describe("findSilentLoss", () => {
+  // The whole point of this branch: abaplint reports NOTHING for these, so
+  // there is no error count for the #69 search to improve on. Every source
+  // here parses cleanly and runs; what is lost is output the user asked for.
+  it("finds the operand a comment ate out of a one-item chain", async () => {
+    expect(await silentLossOf(`REPORT z.\nWRITE: "hello".`)).toEqual({
+      kind: "double_quote",
+      line: 2,
+    });
+  });
+
+  it("finds a lost operand even when the rest of the chain still prints", async () => {
+    // `a` is written and `b` is not. Nothing on screen says so, which is why
+    // "the run produced no output" cannot be the trigger for this search.
+    expect(await silentLossOf(`REPORT z.\nWRITE: 'a', "b".`)).toEqual({
+      kind: "double_quote",
+      line: 2,
+    });
+  });
+
+  it("follows a chain across lines", async () => {
+    expect(await silentLossOf(`REPORT z.\nWRITE: 'a',\n       "b".`)).toEqual({
+      kind: "double_quote",
+      line: 3,
+    });
+  });
+
+  it("finds the loss when the chain keyword is alone on its own line", async () => {
+    // An ordinary ABAP layout, and the textbook shape of the bug: the FIRST
+    // operand is the quoted one, so no statement survives to end in a comma.
+    expect(await silentLossOf(`REPORT z.\nWRITE:\n  "a",\n  'b'.`)).toEqual({
+      kind: "double_quote",
+      line: 3,
+    });
+  });
+
+  it("finds the loss when a comment line sits inside the chain", async () => {
+    expect(
+      await silentLossOf(`REPORT z.\nWRITE: 'a',\n" a note\n       "b".`),
+    ).toBeDefined();
+  });
+
+  it("reports no row when only the all-at-once rewrite reaches it", async () => {
+    // One operand, two pairs. Fixing either half alone leaves the expression
+    // broken (`WRITE: 'a' &&` does not parse), so the single-line candidates
+    // both score worse and only the combined rewrite scores better. The row
+    // is dropped for the same reason it is in the #69 search: the score
+    // credits no single edit.
+    expect(await silentLossOf(`REPORT z.\nWRITE: "a" && "b".`)).toEqual({
+      kind: "double_quote",
+    });
+  });
+
+  // Correct ABAP. Each of these holds a `"..."` pair, so each one COSTS a
+  // re-parse and has to lose it.
+  it.each([
+    [`a full-line comment`, `REPORT z.\n* he said "hello" here\nWRITE 'a'.`],
+    [`a commented-out line`, `REPORT z.\n" WRITE "hello".\nWRITE 'a'.`],
+    [`an end-of-line comment`, `REPORT z.\nWRITE 'a'. " note "x" here`],
+    [`a string template`, `REPORT z.\nWRITE |He said "hi"|.`],
+    [
+      `ABAPDoc`,
+      `CLASS zcl_x DEFINITION PUBLIC.\n  PUBLIC SECTION.\n` +
+        `    "! <p class="shorttext synchronized">does a thing</p>\n` +
+        `    METHODS m.\nENDCLASS.\n` +
+        `CLASS zcl_x IMPLEMENTATION.\n  METHOD m.\n  ENDMETHOD.\nENDCLASS.`,
+    ],
+  ])("keeps quiet on %s", async (_name, source) => {
+    expect(await silentLossOf(source)).toBeUndefined();
+  });
+
+  // The reach of the search is "an operand where a text literal is legal", and
+  // these are outside it: `'lv2 TYPE i'` is not a declaration. They are here so
+  // that the limit is a fixed, visible fact rather than something a future
+  // reader assumes was covered.
+  it.each([
+    [`a DATA chain`, `REPORT z.\nDATA: lv1 TYPE i, "lv2 TYPE i".`],
+    [`a CLEAR chain`, `REPORT z.\nDATA lv TYPE i.\nCLEAR: lv, "lv".`],
+  ])("cannot reach %s, and says nothing rather than guessing", async (_n, source) => {
+    expect(await silentLossOf(source)).toBeUndefined();
+  });
+
+  it("swallows a parse failure rather than letting it out", async () => {
+    // The worker wraps this call in the same try whose catch reports a
+    // `transpile_error`. A throw escaping here would turn a program that
+    // parses AND transpiles into a transpile failure with a bogus diagnosis —
+    // the exact accident findSyntaxRepair is written to avoid one branch over.
+    const throwing = async () => {
+      throw new Error("boom");
+    };
+    await expect(
+      findSilentLoss(`REPORT z.\nWRITE: "hello".`, { errors: 0, real: 1 }, throwing),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("silentLossHint", () => {
+  it("names the row when the search can justify one", () => {
+    expect(silentLossHint({ kind: "double_quote", line: 4 })).toContain("line 4");
+  });
+
+  it("omits the row when it cannot", () => {
+    expect(silentLossHint({ kind: "double_quote" })).not.toContain("line");
+  });
+
+  it("says the statement did not run, which is what the user could not see", () => {
+    expect(silentLossHint({ kind: "double_quote" })).toContain("was not executed");
+  });
+
+  it("offers the fix as a condition, never as a diagnosis of intent", () => {
+    expect(silentLossHint({ kind: "double_quote" })).toContain(
+      "If you meant that as literal data",
+    );
+  });
+});
+
+describe("silent_loss as a parameter", () => {
+  it("survives sanitizing on a success, which is the outcome it exists for", () => {
+    expect(
+      sanitizeParams("run_result", {
+        outcome: "success",
+        duration_ms: 1,
+        output_lines: 0,
+        silent_loss: "double_quote",
+      }),
+    ).toMatchObject({ silent_loss: "double_quote" });
+  });
+
+  it("carries `none` so that 'nothing found' and 'never looked' stay apart", () => {
+    expect(
+      sanitizeParams("run_result", {
+        outcome: "success",
+        duration_ms: 1,
+        output_lines: 0,
+        silent_loss: "none",
+      }),
+    ).toMatchObject({ silent_loss: "none" });
+  });
+
+  it("drops a value outside the enum", () => {
+    expect(
+      sanitizeParams("run_result", {
+        outcome: "success",
+        duration_ms: 1,
+        output_lines: 0,
+        silent_loss: "ZSECRET" as never,
+      }),
+    ).not.toHaveProperty("silent_loss");
   });
 });

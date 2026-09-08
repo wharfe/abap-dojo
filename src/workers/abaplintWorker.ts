@@ -14,9 +14,13 @@ import { classifyTranspileError } from "./transpileDiagnostics";
 import { classifySyntaxError } from "./syntaxDiagnostics";
 import {
   errorCounter,
+  statementScorer,
   countErrors,
+  countRealStatements,
   findSyntaxRepair,
+  findSilentLoss,
 } from "./syntaxRepair";
+import type { SilentLoss } from "../types/diagnostics";
 
 const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
 
@@ -28,6 +32,7 @@ const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
 const SOURCE_FILENAME = "ztest.prog.abap";
 
 const errorsIn = errorCounter(abaplintConfig, SOURCE_FILENAME);
+const scoreIn = statementScorer(abaplintConfig, SOURCE_FILENAME);
 
 function mapSeverity(s: string): LintIssue["severity"] {
   if (s === "Error") return "error";
@@ -69,6 +74,12 @@ async function handleTranspile(
   source: string,
   requestId: string,
 ): Promise<WorkerResponse> {
+  // Hoisted out of the try so the catch below can report them too. A run whose
+  // transpilation throws still deserves the hint, and — more importantly for
+  // the metric — still has to say whether the search ran at all: an absent
+  // `silent_loss` has to keep meaning "never looked".
+  let silentLoss: SilentLoss | undefined;
+  let silentLossChecked = false;
   try {
     const reg = new Registry(abaplintConfig);
     reg.addFile(new MemoryFile(SOURCE_FILENAME, source));
@@ -108,6 +119,21 @@ async function handleTranspile(
       };
     }
 
+    // abaplint had nothing to say, so the other search cannot help: there is no
+    // error count to lower. What can still be wrong is a chained statement
+    // whose operand a comment ate, which parses, transpiles and runs while
+    // printing less than the user wrote (#68). Runs before transpilation so
+    // the answer exists on both exits below, and swallows its own parse
+    // failures for the same reason findSyntaxRepair does — the catch at the
+    // bottom of this function would otherwise turn a working program into a
+    // `transpile_error`.
+    silentLossChecked = true;
+    silentLoss = await findSilentLoss(
+      source,
+      { errors: 0, real: countRealStatements(reg) },
+      scoreIn,
+    );
+
     const transpiler = new Transpiler({ ignoreSourceMap: true });
     const output = await transpiler.run(reg);
 
@@ -119,7 +145,7 @@ async function handleTranspile(
       output.initializationScript2,
     ].join("\n");
 
-    return { type: "transpile-result", js, requestId };
+    return { type: "transpile-result", js, silentLoss, silentLossChecked, requestId };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return {
@@ -127,6 +153,8 @@ async function handleTranspile(
       kind: "transpile",
       message: msg,
       diagnostics: classifyTranspileError(msg),
+      silentLoss,
+      silentLossChecked,
       requestId,
     };
   }

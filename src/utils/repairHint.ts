@@ -1,4 +1,4 @@
-import type { SyntaxRepair } from "../types/diagnostics";
+import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
 
 /**
  * What to tell someone whose parse failed on punctuation from another
@@ -63,6 +63,44 @@ export function repairHint(repair: SyntaxRepair): string {
       return (
         `Hint: in ABAP a double quote begins a comment, so everything ` +
         `after it ${where(repair.line)}was ignored. ` +
+        `If you meant that as literal data rather than a comment, ` +
+        `single quotes are what ABAP uses: WRITE 'hello'.`
+      );
+  }
+}
+
+/**
+ * What to tell someone whose statement was parsed away in silence.
+ *
+ * The sibling of `repairHint`, for the case where nothing failed. There is no
+ * error on screen to attach this to and no missing output to point at — a
+ * chain whose operands were all eaten simply prints nothing, and one that lost
+ * a single operand prints the rest — so this hint is the only thing the user
+ * will ever see about it.
+ *
+ * Worded to stay harmless when it is wrong, on the same reasoning as
+ * `repairHint`: the search proves that rewriting the pair recovers a
+ * statement, never that the user meant a literal. Somebody who deliberately
+ * commented out the tail of a chain gets a true sentence (their statement did
+ * not run) followed by an offer they can decline.
+ *
+ * The one thing it says that its sibling does not is that the statement was
+ * NOT EXECUTED. That is the fact the user could not have discovered: the other
+ * branch at least shows them a red error, and this one shows them a program
+ * that ran.
+ *
+ * Every string here is authored, never assembled from the user's source, and
+ * `line` is a number. Keep the prose clear of bare Tailwind utility names —
+ * `src/index.css` has no `source(none)`, so v4 scans this file and an ordinary
+ * English word in a string can become production CSS (#44).
+ */
+export function silentLossHint(loss: SilentLoss): string {
+  switch (loss.kind) {
+    case "double_quote":
+      return (
+        `Hint: in ABAP a double quote begins a comment, so a statement ` +
+        `${where(loss.line)}was not executed — everything after the quote ` +
+        `was read as a comment. ` +
         `If you meant that as literal data rather than a comment, ` +
         `single quotes are what ABAP uses: WRITE 'hello'.`
       );
