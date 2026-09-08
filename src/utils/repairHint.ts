@@ -80,13 +80,26 @@ export function repairHint(repair: SyntaxRepair): string {
  *
  * Worded to stay harmless when it is wrong, on the same reasoning as
  * `repairHint`: the search proves that rewriting the pair recovers a
- * statement, never that the user meant a literal. Somebody who deliberately
- * commented out the tail of a chain gets a true sentence (their statement did
- * not run) followed by an offer they can decline.
+ * statement, never that the user meant a literal.
  *
- * The one thing it says that its sibling does not is that the statement was
- * NOT EXECUTED. That is the fact the user could not have discovered: the other
- * branch at least shows them a red error, and this one shows them a program
+ * **So the sentence about something not running is governed by "if you meant
+ * that as literal data", and must stay that way.** External review produced
+ * the program that forces it:
+ *
+ *   REPORT z.
+ *   WRITE: 'a', " note for maintainers".
+ *
+ * That is not correct ABAP — the comment eats the period, so the chain is
+ * never closed and the parsed statement is `WRITE 'a',` — but nothing the
+ * user wanted was lost either, and the search fires on it all the same.
+ * Structurally it is `WRITE: 'a', "b".`, so no amount of parsing separates
+ * them; only intent does. A flat "a statement was not executed" would be a
+ * false statement about that program.
+ *
+ * What it can say flatly is what is true under both readings: everything
+ * after the quote was read as a comment, INCLUDING the period that would have
+ * ended the statement. That is also the part its sibling cannot say — the
+ * other branch shows the user a red error, and this one shows them a program
  * that ran.
  *
  * Every string here is authored, never assembled from the user's source, and

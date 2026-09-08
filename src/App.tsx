@@ -122,8 +122,35 @@ function App() {
    * means it never ran, and the two must stay apart (see analytics.ts).
    */
   const silentLossRef = useRef<SilentLoss | null | undefined>(undefined);
-  /** The same finding, as the hint the user reads. Cleared with every run. */
-  const [silentLossHintText, setSilentLossHintText] = useState<string | null>(null);
+  /**
+   * The source this run was started with.
+   *
+   * Not `sourceRef`, which tracks the editor: by the time the worker answers,
+   * the user may have typed. The hint describes the program that RAN, so that
+   * is the version it has to be compared against.
+   */
+  const runSourceRef = useRef("");
+  /**
+   * The same finding as the hint the user reads, together with the source it
+   * describes.
+   *
+   * The source is stored WITH it rather than the hint being cleared wherever
+   * the editor changes, because clearing at each site is a list that has
+   * already been wrong twice: it missed ordinary typing, and it cannot cover
+   * the case where a run's reply arrives after the user has edited — the run
+   * is still the current one, so its finding is delivered legitimately and is
+   * stale on arrival. Deriving visibility from equality is not a list, so
+   * there is no site to forget: the hint is shown only while the editor still
+   * holds the program it is about.
+   */
+  const [silentLossHint_, setSilentLossHint] = useState<{
+    text: string;
+    source: string;
+  } | null>(null);
+  const silentLossHintText =
+    silentLossHint_ !== null && silentLossHint_.source === source
+      ? silentLossHint_.text
+      : null;
   const validateStartRef = useRef(0);
   const validateLineCountRef = useRef(0);
   const wasValidatingRef = useRef(false);
@@ -253,7 +280,9 @@ function App() {
     (checked: boolean | undefined, loss: SilentLoss | undefined) => {
       if (checked !== true) return;
       silentLossRef.current = loss ?? null;
-      setSilentLossHintText(loss ? silentLossHint(loss) : null);
+      setSilentLossHint(
+        loss ? { text: silentLossHint(loss), source: runSourceRef.current } : null,
+      );
     },
     [],
   );
@@ -587,8 +616,9 @@ function App() {
     playgroundRequestIdRef.current = requestId;
     runStartRef.current = performance.now();
     runOutputCountRef.current = 0;
+    runSourceRef.current = source;
     silentLossRef.current = undefined;
-    setSilentLossHintText(null);
+    setSilentLossHint(null);
     track("run_click", { line_count: lineCount(source) });
     appWorker?.postMessage({ type: "transpile", source, requestId });
     // Nothing else can end the run until the worker replies (or the sandbox
@@ -672,11 +702,6 @@ function App() {
     setSource(sample.code);
     setOutput([]);
     setError(null);
-    // The hint belongs to the program that was in the editor, so it has to go
-    // with it. Left behind it describes code the user can no longer see, and
-    // because OutputPanel suppresses its placeholder while a hint is showing,
-    // the panel would offer a stale warning instead of an invitation to run.
-    setSilentLossHintText(null);
     debouncedLint(sample.code);
   }, []);
 

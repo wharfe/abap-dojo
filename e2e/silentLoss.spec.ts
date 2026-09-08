@@ -81,3 +81,19 @@ test("the hint does not outlive the program it describes", async ({ page }) => {
   await expect(page.getByText(HINT)).toHaveCount(0);
   await expect(page.getByText(PLACEHOLDER)).toBeVisible();
 });
+
+test("editing the program takes the hint with it", async ({ page }) => {
+  // The commonest way to act on the hint is to fix the line it is about, and
+  // until the run after that the panel would keep showing a warning about code
+  // that is no longer there. Clearing it wherever the editor changes was tried
+  // and is a list that was already wrong twice, so visibility is derived from
+  // whether the editor still holds the program the hint describes.
+  await page.goto("/");
+  await typeProgram(page, `REPORT ztest.\nWRITE: "hello".`);
+  await clickRun(page);
+  await expect(page.getByText(HINT)).toBeVisible({ timeout: 30_000 });
+
+  await typeProgram(page, `REPORT ztest.\nWRITE: 'hello'.`);
+
+  await expect(page.getByText(HINT)).toHaveCount(0);
+});
