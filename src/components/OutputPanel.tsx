@@ -89,11 +89,6 @@ export function OutputPanel({
             {error && (
               <p className="text-red-400 whitespace-pre-wrap">{error}</p>
             )}
-            {silentLossHint && (
-              <p className="text-yellow-400 whitespace-pre-wrap">
-                {silentLossHint}
-              </p>
-            )}
             {output.map((line, i) => (
               <p
                 key={i}
@@ -103,6 +98,19 @@ export function OutputPanel({
                 {line}
               </p>
             ))}
+            {/* Below the output, not above it: the hint is about the program
+                that just ran, so it reads as a note on the result rather than
+                as a header the user has to get past. The case it is worst for
+                is a run that printed thousands of lines — display stops at
+                10,000 — where it lands at the bottom of a long scroll. That is
+                the rarer shape by far: the failure this hint is about usually
+                produces no output at all, and the partial one produces the few
+                lines that survived. */}
+            {silentLossHint && (
+              <p className="text-yellow-400 whitespace-pre-wrap">
+                {silentLossHint}
+              </p>
+            )}
             {/* A silent loss produces no output and no error, so without the
                 hint in this test the placeholder renders directly underneath
                 it and tells the user to press the button they just pressed. */}

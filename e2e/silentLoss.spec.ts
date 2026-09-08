@@ -51,6 +51,16 @@ test("a partly eaten chain still prints what survived, and says so", async ({
   // output" useless as a trigger.
   await expect(page.getByText(/^a$/m)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(HINT)).toBeVisible();
+
+  // Below the output, not above it. Asserted rather than left to the JSX
+  // because it is a deliberate choice about how the panel reads, and the kind
+  // of thing a later edit reorders without noticing.
+  const lastLine = await page
+    .getByTestId("output-line")
+    .last()
+    .boundingBox();
+  const hint = await page.getByText(HINT).boundingBox();
+  expect(hint!.y).toBeGreaterThan(lastLine!.y);
 });
 
 test("a correct program that prints nothing gets no hint", async ({ page }) => {
