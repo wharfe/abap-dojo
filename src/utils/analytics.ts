@@ -143,9 +143,10 @@ export interface EventMap {
      * SilentLoss in types/diagnostics.ts for why sharing that dimension would
      * be unrecoverable.
      *
-     * `none` is sent explicitly when the search ran and found nothing. Absent
-     * means it never ran (a run that ended before the parse: `stalled`, or a
-     * Stop pressed before transpiling). Merge those two and the denominator
+     * `none` is sent explicitly when the search ran to the end and found
+     * nothing. Absent means it never ran — and the largest cause of that is
+     * every `syntax_error` run, because the worker answers those before the
+     * search is reached. Merge those two and the denominator
      * is gone — every rate computed from this parameter would be a fraction of
      * an unknown, which is the `(not set)` trap `transpile_node` is already
      * documented for.

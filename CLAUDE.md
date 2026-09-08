@@ -645,10 +645,16 @@ stay quiet because rewriting the pair in `* he said "hello"` or
    The failure leaves no error, so it usually rides on a `success`; the same
    program can also time out or throw for reasons of its own. Do not filter by
    `outcome` the way the `syntax_*` and `transpile_*` parameters require.
-2. **`none` is a value; absence is not.** `none` means the search ran and found
-   nothing. Absent means it never ran — a run that ended before the parse
-   (`stalled`, or a Stop pressed before transpiling). Merge them and the
-   denominator is gone. This is the `(not set)` trap `transpile_node` is
+2. **`none` is a value; absence is not — and absence is mostly one specific
+   thing.** `none` means the search ran to the end and found nothing. Absent
+   means it never ran, and the largest cause of that is **every `syntax_error`
+   run** — about a third of all runs — because the worker answers those from
+   the branch above and the search is never reached. The other causes are a
+   search that gave up part way, a source over 64 kB, and a run that ended
+   before the parse (`stalled`, or a Stop pressed before transpiling). So
+   `(not set)` here is dominated by syntax errors: do not read it as "the run
+   stalled", and do not compute a rate over all runs. Merge `none` into it and
+   the denominator is gone entirely — the `(not set)` trap `transpile_node` is
    already documented for, headed off in advance.
 3. **A small number is not evidence of a small problem, and not evidence of a
    broken detector either — most of this shape is already caught elsewhere.**
@@ -661,9 +667,14 @@ stay quiet because rewriting the pair in `* he said "hello"` or
 4. **It reaches only operands where a text literal is grammatically legal.**
    `WRITE:`, `SKIP:` and `APPEND:` chains are found; `DATA: lv1 TYPE i,
    "lv2 TYPE i".` and `CLEAR: lv, "lv".` are not, because `'lv2 TYPE i'` is not
-   a declaration, so the candidate fails to parse and is discarded. Those stay
-   silent by construction and `syntaxRepair.test.ts` fixes that fact in place —
-   a green suite is not a claim that #68 is fully solved.
+   a declaration, so the candidate fails to parse and is discarded. One more
+   shape is out of reach for a different reason: a line whose own single-quoted
+   literal contains double quotes (`WRITE: 'he said "hi"', "b".`), because the
+   single-line candidate rewrites the *first* pair on the line — the one inside
+   the literal — and the all-at-once candidate breaks it too, so neither scores
+   better. All of these stay silent by construction and `syntaxRepair.test.ts`
+   fixes those facts in place — a green suite is not a claim that #68 is fully
+   solved.
 
 `SILENT_LOSSES` is deliberately **not** part of `SYNTAX_REPAIRS`. That array is
 the enum of the registered `syntax_repair` dimension, whose documented meaning

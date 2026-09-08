@@ -98,11 +98,12 @@ export function silentLossHint(loss: SilentLoss): string {
   switch (loss.kind) {
     case "double_quote":
       return (
-        `Hint: in ABAP a double quote begins a comment, so a statement ` +
-        `${where(loss.line)}was not executed — everything after the quote ` +
-        `was read as a comment. ` +
-        `If you meant that as literal data rather than a comment, ` +
-        `single quotes are what ABAP uses: WRITE 'hello'.`
+        `Hint: in ABAP a double quote begins a comment, so everything after ` +
+        `the one ${where(loss.line)}was read as a comment — including the ` +
+        `period that would have ended the statement. ` +
+        `If you meant that as literal data rather than a comment, that part ` +
+        `of the statement never ran, and single quotes are what ABAP uses: ` +
+        `WRITE 'hello'.`
       );
   }
 }

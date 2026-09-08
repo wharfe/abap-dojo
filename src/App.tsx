@@ -672,6 +672,11 @@ function App() {
     setSource(sample.code);
     setOutput([]);
     setError(null);
+    // The hint belongs to the program that was in the editor, so it has to go
+    // with it. Left behind it describes code the user can no longer see, and
+    // because OutputPanel suppresses its placeholder while a hint is showing,
+    // the panel would offer a stale warning instead of an invitation to run.
+    setSilentLossHintText(null);
     debouncedLint(sample.code);
   }, []);
 

@@ -69,8 +69,14 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
 /**
  * How many candidate edits are worth a re-parse.
  *
- * Each candidate costs one full `parseAsync`, and this runs on the Run path
- * after a failure — never on the lint path, which fires on every keystroke.
+ * Each candidate costs one full `parseAsync`, and this runs on the Run path —
+ * never on the lint path, which fires on every keystroke.
+ *
+ * "On the Run path after a failure" was true when only `findSyntaxRepair` used
+ * these candidates. `findSilentLoss` searches the same set on the *success*
+ * path, before transpiling, on every run whose parse was clean — the majority
+ * of runs, where the user is not already waiting on an error. That is what the
+ * cap now bounds, and it is why the size cap below matters more than it did.
  * The cap bounds the worst case (a program with a quote on every line) at
  * eleven parses of a Playground-sized program. A file whose only misused
  * quote is below the tenth quoted line gets no hint, which is the right way
@@ -328,7 +334,23 @@ export function errorCounter(
 }
 
 /**
- * The statement a comment ate, or `undefined`.
+ * The outcome of a silent-loss search.
+ *
+ * Three states, not two, and the third is the reason this is not just
+ * `SilentLoss | undefined`. The search can give up part way (a candidate this
+ * module mangled on purpose can make the parser throw), and a search that gave
+ * up is not a search that found nothing. The worker marks the search as having
+ * run *before* calling this, so without `completed` an abandoned search would
+ * be reported as `silent_loss: "none"` — "we looked and found nothing" — and
+ * the denominator that parameter exists to provide would be quietly wrong for
+ * exactly the runs where the machinery misbehaved. Found by external review.
+ */
+export type SilentLossSearch =
+  | { completed: true; loss?: SilentLoss }
+  | { completed: false };
+
+/**
+ * The statement a comment ate.
  *
  * The sibling of `findSyntaxRepair`, over the same candidates, for the case
  * where abaplint had nothing to say. `before.errors` is 0 whenever the worker
@@ -352,18 +374,24 @@ export async function findSilentLoss(
   source: string,
   before: Score,
   scoreIn: (candidate: string) => Promise<Score>,
-): Promise<SilentLoss | undefined> {
+): Promise<SilentLossSearch> {
+  // `doubleQuoteCandidates` answers `[]` above its size cap, which the loop
+  // below cannot tell from a source with no quoted pairs at all. Reported as a
+  // completed search, a paste nobody looked at would be counted as a paste
+  // with nothing wrong with it.
+  if (source.length > MAX_SOURCE_CHARS) return { completed: false };
+
   for (const candidate of doubleQuoteCandidates(source)) {
     let after: Score;
     try {
       after = await scoreIn(candidate.source);
     } catch {
-      return undefined;
+      return { completed: false };
     }
     if (after.errors === before.errors && after.real > before.real) {
-      return { kind: "double_quote", line: candidate.line };
+      return { completed: true, loss: { kind: "double_quote", line: candidate.line } };
     }
   }
 
-  return undefined;
+  return { completed: true };
 }

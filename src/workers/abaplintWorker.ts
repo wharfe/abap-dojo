@@ -127,12 +127,17 @@ async function handleTranspile(
     // failures for the same reason findSyntaxRepair does — the catch at the
     // bottom of this function would otherwise turn a working program into a
     // `transpile_error`.
-    silentLossChecked = true;
-    silentLoss = await findSilentLoss(
+    const search = await findSilentLoss(
       source,
       { errors: 0, real: countRealStatements(reg) },
       scoreIn,
     );
+    // Only a search that ran to the end may be reported as having run. A
+    // search that gave up leaves both fields unset, so the event omits
+    // `silent_loss` rather than claiming `none` for a look that never
+    // finished.
+    silentLossChecked = search.completed;
+    silentLoss = search.completed ? search.loss : undefined;
 
     const transpiler = new Transpiler({ ignoreSourceMap: true });
     const output = await transpiler.run(reg);

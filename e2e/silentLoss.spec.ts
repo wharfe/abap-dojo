@@ -64,3 +64,20 @@ test("a correct program that prints nothing gets no hint", async ({ page }) => {
   await expect(page.getByText(PLACEHOLDER)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(HINT)).toHaveCount(0);
 });
+
+test("the hint does not outlive the program it describes", async ({ page }) => {
+  // The panel clears output and error when a sample is loaded, so a hint left
+  // behind would describe code the user can no longer see — and because the
+  // placeholder is suppressed while a hint is showing, they would get a stale
+  // warning instead of an invitation to run. Found by review; there was no
+  // test for it because App.tsx's wiring has none at all (#17).
+  await page.goto("/");
+  await typeProgram(page, `REPORT ztest.\nWRITE: "hello".`);
+  await clickRun(page);
+  await expect(page.getByText(HINT)).toBeVisible({ timeout: 30_000 });
+
+  await page.getByRole("combobox").selectOption("hello-world");
+
+  await expect(page.getByText(HINT)).toHaveCount(0);
+  await expect(page.getByText(PLACEHOLDER)).toBeVisible();
+});

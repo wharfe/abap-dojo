@@ -184,11 +184,27 @@ export interface SyntaxRepair {
  * definition that does not hold for it — and GA4 registration is not
  * retroactive, so the two could never be told apart afterwards.
  *
- * `none` is a value rather than an absence on purpose. The search runs only
- * after a parse that produced no errors, so a run that ended before that
- * (`stalled`, or a Stop pressed before transpiling) sends nothing. Without an
- * explicit `none`, "we looked and found nothing" and "we never looked" would
- * both arrive as `(not set)` and no rate could be computed from either.
+ * It reaches only operands where a text literal is grammatically legal, and
+ * one more shape is out of reach for a different reason: a line whose own
+ * single-quoted literal contains double quotes (`WRITE: 'he said "hi"', "b".`).
+ * The single-line candidate rewrites the FIRST pair on the line, which there
+ * is the one inside the literal, and the all-at-once candidate rewrites that
+ * one too — so neither scores better and the real loss goes unreported. It
+ * fails silent rather than wrong, which is this module's preference, but it is
+ * a limit rather than an accident and `syntaxRepair.test.ts` fixes it in place.
+ *
+ * `none` is a value rather than an absence on purpose: it means the search ran
+ * to the end and found nothing, and absence means it never ran. Without the
+ * distinction, "we looked and found nothing" and "we never looked" would both
+ * arrive as `(not set)` and no rate could be computed from either.
+ *
+ * **The biggest cause of absence is not an accident: every `syntax_error`
+ * run.** The worker returns from the branch that handles Error-severity issues
+ * before this search is reached, so the largest failure bucket in the app
+ * sends nothing here. A search that gave up part way and a source too large to
+ * search are the other two; a run that ended before the parse (`stalled`, or a
+ * Stop pressed before transpiling) is the fourth. Do not read `(not set)` as
+ * "the run stalled".
  */
 export const SILENT_LOSSES = ["double_quote", "none"] as const;
 
