@@ -73,7 +73,7 @@ Q1 の厳しい判定は「件数が減れば採用」に比べて、得るも�
 
 **パースの重さは文字数に比例しない。** 二重引用符やセミコロンがどの行でもピリオドを食う貼り付け
 （LLM が `WRITE "a".` を並べた形）はファイル全体が 1 つの文になり、1 回のパースが
-16 kB で 116 ms、64 kB で 2,642 ms（Node）— 文字数 4 倍で 20 倍以上。行ごとにエラーが切れる形はほぼ比例
+`WRITE 'value#';` を並べた形で 16 kB 116 ms・64 kB 1,431 ms（Node）— 文字数 4 倍で約 12 倍、形によっては約 38 倍。行ごとにエラーが切れる形はほぼ比例
 （64 kB で 68 ms）。
 
 そのため旧上限の 64 kB では、二重引用符の探索だけで Firefox 12.8 秒・WebKit 10.6 秒かかり
@@ -83,7 +83,7 @@ Q1 の厳しい判定は「件数が減れば採用」に比べて、得るも�
 
 採らなかった上限:
 
-- **再パースした文字数の合計** — 上の非比例のため、同じ合計でも中身次第で時間が 20 倍以上ずれる
+- **再パースした文字数の合計** — 上の非比例のため、同じ合計でも中身次第で時間が大きくずれる（64 kB の 1 回のパースが形によって 68〜2,642 ms）
 - **経過時間** — 同じコードでも端末の速さでヒントの有無が変わり、`syntax_repair` の件数に端末差が混ざる
 - **16 kB ＋ 経過時間の最終防衛線** — 普段は発動しないが、テストに時計の差し替えが要る。今回は入れない
 
@@ -113,7 +113,9 @@ Run 1 回あたりの平均は約 20 行（GA4 2026-08-28..09-10、7,312 回）�
 ## 受け入れコマンド
 
 ```bash
-npm test -- src/workers/syntaxRepair.test.ts   # 上の表の全行 + 既存ケース無修正。実装前に新ケースが赤であること
+npm test -- src/workers/statementEndRepair.test.ts src/workers/searchSizeCap.test.ts src/workers/syntaxRepair.test.ts
+                                                # 上の表の全行は statementEndRepair.test.ts、16 kB の上限は searchSizeCap.test.ts。
+                                                # 既存 syntaxRepair.test.ts は無修正。実装前に新ケースが赤であること
 npx playwright test e2e/syntaxHint.spec.ts --project=chromium --project=firefox --repeat-each=5
                                                 # 表示の配線。配線を外した状態で赤になることも確認（#70 の教訓）
 npm run lint && npm run typecheck && npm test && npm run build   # すべて exit 0
