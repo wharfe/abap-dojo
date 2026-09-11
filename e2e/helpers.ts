@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 const EDITOR = ".monaco-editor, textarea";
 
@@ -25,11 +25,31 @@ export async function typeProgram(page: Page, source: string): Promise<void> {
  * An earlier version claimed to wait, by asserting a `/Run/i` button was
  * visible afterwards. That is vacuous: the label only becomes `Stop` once
  * React has flushed `setIsRunning(true)`, so the assertion usually resolves
- * against the pre-click button and returns immediately. It happened not to
- * produce a false green here, because every negative assertion in this suite
- * is preceded by a positive wait — but a helper whose contract is stronger
- * than its behaviour is a false green waiting for its first careless caller.
+ * against the pre-click button and returns immediately. A helper whose
+ * contract is stronger than its behaviour is a false green waiting for its
+ * first careless caller.
+ *
+ * A positive wait before a negative assertion is NOT enough on its own; the
+ * thing waited for has to come after the last moment the unwanted element
+ * could still appear. #70 was exactly that gap: the silent-loss hint arrives
+ * with the transpile result, while the run is still executing, and the
+ * placeholder is hidden during a run no matter what — so `toHaveCount(0)` on
+ * the placeholder passed against a build that did not contain the fix, 5 runs
+ * out of 12. Use `waitForRunToEnd` when the negative is about the end state.
  */
 export async function clickRun(page: Page): Promise<void> {
   await page.getByRole("button", { name: /Run/i }).click();
+}
+
+/**
+ * Wait until the toolbar button reads Run again, i.e. `isRunning` is false.
+ *
+ * Only meaningful once something has already proved the run started (output,
+ * a hint, an error). Called straight after `clickRun` it has the same flaw
+ * the note above describes: the pre-click button already says Run.
+ */
+export async function waitForRunToEnd(page: Page): Promise<void> {
+  await expect(page.getByRole("button", { name: /Run/i })).toBeVisible({
+    timeout: 30_000,
+  });
 }

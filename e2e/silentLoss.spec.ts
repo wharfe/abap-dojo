@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { typeProgram, clickRun } from "./helpers";
+import { typeProgram, clickRun, waitForRunToEnd } from "./helpers";
 
 /**
  * The #68 hint, end to end.
@@ -37,6 +37,10 @@ test("a chained WRITE whose only operand was eaten is explained", async ({
   // And the placeholder must have got out of the way: output is empty and
   // there is no error, which is precisely when it used to render — directly
   // under the hint, telling the user to press the button they just pressed.
+  // The hint is not the end of the run — it arrives with the transpile result,
+  // and the placeholder is hidden while running regardless — so wait for the
+  // run to end first, or this passes without the fix (#70: 5 of 12 runs).
+  await waitForRunToEnd(page);
   await expect(page.getByText(PLACEHOLDER)).toHaveCount(0);
 });
 
