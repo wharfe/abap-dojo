@@ -4,7 +4,7 @@
 
 **Goal:** Run が構文エラーで失敗したとき、ピリオド抜けと行末セミコロンについて「何を直せば通るか」を 1 行で出し、GA4 の `syntax_repair` に `missing_period` / `semicolon` を送る。
 
-**Architecture:** #69 の方式（書き換えた版を abaplint に再パースさせ、判定が良くなった書き換えだけ採る）を新ファイル `src/workers/statementEndRepair.ts` に作る。二重引用符の `findSyntaxRepair` は一切変えず、それが何も見つけなかったときだけ新しい探索を試す。新しい 2 種は「件数が減り、かつ対象にしたエラー行範囲から始まるエラーが残らない」ときだけ採用する。探索する大きさの上限（`MAX_SOURCE_CHARS`）は 64 kB → 16 kB に下げ、既存の二重引用符・`silent_loss` の探索にも同時に効かせる（Gate2 H1 / #75。仕様 Q6）。
+**Architecture:** #69 の方式（書き換えた版を abaplint に再パースさせ、判定が良くなった書き換えだけ採る）を新ファイル `src/workers/statementEndRepair.ts` に作る。二重引用符の `findSyntaxRepair` は一切変えず、それが何も見つけなかったときだけ新しい探索を試す。新しい 2 種は「件数が減り、かつ対象にしたエラー行範囲から始まるエラーが残らない」ときだけ採用する。探索する大きさの上限（`MAX_SOURCE_CHARS`）は 64 kB → 16 kB に下げ、既存の二重引用符・`silent_loss` の探索にも同時に効かせる（Gate2 H1 / #75。仕様 Q6）。さらに Run ごとに探索全体で共有する 3 秒の打ち切り（`src/workers/searchDeadline.ts`、Task 2b）を入れる。大きさを揃えても形による重さの差（16 kB で 1 パース 24〜512 ms）が残り、大きさだけでは時間を保証できないため（Gate2 3 周目 H-B。仕様 Q7）。
 
 **Tech Stack:** TypeScript, `@abaplint/core`, `@abaplint/transpiler`（config）, Vitest, Playwright
 
@@ -12,10 +12,10 @@
 
 ## Global Constraints
 
-- 既存の `src/workers/syntaxRepair.test.ts` は**1 文字も変えない**（16 kB 以下で二重引用符の結果が変わらないことの証拠。既存の大きさのテスト 2 件は 64 kB 超の入力なので、16 kB 化の後も緑のまま）。`syntaxRepair.ts` の変更は、定数 2 つの `export`・`MAX_SOURCE_CHARS` の値（64 → 16 kB）・その 2 定数のコメント・`countErrors` の中身を切り出した `errorIssues` の export（「エラーとは何か」の定義を 1 か所に保つ — #63）だけ
+- 既存の `src/workers/syntaxRepair.test.ts` は**1 文字も変えない**（16 kB 以下で二重引用符の結果が変わらないことの証拠。既存の大きさのテスト 2 件は 64 kB 超の入力なので、16 kB 化の後も緑のまま）。`syntaxRepair.ts` の変更は、定数 2 つの `export`・`MAX_SOURCE_CHARS` の値（64 → 16 kB）・その 2 定数のコメント・`RepairCandidate.line` のコメント・`countErrors` の中身を切り出した `errorIssues` の export（「エラーとは何か」の定義を 1 か所に保つ — #63）だけ
 - 送るのは列挙値だけ。`line` は画面表示専用で送らない
 - 探索は Run の失敗時だけ（`handleTranspile` の `errors.length > 0` 分岐）。`handleLint` には入れない
-- 16 kB 超のソースは探さない（`MAX_SOURCE_CHARS`。64 kB から下げる — Gate2 H1 / #75。失敗側の 3 種と成功側の `silent_loss` が同じ定数を共有する。経過時間や文字数合計の上限は入れない — 仕様 Q6）。種類ごとに行候補は最大 10（`MAX_CANDIDATES`）+ まとめ候補 1
+- 16 kB 超のソースは探さない（`MAX_SOURCE_CHARS`。64 kB から下げる — Gate2 H1 / #75。失敗側の 3 種と成功側の `silent_loss` が同じ定数を共有する。文字数合計の上限は入れない — 仕様 Q6）。加えて、探索を始めてから `SEARCH_BUDGET_MS`（3 秒）を過ぎたら新しい再パースを始めない（仕様 Q7）。打ち切りは再パース関数を包んで投げる形で入れ、探索関数そのものは変えない。種類ごとに行候補は最大 10（`MAX_CANDIDATES`）+ まとめ候補 1
 - 候補の再パースが投げたら `undefined` を返す（`syntax_error` の判定を `transpile_error` に変えない）
 - 試す順: 二重引用符（既存）→ `semicolon` → `missing_period`
 - ヒント文言は固定文。行番号以外にユーザー由来の値を入れない。Tailwind のユーティリティ名になる英単語を裸で書かない（#44。CSS ratchet で確認）
@@ -37,9 +37,17 @@
 
 Tailwind v4 はディスク上のファイルを走査するので、未追跡の新ファイルがあると `git stash` では基準にならない（CLAUDE.md Known Gotchas）。着手前のツリーで取る。
 
+Tailwind v4 は `docs/superpowers/*.md` も走査する。この計画は新しいコードの文字列を一字一句含むので、計画を置いたまま基準を取ると、
+コードが増やすクラスが基準に先に入り、比較が何も検出しない（Gate2 3 周目 M-A。レビュー役が `mt-8` など 5 ルールで実測）。
+基準も最終（Task 4 Step 4）も `docs/superpowers` を一時的に外してビルドする。
+
 ```bash
-npm run build >/dev/null 2>&1 && cp dist/assets/index-*.css /tmp/before.css && ls -l /tmp/before.css
+if [ -e /tmp/sp-hold/superpowers ]; then echo "HOLD_EXISTS"; exit 1; fi
+mkdir -p /tmp/sp-hold && mv docs/superpowers /tmp/sp-hold/ && trap 'mv /tmp/sp-hold/superpowers docs/' EXIT INT TERM HUP
+npm run build >/dev/null 2>&1; echo "BUILD=$?"
+cp dist/assets/index-*.css /tmp/before.css && ls -l /tmp/before.css
 ```
+  Expected: `BUILD=0`。続けて別の呼び出しで `git status --short docs/` が何も出さない（`docs/superpowers` が戻っている）
 
 - [ ] **Step 1: 失敗するテストを書く** — `src/utils/repairHint.test.ts`
 
@@ -114,6 +122,16 @@ export const SYNTAX_REPAIRS = ["double_quote", "semicolon", "missing_period"] as
  * under a stricter rule than `double_quote`, because appending a period makes
  * almost any line look like a finished statement: a rewrite is kept only if it
  * clears every error it targeted, not merely if the count went down.
+```
+
+同じファイルの `SyntaxRepair.line` のコメントは二重引用符の話（1 行に複数のペア）だけで書かれていて、新しい 2 種について偽になる（Gate2 3 周目 L-b）。
+`* comment. The hint drops the row rather than point somewhere never wrong.` の行の直後（`*/` の前）に追記:
+
+```ts
+   *
+   * The same holds for `semicolon` and `missing_period`: their
+   * rewrite-everything candidate can end several statements at once, and the
+   * score does not say which of those edits mattered.
 ```
 
 - [ ] **Step 4: ヒント文言を足す** — `src/utils/repairHint.ts` の `repairHint` の switch に 2 ケース追加（`double_quote` の case の後）
@@ -520,6 +538,26 @@ export function errorIssues(issues: readonly Issue[]): Issue[] {
 }
 ```
 
+(iv) `RepairCandidate.line` のコメント（二重引用符の話だけで、新しい 2 種について偽になる — Gate2 3 周目 L-b）。旧:
+
+```ts
+   * 1-based row the edit was made on, or `undefined` for the candidate that
+   * rewrites everything — always undefined there, even when it happened to
+   * touch one row, because that row can hold several pairs and the score
+   * attributes the improvement to none of them in particular.
+```
+
+新:
+
+```ts
+   * 1-based row the edit was made on, or `undefined` for the candidate that
+   * rewrites everything — always undefined there, even when it happened to
+   * touch one row, because the score attributes the improvement to none of
+   * its edits in particular: for the double quote a row can hold several
+   * pairs, and for the statement-end kinds (statementEndRepair.ts) the
+   * candidate can end several statements at once.
+```
+
 - [ ] **Step 4: 実装する** — `src/workers/statementEndRepair.ts`
 
 ```ts
@@ -718,6 +756,185 @@ git commit -m "ピリオド抜けとセミコロンを再パースで探し、�
 
 ---
 
+### Task 2b: 探索全体の時間の打ち切り（`searchDeadline.ts`）
+
+仕様 Q7。大きさの上限（Task 2 Step 3）だけでは、16 kB の `foo(1);` の形で探索が Node 4.9〜6.5 秒、`foo(1, "x");` で 7.8 秒かかる（Gate2 3 周目 H-B）。
+Task 3 に番号を振り直さないために「2b」とする（Gate2 記録が Task 3 / 4 の番号で指しているため）。
+
+**Files:**
+- Create: `src/workers/searchDeadline.ts`
+- Create: `src/workers/searchDeadline.test.ts`
+
+**Interfaces:**
+- Consumes: `findSyntaxRepair`, `findSilentLoss`（`syntaxRepair.ts`）、`findStatementEndRepair`（Task 2）
+- Produces: `SEARCH_BUDGET_MS = 3000`、`class SearchDeadlineExceeded extends Error`、`withDeadline<T>(reparse: (c: string) => Promise<T>, deadline: number, now?: () => number): (c: string) => Promise<T>`
+
+- [ ] **Step 1: 失敗するテストを書く** — `src/workers/searchDeadline.test.ts`
+
+```ts
+import { describe, it, expect } from "vitest";
+import { Buffer } from "buffer";
+(globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
+
+import { SEARCH_BUDGET_MS, SearchDeadlineExceeded, withDeadline } from "./searchDeadline";
+import { findSilentLoss, findSyntaxRepair } from "./syntaxRepair";
+import { findStatementEndRepair } from "./statementEndRepair";
+
+/** A clock the test moves by hand. */
+function fakeClock() {
+  let t = 0;
+  return {
+    now: () => t,
+    advance: (ms: number) => {
+      t += ms;
+    },
+  };
+}
+
+describe("withDeadline", () => {
+  it("allows three seconds", () => {
+    expect(SEARCH_BUDGET_MS).toBe(3000);
+  });
+
+  it("starts a re-parse before the deadline", async () => {
+    const clock = fakeClock();
+    const reparse = withDeadline(() => Promise.resolve(7), 100, clock.now);
+    await expect(reparse("x")).resolves.toBe(7);
+  });
+
+  it("refuses to start one at or after the deadline, without calling through", async () => {
+    const clock = fakeClock();
+    let calls = 0;
+    const reparse = withDeadline(
+      () => {
+        calls++;
+        return Promise.resolve(7);
+      },
+      100,
+      clock.now,
+    );
+    clock.advance(100);
+    await expect(reparse("x")).rejects.toBeInstanceOf(SearchDeadlineExceeded);
+    expect(calls).toBe(0);
+  });
+});
+
+/**
+ * The deadline works by throwing, and every search already turns a throwing
+ * re-parse into "no answer". These pin that contract for each search: if one
+ * of them ever stops swallowing the throw, a search that ran out of time
+ * would turn a correct `syntax_error` into a `transpile_error`.
+ */
+describe("a search that runs out of time", () => {
+  /** Each re-parse costs 60 ms of fake time against a 100 ms budget: two start, the third is refused. */
+  function slow<T>(value: T) {
+    const clock = fakeClock();
+    let calls = 0;
+    const reparse = withDeadline(
+      () => {
+        calls++;
+        clock.advance(60);
+        return Promise.resolve(value);
+      },
+      100,
+      clock.now,
+    );
+    return { reparse, calls: () => calls };
+  }
+
+  it("leaves the double-quote search with no hint", async () => {
+    const source = Array.from({ length: 5 }, (_, i) => `WRITE "a${i}".`).join("\n");
+    // The count never drops, so nothing but the deadline ends the search.
+    const { reparse, calls } = slow(99);
+    await expect(findSyntaxRepair(source, 99, reparse)).resolves.toBeUndefined();
+    expect(calls()).toBe(2);
+  });
+
+  it("reports the silent-loss search as not completed", async () => {
+    const source = Array.from({ length: 5 }, (_, i) => `WRITE: "a${i}".`).join("\n");
+    const { reparse, calls } = slow({ errors: 0, real: 1 });
+    await expect(
+      findSilentLoss(source, { errors: 0, real: 1 }, reparse),
+    ).resolves.toEqual({ completed: false });
+    expect(calls()).toBe(2);
+  });
+
+  it("leaves the statement-end search with no hint", async () => {
+    const source = Array.from({ length: 5 }, (_, i) => `WRITE ${i};`).join("\n");
+    const spans = Array.from({ length: 5 }, (_, i) => ({ start: i + 1, end: i + 1 }));
+    // Every re-parse still reports an error on every row, so nothing is accepted.
+    const { reparse, calls } = slow([1, 2, 3, 4, 5]);
+    await expect(findStatementEndRepair(source, spans, reparse)).resolves.toBeUndefined();
+    expect(calls()).toBe(2);
+  });
+});
+```
+
+- [ ] **Step 2: 赤を確認** — Run: `npm test -- src/workers/searchDeadline.test.ts`
+  Expected: FAIL（`Failed to resolve import "./searchDeadline"`）
+
+- [ ] **Step 3: 実装する** — `src/workers/searchDeadline.ts`
+
+```ts
+/**
+ * One time limit for every re-parse search in a Run (#75).
+ *
+ * The size cap (MAX_SOURCE_CHARS in syntaxRepair.ts) bounds how large a
+ * source the searches look at, but not how long one parse of it takes: at
+ * 16 kB that ranges from 24 ms to 512 ms by shape alone (Node, 2026-09-11),
+ * and a paste of `foo(1, "x");` rows took the searches 7.8 s. So the searches
+ * also share a deadline, and once it has passed no new re-parse is started.
+ *
+ * It cannot stop a parse already running, so the worst case is the budget
+ * plus one parse (about 0.5 s at 16 kB for the heaviest shape measured). The
+ * limit that matters is the 20s watchdog in App.tsx: past it, a real
+ * `syntax_error` is shown and counted as `stalled`.
+ *
+ * The deadline is enforced by throwing from the wrapped re-parse, because
+ * every search already treats a throwing re-parse as "no answer" —
+ * `findSyntaxRepair` and `findStatementEndRepair` return undefined,
+ * `findSilentLoss` reports `completed: false`. None of them needs to know the
+ * deadline exists; searchDeadline.test.ts pins that for each.
+ *
+ * The price: for a paste heavy enough to reach it, whether a hint appears
+ * depends on how fast the device is. An ordinary paste (about 20 lines per
+ * Run) finishes its searches far below it.
+ */
+
+export const SEARCH_BUDGET_MS = 3000;
+
+export class SearchDeadlineExceeded extends Error {
+  constructor() {
+    super("re-parse search deadline passed");
+    this.name = "SearchDeadlineExceeded";
+  }
+}
+
+/** `reparse`, refusing to start once `now()` has reached `deadline`. */
+export function withDeadline<T>(
+  reparse: (candidate: string) => Promise<T>,
+  deadline: number,
+  now: () => number = () => performance.now(),
+): (candidate: string) => Promise<T> {
+  return (candidate) =>
+    now() >= deadline
+      ? Promise.reject(new SearchDeadlineExceeded())
+      : reparse(candidate);
+}
+```
+
+- [ ] **Step 4: 緑を確認** — Run: `npm test -- src/workers/searchDeadline.test.ts src/workers/statementEndRepair.test.ts src/workers/syntaxRepair.test.ts && npm run typecheck && npm run lint`
+  Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/workers/searchDeadline.ts src/workers/searchDeadline.test.ts
+git commit -m "再パースの探索に Run ごとの 3 秒の打ち切りを足す (#75)"
+```
+
+---
+
 ### Task 3: ワーカーへの配線と e2e
 
 **Files:**
@@ -725,7 +942,7 @@ git commit -m "ピリオド抜けとセミコロンを再パースで探し、�
 - Modify: `e2e/syntaxHint.spec.ts`
 
 **Interfaces:**
-- Consumes: `errorRowCounter`, `errorSpanOf`, `findStatementEndRepair`（Task 2）、`repairHint`（Task 1。`App.tsx:376` が既に `data.repair` を描画するので App.tsx は変更不要）
+- Consumes: `errorRowCounter`, `errorSpanOf`, `findStatementEndRepair`（Task 2）、`errorIssues`（Task 2）、`withDeadline`, `SEARCH_BUDGET_MS`（Task 2b）、`repairHint`（Task 1。`App.tsx:376` が既に `data.repair` を描画するので App.tsx は変更不要）
 
 **この Task の e2e を走らせる前に毎回**（Gate2 2 周目 H-1 / M-3）:
 
@@ -805,7 +1022,10 @@ import {
   errorSpanOf,
   findStatementEndRepair,
 } from "./statementEndRepair";
+import { SEARCH_BUDGET_MS, withDeadline } from "./searchDeadline";
 ```
+
+既存の `} from "./syntaxRepair";` の import 一覧に `errorIssues` を足す。
 
 `const scoreIn = ...`（35 行目）の直後:
 
@@ -822,8 +1042,9 @@ const errorRowsIn = errorRowCounter(abaplintConfig, SOURCE_FILENAME);
       // must not turn it into a `transpile_error`.
       //
       // Costs a bounded number of extra parses — at most 11 for the double
-      // quote and 22 more for the statement end, none above MAX_SOURCE_CHARS —
-      // and only on the Run path after a failure the user is already waiting
+      // quote and 22 more for the statement end, none above MAX_SOURCE_CHARS
+      // and none started once SEARCH_BUDGET_MS has passed (searchDeadline.ts)
+      // — and only on the Run path after a failure the user is already waiting
       // on. Never on `lint`, which runs on every keystroke. It is not scoped
       // to the parse-failure keys: any Error-severity outcome gets the search,
       // which is a superset of what can ever match and one fewer rule to keep
@@ -832,10 +1053,30 @@ const errorRowsIn = errorRowCounter(abaplintConfig, SOURCE_FILENAME);
       // The double quote is tried first and unchanged; the statement-end search
       // (#67) only runs when it found nothing, so what `double_quote` reports
       // cannot move.
+      // One deadline for every search in this Run (#75): no re-parse starts
+      // once it has passed, so the worst case is the budget plus one parse,
+      // whatever shape the paste has.
+      const deadline = performance.now() + SEARCH_BUDGET_MS;
       const repair =
-        (await findSyntaxRepair(source, countErrors(issues), errorsIn)) ??
-        (await findStatementEndRepair(source, errors.map(errorSpanOf), errorRowsIn));
+        (await findSyntaxRepair(
+          source,
+          countErrors(issues),
+          withDeadline(errorsIn, deadline),
+        )) ??
+        (await findStatementEndRepair(
+          source,
+          errors.map(errorSpanOf),
+          withDeadline(errorRowsIn, deadline),
+        ));
 ```
+
+同じファイルで、あと 2 か所:
+
+- 90 行の `const errors = issues.filter(isError);` を `const errors = errorIssues(issues);` にし、ほかに使われていない
+  `function isError`（57〜59 行。`grep -n isError src/workers/abaplintWorker.ts` が 57 と 90 だけ）を消す。
+  エラーの定義を `errorIssues` の 1 か所に揃える（Gate2 3 周目 L-a）
+- 成功側の `findSilentLoss(` の呼び出しの第 3 引数 `scoreIn,` を `withDeadline(scoreIn, performance.now() + SEARCH_BUDGET_MS),` にする
+  （成功側は探索が 1 種なので、自分の期限を 1 つ持つ — 仕様 Q7）
 
 - [ ] **Step 4: 緑を確認（繰り返し）** — Run: `npx playwright test e2e/syntaxHint.spec.ts --project=chromium --project=firefox --repeat-each=5`
   Expected: 全件 PASS（WebKit はファイル先頭で skip）
@@ -846,25 +1087,36 @@ const errorRowsIn = errorRowCounter(abaplintConfig, SOURCE_FILENAME);
 e2e は「期待値が外れた」ではなく「サーバーが起動しない」で赤になる — それは何も確かめていない赤で、
 #70 と同じ形の偽の証拠になる。ここでは探索に空の範囲を渡し、import と変数を使ったまま結果だけ消す。
 
-**変異させたファイルを残さない**: 途中で打ち切られても戻るよう `trap` で復元し、Bash ツールの `timeout` は 600000 にする
-（10 件が 30 秒ずつ待って落ちるので、ビルド込みで 6〜7 分かかる）。打ち切られたら Step 6 の確認で止まる（Gate2 2 周目 H-1）。
+**変異させたファイルを残さない**（Gate2 2 周目 H-1、3 周目 H-A）:
+
+- この Step は **`run_in_background` で 1 回だけ**走らせ、**完了通知が来るまで** `abaplintWorker.ts` に触る作業も、この Step の再実行も、Step 6 もしない。
+  Bash ツールは timeout で処理を殺さず裏へ回すので、「打ち切られた」と思って次へ進むと、裏で走っている変異版と並ぶ
+  （10 件が 30 秒ずつ待って落ちるので、ビルド込みで 6〜7 分かかる）
+- バックアップは `mktemp` で毎回別の名前にし、取る前に「現ファイルに変異が無い」ことを確かめて止める。前回の変異版をバックアップとして
+  上書き保存すると、以後の復元が変異版を戻す
+- 復元は `trap` でも行う。最後の砦は Step 6 の確認（変異が残っていれば `exit 1` で止まり、コミットまで進まない）
 
 ```bash
 if ss -ltn | grep -q ':4173 '; then echo "PORT_4173_BUSY"; exit 1; fi
-cp src/workers/abaplintWorker.ts /tmp/worker.bak
-trap 'cp /tmp/worker.bak src/workers/abaplintWorker.ts' EXIT INT TERM HUP
-python3 - <<'PY'
-p='src/workers/abaplintWorker.ts'; s=open(p).read()
-old = 'findStatementEndRepair(source, errors.map(errorSpanOf), errorRowsIn)'
-assert s.count(old) == 1, 'wiring not found'
-open(p,'w').write(s.replace(old, 'findStatementEndRepair(source, errors.map(errorSpanOf).slice(0, 0), errorRowsIn)'))
+if grep -q 'slice(0, 0)' src/workers/abaplintWorker.ts; then echo "ALREADY_MUTATED"; exit 1; fi
+BAK=$(mktemp /tmp/worker.XXXXXX.bak)
+cp src/workers/abaplintWorker.ts "$BAK"
+trap 'cp "$BAK" src/workers/abaplintWorker.ts' EXIT INT TERM HUP
+python3 - <<'PY' || exit 1
+import sys
+p = 'src/workers/abaplintWorker.ts'
+s = open(p).read()
+old = 'errors.map(errorSpanOf),'
+if s.count(old) != 1:
+    sys.exit('wiring not found')
+open(p, 'w').write(s.replace(old, 'errors.map(errorSpanOf).slice(0, 0),'))
 PY
 npx playwright test e2e/syntaxHint.spec.ts --project=chromium --grep "missing period|semicolon used" --repeat-each=5 > /tmp/mutant.log 2>&1; echo "MUTANT_EXIT=$?"
 sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -c '✘'
 sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -c '✓'
 sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -E '^\s+[0-9]+ (failed|passed)'
 grep -c 'was not able to start\|error TS' /tmp/mutant.log
-cp /tmp/worker.bak src/workers/abaplintWorker.ts && git diff --stat src/workers/abaplintWorker.ts
+cp "$BAK" src/workers/abaplintWorker.ts && git diff --stat src/workers/abaplintWorker.ts
 ```
   Expected: `MUTANT_EXIT` が非 0、**`✘` の行が 10 件・`✓` の行が 0 件**、集計行が `10 failed` だけ、**`was not able to start` / `error TS` が 0 件**（落ちた理由が期待値であってビルドではないこと）。復元後の diff は Step 3 の変更だけ。
   成功行も数える grep だと「変異が効かず全件成功」も 10 件になり、区別できない（Gate2 H2）。`✘` と `✓` を別々に数えるのはそのため
@@ -872,9 +1124,11 @@ cp /tmp/worker.bak src/workers/abaplintWorker.ts && git diff --stat src/workers/
 - [ ] **Step 6: Commit**
 
 ```bash
-grep -c 'slice(0, 0)' src/workers/abaplintWorker.ts   # 0 でなければ止める: Step 5 の変異が残っている
-git diff src/workers/abaplintWorker.ts | grep -c 'findStatementEndRepair(source, errors.map(errorSpanOf), errorRowsIn)'   # 1
+# Step 5 を裏で走らせたなら、その完了通知を受け取ってからこの Step を始める
+if grep -q 'slice(0, 0)' src/workers/abaplintWorker.ts; then echo "MUTANT_LEFT"; exit 1; fi
+if ! git diff src/workers/abaplintWorker.ts | grep -q 'withDeadline(errorRowsIn, deadline)'; then echo "WIRING_MISSING"; exit 1; fi
 git add src/workers/abaplintWorker.ts e2e/syntaxHint.spec.ts
+if git diff --cached | grep -q 'slice(0, 0)'; then echo "MUTANT_STAGED"; git reset -q; exit 1; fi
 git commit -m "Run の構文エラーにピリオド抜けとセミコロンのヒントを出す (#67)"
 ```
 
@@ -948,6 +1202,14 @@ double-quote search alone took
 12.8 s in Firefox. The 20s watchdog ends the *display* without interrupting
 this worker, so past it a real `syntax_error` is shown and counted as
 `stalled`. A paste over 16 kB — roughly 400 lines — gets no hint.
+
+The size cap did not bound the time on its own: at 16 kB one parse still
+ranges from 24 ms to 512 ms by shape, and `foo(1, "x");` rows took the
+searches 7.8 s. So every search in a Run also shares a 3 s deadline
+(`src/workers/searchDeadline.ts`): once it has passed no new re-parse starts,
+and the search ends with no hint. For a paste heavy enough to reach it,
+whether a hint appears depends on the device, and a missing `syntax_repair`
+does not say whether the search found nothing or ran out of time.
 ```
 
 (c) 620 行（`compare it against \`syntax_statement = WRITE\` over the same period.`）の直後に追記:
@@ -959,7 +1221,7 @@ with two of the mistakes at once (`WRITE "hello";`) gets no hint from any
 kind, so the sum undercounts what that bucket holds.
 ```
 
-(d) 653 行の `a source over 64 kB,` を `a source over 16 kB (64 kB until #75, so absence rises slightly across that release),` に置き換え
+(d) 653 行の `a source over 64 kB,` を `a source over 16 kB (64 kB until #75, so absence rises slightly across that release), a search cut off by the 3 s search deadline,` に置き換え
 
 (e) 688〜689 行。旧:
 
@@ -992,8 +1254,10 @@ search it runs on
 
 - [ ] **Step 3: 上限ちょうどの最悪ケースの所要時間を測る**（コミットしない。Node と 3 ブラウザ）
 
-入力は Gate2 H1 で重いと分かった形（ファイル全体が 1 つの文になる形）を `MAX_SOURCE_CHARS` ちょうどまで並べたもの。
-300 行の貼り付けは最悪ケースではない（Gate2 M3）。
+入力は Gate2 H1 で重いと分かった形（ファイル全体が 1 つの文になる形）と、3 周目 H-B で 16 kB でも 5 秒を超えた
+`foo(1);`・`foo(1, "x");` を `MAX_SOURCE_CHARS` ちょうどまで並べたもの。300 行の貼り付けは最悪ケースではない（Gate2 M3）。
+探索は本番と同じく `withDeadline` で包み、合否は形ごとの「元のパース + 探索」で判定する（「1 パースの最悪 × 回数」は、候補が元と
+同じ重さとは限らないので上限にならない — 3 周目 H-B）。同じ入力でも 4.9〜6.5 秒とばらつくので 3 回の中央値を使う。
 
 Node — `npx vitest` はフック G2 が拒否するので `./node_modules/.bin/vitest` を使う。この repo の vitest は
 `console.log` を出さないので結果はファイルに書く:
@@ -1011,6 +1275,7 @@ import { config as transpilerConfig } from "@abaplint/transpiler";
 import type { Issue } from "@abaplint/core";
 import { errorCounter, countErrors, errorIssues, findSyntaxRepair, MAX_SOURCE_CHARS } from "./syntaxRepair";
 import { errorRowCounter, errorSpanOf, findStatementEndRepair } from "./statementEndRepair";
+import { SEARCH_BUDGET_MS, withDeadline } from "./searchDeadline";
 
 it("worst case at the size cap", async () => {
   const config = new Config(JSON.stringify(transpilerConfig));
@@ -1021,12 +1286,13 @@ it("worst case at the size cap", async () => {
     semi: `WRITE 'value#';\n`,
     period: `WRITE 'a'\n`,
     js: `console.log("x");\n`,
+    foo1: `foo(1);\n`,
+    foo1x: `foo(1, "x");\n`,
   };
   const rows: string[] = [];
-  let worstParse = 0;
   for (const [name, line] of Object.entries(shapes)) {
     const source = line.repeat(Math.floor(MAX_SOURCE_CHARS / line.length));
-    // Best of two, so JIT warm-up on the first shape cannot inflate bound_ms.
+    // Best of two, so JIT warm-up on the first shape cannot inflate parse_ms.
     let parseMs = Infinity;
     let issues: Issue[] = [];
     for (let i = 0; i < 2; i++) {
@@ -1038,20 +1304,35 @@ it("worst case at the size cap", async () => {
       parseMs = Math.min(parseMs, performance.now() - t0);
     }
     const errors = errorIssues(issues);
-    worstParse = Math.max(worstParse, parseMs);
-    let parses = 0;
     const count = errorCounter(config, file);
     const rowsIn = errorRowCounter(config, file);
-    const t1 = performance.now();
-    const repair =
-      (await findSyntaxRepair(source, countErrors(issues), (c) => (parses++, count(c)))) ??
-      (await findStatementEndRepair(source, errors.map(errorSpanOf), (c) => (parses++, rowsIn(c))));
+    // Three runs, median: one input measured 4.9-6.5 s across runs (Gate2 round 3).
+    const runs: { ms: number; parses: number; repair: unknown }[] = [];
+    for (let r = 0; r < 3; r++) {
+      let parses = 0;
+      const t1 = performance.now();
+      const deadline = t1 + SEARCH_BUDGET_MS;
+      const repair =
+        (await findSyntaxRepair(
+          source,
+          countErrors(issues),
+          withDeadline((c) => (parses++, count(c)), deadline),
+        )) ??
+        (await findStatementEndRepair(
+          source,
+          errors.map(errorSpanOf),
+          withDeadline((c) => (parses++, rowsIn(c)), deadline),
+        ));
+      runs.push({ ms: performance.now() - t1, parses, repair });
+    }
+    runs.sort((a, b) => a.ms - b.ms);
+    const mid = runs[1];
     rows.push(
       `${name} chars=${source.length} errors=${errors.length} parse_ms=${parseMs.toFixed(0)} ` +
-        `search_parses=${parses} search_ms=${(performance.now() - t1).toFixed(0)} repair=${JSON.stringify(repair)}`,
+        `search_parses=${mid.parses} search_ms=${mid.ms.toFixed(0)} ` +
+        `total_ms=${(parseMs + mid.ms).toFixed(0)} repair=${JSON.stringify(mid.repair)}`,
     );
   }
-  rows.push(`bound_ms=${(worstParse * 34).toFixed(0)} (worst single parse x 34)`);
   writeFileSync("/tmp/perf.txt", rows.join("\n") + "\n");
 }, 300_000);
 TS
@@ -1069,11 +1350,14 @@ const CAP = 16 * 1024;
 const encode = (s) => Buffer.from(pako.deflate(new TextEncoder().encode(s)))
   .toString("base64").replace(/\+/g, "-").replace(/\//g, "_");
 const fill = (line) => line.repeat(Math.floor(CAP / line.length));
-// `js` is the one shape that exhausts all three searches (33 re-parses, nothing found).
+// `js` exhausts all three searches (33 re-parses, nothing found); the two
+// `foo` shapes are the ones that passed 5 s in Node at 16 kB (Gate2 round 3).
 const SOURCES = {
   dq: fill(`lv = |a#| && 'b' "c";\n`),
   semi: fill(`WRITE 'value#';\n`),
   js: fill(`console.log("x");\n`),
+  foo1: fill(`foo(1);\n`),
+  foo1x: fill(`foo(1, "x");\n`),
 };
 const URL = "http://localhost:4173/";
 for (let i = 0; i < 60; i++) {
@@ -1113,12 +1397,13 @@ cat /tmp/browser-perf.json
 grep -c 'already in use' /tmp/preview.log
 kill "$(cat /tmp/preview.pid)"; echo "KILL=$?"
 ```
-  Bash ツールの `timeout` は 600000（3 エンジン × 3 形、1 件あたり 8 秒待ちを含む）。
+  Node とブラウザのどちらの呼び出しも、Bash ツールの `timeout` は 600000（ブラウザは 3 エンジン × 5 形、1 件あたり 8 秒待ちを含む）。
   Expected: `PERF_EXIT=0`・`BUILD=0`・`BROWSER_EXIT=0`・`already in use` が 0 件・`KILL=0`（測ったのが自分で立てた preview であることの確認。
   スクリプトは例外を握りつぶして `error` に書くので、`BROWSER_EXIT=0` だけでは証拠にならない）。
-  Node の `bound_ms` と、ブラウザ 9 件の `ms` がすべて **5,000 未満**、`stalled` がすべて `false`、`error` が 0 件。
+  Node の 7 形の `total_ms` がすべて **5,000 未満**（期限 3 秒 + 候補 1 回分 + 元のパース）、ブラウザ 15 件の `ms` がすべて **6,000 未満**、
+  `stalled` がすべて `false`、`error` が 0 件。`foo1` / `foo1x` は期限で打ち切られて `repair` が無くてよい。
   超えたら**上限の値を自分で変えずに止めて**ユーザーに報告する（上限の決め方は仕様 Q6 でユーザーが決めた）。
-  Node の各行とブラウザ 9 件を PR 本文に表で書く
+  Node の各行とブラウザ 15 件を PR 本文に表で書く
 
 - [ ] **Step 4: 全体検証**
 
@@ -1126,6 +1411,8 @@ kill "$(cat /tmp/preview.pid)"; echo "KILL=$?"
 npm run lint; echo "LINT=$?"
 npm run typecheck; echo "TYPECHECK=$?"
 npm test; echo "VITEST=$?"
+if [ -e /tmp/sp-hold/superpowers ]; then echo "HOLD_EXISTS"; exit 1; fi
+mkdir -p /tmp/sp-hold && mv docs/superpowers /tmp/sp-hold/ && trap 'mv /tmp/sp-hold/superpowers docs/' EXIT INT TERM HUP
 npm run build >/dev/null 2>&1; echo "BUILD=$?"
 diff <(tr "}" "\n" < /tmp/before.css) <(tr "}" "\n" < dist/assets/index-*.css); echo "CSS_DIFF=$? (0 = no new rules)"
 ls -l dist/assets/index-*.js
@@ -1266,3 +1553,13 @@ Task 1〜4 を計画の旧/新文面どおりに当てて `npm test` 459 件緑�
 - L-a ワーカーの `isError` が `errorIssues` と別の定義のまま → Task 3 Step 3 で `errorIssues(issues)` に
 - L-b `SyntaxRepair.line`（`src/types/diagnostics.ts`）と `RepairCandidate.line`（`syntaxRepair.ts:129-139`）のコメントが二重引用符の話だけ
 - L-c `;` だけのプログラム → semicolon line 1、`WRITE 'a' COLOR` → missing_period（事実としては正しいが先で壊れたまま）。任意
+
+### 3 周目の後の判断（2026-09-11、ユーザー）
+
+根に戻って問い直した: 守りたいのは「本物の構文エラーを『応答しない』にしない」（目的由来）。「上限は大きさだけ・同じコードなら
+どの端末でも同じヒント」は手段由来だったので、手段を替える。選択肢（16 kB＋時間の打ち切り / 基準を緩める / 8 kB に下げる）を
+実測表つきで示し、**16 kB ＋ Run ごとに共有する 3 秒の打ち切り**に決定（仕様 Q7）。
+
+反映: Task 2b（新規）、Task 3 Step 3（配線・成功側・L-a）/ Step 5〜6（H-A）、Task 1 Step 0 と Task 4 Step 4（M-A）、
+Task 1 Step 3 と Task 2 Step 3 (iv)（L-b）、Task 4 Step 1 (b)(d) と Step 3（測定）。L-c は対応しない（内容は事実として正しい）。
+**この形で Gate2 を新しい周回（1 周目から）でやり直す。**
