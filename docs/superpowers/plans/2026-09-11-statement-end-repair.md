@@ -1242,3 +1242,27 @@ CLAUDE.md (a)〜(e) と `analytics.ts` の旧文面は現ファイルと完全�
 | L-7 | `e2e/syntaxHint.spec.ts` 冒頭のコメント、HANDOFF の 64 kB | Task 3 Step 1。HANDOFF はセッション末に更新 |
 | L-8 | 大きさの上限テストが正しい理由で赤になるのを確かめていない。仕様の受け入れコマンドの対象ファイルが食い違う | `searchSizeCap.test.ts` に分離して Task 2 Step 2 で「AssertionError で赤」を確認。仕様の受け入れコマンドを修正 |
 | L-1 | `WRITE 'a'.;` に「セミコロンをピリオドに」と言う | **対応しない**: 従うと `WRITE 'a'..` になりパースは通る。前にピリオドがあるセミコロンを除外すると、今度はピリオド抜けの候補 `WRITE 'a'.;.` の挙動が未確認になる |
+
+## Gate2 記録（3 周目・2026-09-11）— **周回上限。high が残ったので実装に進まず人へ戻した**
+
+fresh サブエージェント（general-purpose）。critical 0 / high 2 / medium 1 / low 3。
+206 入力を実パーサで試し、ヒントが出た 94 件に誤ヒント 0 件（件数だけの判定なら誤っていた 4 件を厳しい判定が止めた）。
+Task 1〜4 を計画の旧/新文面どおりに当てて `npm test` 459 件緑・`tsc -b` 0・ESLint 0。
+`searchSizeCap.test.ts` が定数変更前に AssertionError 2 件で赤・変更後に緑も実測。
+
+- **H-A（手順）** 変異確認の後の Step 6 の `grep -c 'slice(0, 0)'` は表示するだけで止まらない。Bash ツールは timeout で
+  処理を殺さず裏へ回す（レビュー役が 4 秒 timeout で実測）ので、裏の Step 5 と並んで Step 6 や Step 5 の再実行が走ると、
+  変異入りのコミット・バックアップの上書き・直した後のファイルの巻き戻しが起きうる。
+  → Step 6 を `if grep -q 'slice(0, 0)' ...; then exit 1; fi` と `git diff --cached` の確認で止める形に、
+  Step 5 は `run_in_background` で完了通知を待つ、バックアップは `mktemp` にし変異が無いことを確かめてから取る
+- **H-B（時間の保証）** 16 kB でも Node で 5 秒を超える形がある: `foo(1);` の繰り返しで探索 4.9 / 5.4 / 6.5 秒（13 回）、
+  `foo(1, "x");` で 7.8 秒（24 回）。計画の測定は `bound_ms = 元の 1 パースの最悪 × 34` で合格（2,615 ms）してしまい、
+  ブラウザ測定にもこの形が無いので、仕様の「5 秒超なら人へ」が発動しないまま出荷される。
+  **同じ根（上限で時間を抑えきれていない）の指摘が 1 周目 H1 に続いて 2 回目** なので、規則どおり仕様へ戻す。
+  自分でも確認（2026-09-11、Node、2 回のうち速い方）: `foo(1);` 16 kB の元のパース 512 ms（エラー 1 件 = 全体が 1 文）、
+  全セミコロンを書き換えた版 48 ms。1 行ずつの候補は元と同じく 1 文のままなので約 0.5 秒ずつかかる。
+  レビュー役の補足「`CONCATENATE 'a' 'b'` のまとめ候補が元の 80 倍」は再現しなかった（元 39 ms、全行にピリオド 17 ms）
+- M-A Tailwind v4 は `docs/superpowers/*.md` も走査するので、計画に写したコードの文字列が基準 CSS に先に入り、CSS 比較が新しいクラスを検出できない（今の実害は 0 と実測）→ 基準も最終も `docs/superpowers` を外してビルド
+- L-a ワーカーの `isError` が `errorIssues` と別の定義のまま → Task 3 Step 3 で `errorIssues(issues)` に
+- L-b `SyntaxRepair.line`（`src/types/diagnostics.ts`）と `RepairCandidate.line`（`syntaxRepair.ts:129-139`）のコメントが二重引用符の話だけ
+- L-c `;` だけのプログラム → semicolon line 1、`WRITE 'a' COLOR` → missing_period（事実としては正しいが先で壊れたまま）。任意
