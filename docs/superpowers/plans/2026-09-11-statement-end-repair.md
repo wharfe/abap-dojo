@@ -765,3 +765,44 @@ git diff --stat origin/main -- src/workers/syntaxRepair.test.ts
 git add CLAUDE.md src/utils/analytics.ts
 git commit -m "syntax_repair の文書に statement-end の 2 種と厳しい判定の理由を書く (#67)"
 ```
+
+---
+
+## Gate2 記録（1 周目・2026-09-11）— **この計画は未修正。次のセッションはここから始める**
+
+fresh サブエージェント（general-purpose）による敵対レビュー。critical 0 / high 2 / medium 4 / low 4。
+計画のコードを一時ファイルに写して実 abaplint で動かし、単体テスト 30 件はそのまま緑だった。
+誤ヒント・ソース送信・`syntax_error`/`transpile_error` の分離破壊は、58 入力で見つからなかった。
+
+### 実行前に直す（high）
+
+- **H1（レビュー役が実測）** 64 kB 入力で探索が合計約 16.8 秒。`lv = |a#| && 'b' "c";` の繰り返しで
+  二重引用符 11 回 8466 ms + 新探索 13 回 7739 ms。`WRITE 'value#';` の繰り返しで新探索 9334 ms。
+  20 秒のウォッチドッグ（`App.tsx:626-628`）が先に `stalled` を出し、後から届く結果は捨てられる
+  （`App.tsx:196-210`）。仕様の 413 ms は 300 行の値で、最悪ケースではない。コストは「文字数 × 回数」。
+  → 3 種で共有する上限（経過時間またはパース回数）を入れ、64 kB で測り直す。上限の決め方はユーザー判断に回すか検討
+- **H2（ソース読解のみ）** Task 3 Step 5 の grep は成功行も数えるので、期待値 10 が「変異が効かず全件成功」と一致する。
+  → `✘` 行だけ数え、期待値 10 にする
+
+### 同じ周回で直す（medium）
+
+- **M1（実測）** まとめ候補の targets が全エラーの行（`rowsOf(spans)`）なので、無関係なエラーが別の行に 1 つあると
+  連続ピリオド抜け・連続セミコロンが黙る（`WRITE 'a'` ⏎ `WRITE 'b'` ⏎ `WRITE 'c'.` ⏎ `WRTE 'd'.`）。
+  → targets を「実際に書き換えた行を含むスパン」に絞る。テストを足す
+- **M2（実測）** 「ヒントなし」9 件のうち、厳しい判定が効いているのは `console.log('a')` と `console.log('a');` の 2 件だけ。
+  コメント「the quiet ones are the reason the rule is stricter」は誤り。58 入力で、厳しい判定が止めた誤ヒントは 2 件・
+  止めてしまった正ヒントは 2 件（M1）。この損得を仕様に書く
+- **M3（実測）** 所要時間の測定手順は動かない: `npx vitest` はフック G2 が拒否する（`./node_modules/.bin/vitest` を使う）。
+  この repo の vitest では `console.log` が出ない（ファイルに書く）。入力も H1 の最悪ケースになっていない
+- **M4** 変更後に偽になる記述が計画の対象外にある: `syntaxRepair.ts:81`（eleven parses）/ `:92`（~138 ms）、
+  `CLAUDE.md:688-689`（sibling と同じ 10 候補）、`abaplintWorker.ts:93-102`（findSyntaxRepair だけに言及）
+
+### low（任意）
+
+- L1 連続ピリオド抜けに複数行の文が混ざると見逃す（`lv = to_upper(` ⏎ `'a' )` ⏎ `WRITE lv`）。2 種混在も黙る
+- L2 Task 4 Step 1 の CLAUDE.md 置換文は、字義どおり当てると文とダッシュが重複する
+- L3 `return;` / `break;` → semicolon、`exit` → missing_period（直せば通るので内容は正しい）。
+  セミコロンが複数あるのに 1 つを名指しすると「the one」が唯一に読める
+- L4 CSS 比較は仕様・計画の文言を構造上検出できない（実害なし: 両ファイルの有無で CSS は同一と実測）
+
+CSS の基準: 変更ゼロのツリーで取得済み（CSS 24,900 B、`index-*.js` 376,062 B）。ただし `/tmp/before.css` はセッションをまたぐと消えうるので、次回は取り直す。
