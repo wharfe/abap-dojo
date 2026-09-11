@@ -4,7 +4,7 @@
 
 **Goal:** Run が構文エラーで失敗したとき、ピリオド抜けと行末セミコロンについて「何を直せば通るか」を 1 行で出し、GA4 の `syntax_repair` に `missing_period` / `semicolon` を送る。
 
-**Architecture:** #69 の方式（書き換えた版を abaplint に再パースさせ、判定が良くなった書き換えだけ採る）を新ファイル `src/workers/statementEndRepair.ts` に作る。二重引用符の `findSyntaxRepair` は一切変えず、それが何も見つけなかったときだけ新しい探索を試す。新しい 2 種は「件数が減り、かつ対象にしたエラー行範囲から始まるエラーが残らない」ときだけ採用する。
+**Architecture:** #69 の方式（書き換えた版を abaplint に再パースさせ、判定が良くなった書き換えだけ採る）を新ファイル `src/workers/statementEndRepair.ts` に作る。二重引用符の `findSyntaxRepair` は一切変えず、それが何も見つけなかったときだけ新しい探索を試す。新しい 2 種は「件数が減り、かつ対象にしたエラー行範囲から始まるエラーが残らない」ときだけ採用する。探索する大きさの上限（`MAX_SOURCE_CHARS`）は 64 kB → 16 kB に下げ、既存の二重引用符・`silent_loss` の探索にも同時に効かせる（Gate2 H1 / #75。仕様 Q6）。
 
 **Tech Stack:** TypeScript, `@abaplint/core`, `@abaplint/transpiler`（config）, Vitest, Playwright
 
@@ -12,10 +12,10 @@
 
 ## Global Constraints
 
-- 既存の `src/workers/syntaxRepair.test.ts` は**1 文字も変えない**（二重引用符の結果が変わらないことの証拠）。`syntaxRepair.ts` の変更は定数 2 つの `export` 追加だけ
+- 既存の `src/workers/syntaxRepair.test.ts` は**1 文字も変えない**（16 kB 以下で二重引用符の結果が変わらないことの証拠。既存の大きさのテスト 2 件は 64 kB 超の入力なので、16 kB 化の後も緑のまま）。`syntaxRepair.ts` の変更は、定数 2 つの `export`・`MAX_SOURCE_CHARS` の値（64 → 16 kB）・その 2 定数のコメントだけ
 - 送るのは列挙値だけ。`line` は画面表示専用で送らない
 - 探索は Run の失敗時だけ（`handleTranspile` の `errors.length > 0` 分岐）。`handleLint` には入れない
-- 64 kB 超のソースは探さない（`MAX_SOURCE_CHARS`）。種類ごとに行候補は最大 10（`MAX_CANDIDATES`）+ まとめ候補 1
+- 16 kB 超のソースは探さない（`MAX_SOURCE_CHARS`。64 kB から下げる — Gate2 H1 / #75。失敗側の 3 種と成功側の `silent_loss` が同じ定数を共有する。経過時間や文字数合計の上限は入れない — 仕様 Q6）。種類ごとに行候補は最大 10（`MAX_CANDIDATES`）+ まとめ候補 1
 - 候補の再パースが投げたら `undefined` を返す（`syntax_error` の判定を `transpile_error` に変えない）
 - 試す順: 二重引用符（既存）→ `semicolon` → `missing_period`
 - ヒント文言は固定文。行番号以外にユーザー由来の値を入れない。Tailwind のユーティリティ名になる英単語を裸で書かない（#44。CSS ratchet で確認）
@@ -156,7 +156,7 @@ git commit -m "ピリオド抜けとセミコロンのヒント文言と列挙�
 ### Task 2: 候補生成と探索（`statementEndRepair.ts`）
 
 **Files:**
-- Modify: `src/workers/syntaxRepair.ts:85,98`（`const MAX_CANDIDATES` / `const MAX_SOURCE_CHARS` を `export const` に。他は変えない）
+- Modify: `src/workers/syntaxRepair.ts:69-98`（`MAX_CANDIDATES` / `MAX_SOURCE_CHARS` を `export const` に、`MAX_SOURCE_CHARS` を `16 * 1024` に、両定数のコメントを実測に合わせて書き直す。他は変えない）
 - Create: `src/workers/statementEndRepair.ts`
 - Create: `src/workers/statementEndRepair.test.ts`
 
@@ -184,6 +184,7 @@ import {
   findStatementEndRepair,
   statementEndCandidates,
 } from "./statementEndRepair";
+import { doubleQuoteCandidates, findSilentLoss } from "./syntaxRepair";
 
 /** The worker's own configuration — see the note in syntaxRepair.test.ts. */
 const config = new Config(JSON.stringify(transpilerConfig));
@@ -252,9 +253,58 @@ describe("statementEndCandidates", () => {
     expect(statementEndCandidates("semicolon", source, spans)).toHaveLength(11);
   });
 
+  it("narrows the rewrite-everything candidate to the errors it rewrote", () => {
+    // An unrelated error elsewhere survives any rewrite, so making it a target
+    // would reject a real repair (Gate2 M1).
+    const candidates = statementEndCandidates(
+      "missing_period",
+      `REPORT z.\nWRITE 'a'\nWRITE 'b'\nWRITE 'c'.\nWRTE 'd'.`,
+      [
+        { start: 2, end: 3 },
+        { start: 5, end: 5 },
+      ],
+    );
+    expect(candidates.at(-1)).toEqual({
+      source: `REPORT z.\nWRITE 'a'.\nWRITE 'b'.\nWRITE 'c'.\nWRTE 'd'.`,
+      targets: [2, 3],
+    });
+  });
+
   it("does not search a source too large to search cheaply", () => {
-    const source = `WRITE 'a';\n`.repeat(7000);
+    const source = `WRITE 'a';\n`.repeat(1500);
+    expect(source.length).toBeGreaterThan(16 * 1024);
     expect(statementEndCandidates("semicolon", source, [{ start: 1, end: 1 }])).toEqual([]);
+  });
+});
+
+/**
+ * #75: every search shares one size cap, lowered from 64 kB. One parse of a
+ * paste that is a single long statement grows far faster than its length
+ * (116 ms at 16 kB, 2,642 ms at 64 kB in Node, 2026-09-11), so at 64 kB the
+ * double-quote search alone took 12.8 s in Firefox, and the statement-end
+ * search behind it would have pushed a real syntax error past the watchdog.
+ */
+describe("the size cap every search shares", () => {
+  const under = `WRITE "a".\n`.repeat(1489);
+  const over = `WRITE "a".\n`.repeat(1490);
+
+  it("sits at 16 kB", () => {
+    expect(under.length).toBeLessThanOrEqual(16 * 1024);
+    expect(over.length).toBeGreaterThan(16 * 1024);
+    expect(doubleQuoteCandidates(under)).not.toEqual([]);
+    expect(doubleQuoteCandidates(over)).toEqual([]);
+  });
+
+  it("stops the silent-loss search too, and reports that it did not look", async () => {
+    let parses = 0;
+    const counting = () => {
+      parses++;
+      return Promise.resolve({ errors: 0, real: 1 });
+    };
+    await expect(
+      findSilentLoss(over, { errors: 0, real: 1 }, counting),
+    ).resolves.toEqual({ completed: false });
+    expect(parses).toBe(0);
   });
 });
 
@@ -297,8 +347,10 @@ describe("findStatementEndRepair search", () => {
 
 /**
  * abaplint is the judge. Every row here was checked against the real parser
- * while writing the spec (2026-09-11); the quiet ones are the reason the
- * acceptance rule is stricter than the double quote's.
+ * (2026-09-11). Most of the quiet ones would stay quiet under a plain count
+ * too: only the two `console.log` rows depend on the stricter acceptance rule,
+ * and the last test below is a real repair that rule gives up. The spec
+ * records that trade.
  */
 describe("findStatementEndRepair against the real parser", () => {
   it.each([
@@ -341,6 +393,13 @@ describe("findStatementEndRepair against the real parser", () => {
     });
   });
 
+  it("finds consecutive missing periods beside an unrelated error", async () => {
+    // Gate2 M1: silent while the rewrite-everything candidate targeted row 5.
+    expect(
+      await repairOf(`REPORT z.\nWRITE 'a'\nWRITE 'b'\nWRITE 'c'.\nWRTE 'd'.`),
+    ).toEqual({ kind: "missing_period" });
+  });
+
   it.each([
     ["a misspelt keyword", `REPORT z.\nWRTE 'a'.`],
     ["pasted JavaScript", `REPORT z.\nconsole.log('a')`],
@@ -360,19 +419,52 @@ describe("findStatementEndRepair against the real parser", () => {
     // decision rather than a surprise.
     expect(await repairOf(`REPORT z.\nWRITE 'a' " note`)).toBeUndefined();
   });
+
+  it("cannot reach semicolons abaplint merges into one error with a misspelt keyword", async () => {
+    // abaplint reports rows 2-4 as ONE error, so the misspelt row is a target
+    // of every rewrite and its surviving error rejects each of them. Pinned:
+    // this is the real repair the stricter rule costs.
+    expect(await repairOf(`REPORT z.\nWRITE 'a';\nWRITE 'b';\nWRTE 'd'.`)).toBeUndefined();
+  });
 });
 ```
 
 - [ ] **Step 2: 赤を確認** — Run: `npm test -- src/workers/statementEndRepair.test.ts`
   Expected: FAIL（`Failed to resolve import "./statementEndRepair"`）
 
-- [ ] **Step 3: 定数を export する** — `src/workers/syntaxRepair.ts`
+- [ ] **Step 3: 定数を export し、大きさの上限を 16 kB に下げる** — `src/workers/syntaxRepair.ts`
 
+`MAX_CANDIDATES` のコメントの「The cap bounds the worst case (a program with a quote on every line) at eleven parses of a Playground-sized program.」の 2 行を次に置き換え、定数に `export` を付ける:
+
+```ts
+ * The cap bounds each search at eleven parses: ten candidates plus the one
+ * that rewrites everything. On the failure path the statement-end search
+ * (statementEndRepair.ts, #67) reuses it for two more kinds, so a failing Run
+ * re-parses at most 33 times after the original.
+```
 ```ts
 export const MAX_CANDIDATES = 10;
 ```
+
+`MAX_SOURCE_CHARS` のコメント本文（「Above this many characters」の次の段落から `*/` の前まで）と値を次に置き換える:
+
 ```ts
-export const MAX_SOURCE_CHARS = 64 * 1024;
+/**
+ * Above this many characters, do not search at all.
+ *
+ * The candidate cap bounds the number of parses but not the work, and the
+ * work of one parse does not grow in proportion to the source. A paste whose
+ * quotes or semicolons swallow every period is one statement the length of
+ * the file: measured 2026-09-11 (Node), one parse of that shape took 116 ms at
+ * 16 kB and 2,642 ms at 64 kB — four times the text, over twenty times the
+ * work. At the old 64 kB cap the double-quote search alone took 12.8 s in
+ * Firefox, and the 20s watchdog ends the *display* without interrupting this
+ * worker, so a real `syntax_error` would be shown and counted as `stalled`
+ * (#75). At 16 kB, twelve parses of that shape took under a second in all
+ * three engines. Roughly 400 lines; a longer paste gets no hint and no
+ * `silent_loss`.
+ */
+export const MAX_SOURCE_CHARS = 16 * 1024;
 ```
 
 - [ ] **Step 4: 実装する** — `src/workers/statementEndRepair.ts`
@@ -500,7 +592,13 @@ export function statementEndCandidates(
   if (every.length > 1) {
     const edited = [...lines];
     for (const row of every) edited[row - 1] = edit(lines[row - 1]);
-    candidates.push({ source: edited.join("\n"), targets: rowsOf(spans) });
+    // Only the errors a rewritten row belongs to are targets. An unrelated
+    // error elsewhere survives any rewrite, so targeting it would reject a
+    // real repair.
+    const touched = spans.filter((span) =>
+      every.some((row) => span.start <= row && row <= span.end),
+    );
+    candidates.push({ source: edited.join("\n"), targets: rowsOf(touched) });
   }
 
   return candidates;
@@ -562,7 +660,7 @@ export async function findStatementEndRepair(
 
 ```bash
 git add src/workers/syntaxRepair.ts src/workers/statementEndRepair.ts src/workers/statementEndRepair.test.ts
-git commit -m "ピリオド抜けとセミコロンを再パースで探す (#67)"
+git commit -m "ピリオド抜けとセミコロンを再パースで探し、探索の大きさの上限を 16 kB に下げる (#67, #75)"
 ```
 
 ---
@@ -638,9 +736,22 @@ import {
 const errorRowsIn = errorRowCounter(abaplintConfig, SOURCE_FILENAME);
 ```
 
-103 行目を置き換え:
+93〜103 行目（`// Computed before the response is built` のコメントから `const repair = await findSyntaxRepair(...)` の行まで）を置き換え。古いコメントは `findSyntaxRepair` にしか触れておらず、変更後は偽になる（Gate2 M4）:
 
 ```ts
+      // Computed before the response is built, and both searches swallow
+      // their own parse failures, so this cannot reach the catch below: the
+      // syntax verdict is already correct at this point and a hint that fails
+      // must not turn it into a `transpile_error`.
+      //
+      // Costs a bounded number of extra parses — at most 11 for the double
+      // quote and 22 more for the statement end, none above MAX_SOURCE_CHARS —
+      // and only on the Run path after a failure the user is already waiting
+      // on. Never on `lint`, which runs on every keystroke. It is not scoped
+      // to the parse-failure keys: any Error-severity outcome gets the search,
+      // which is a superset of what can ever match and one fewer rule to keep
+      // in step with abaplint.
+      //
       // The double quote is tried first and unchanged; the statement-end search
       // (#67) only runs when it found nothing, so what `double_quote` reports
       // cannot move.
@@ -667,11 +778,14 @@ assert s.count(old) == 1, 'wiring not found'
 open(p,'w').write(s.replace(old, 'findStatementEndRepair(source, errors.map(errorSpanOf).slice(0, 0), errorRowsIn)'))
 PY
 npx playwright test e2e/syntaxHint.spec.ts --project=chromium --grep "missing period|semicolon used" --repeat-each=5 > /tmp/mutant.log 2>&1; echo "MUTANT_EXIT=$?"
-sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -cE '✘|\[chromium\] › .* (missing period|semicolon used)'
+sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -c '✘'
+sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -c '✓'
+sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -E '^\s+[0-9]+ (failed|passed)'
 grep -c 'was not able to start\|error TS' /tmp/mutant.log
 cp /tmp/worker.bak src/workers/abaplintWorker.ts && git diff --stat src/workers/abaplintWorker.ts
 ```
-  Expected: `MUTANT_EXIT` が非 0、失敗行が 10 件、**`was not able to start` / `error TS` が 0 件**（落ちた理由が期待値であってビルドではないこと）。復元後の diff は Step 3 の変更だけ
+  Expected: `MUTANT_EXIT` が非 0、**`✘` の行が 10 件・`✓` の行が 0 件**、集計行が `10 failed` だけ、**`was not able to start` / `error TS` が 0 件**（落ちた理由が期待値であってビルドではないこと）。復元後の diff は Step 3 の変更だけ。
+  成功行も数える grep だと「変異が効かず全件成功」も 10 件になり、区別できない（Gate2 H2）。`✘` と `✓` を別々に数えるのはそのため
 
 - [ ] **Step 6: Commit**
 
@@ -688,12 +802,22 @@ git commit -m "Run の構文エラーにピリオド抜けとセミコロンの�
 - Modify: `CLAUDE.md`（`### syntax_repair says what to change` 節）
 - Modify: `src/utils/analytics.ts:117-123`（`syntax_repair` のコメント）
 
-- [ ] **Step 1: CLAUDE.md を更新** — 「It is an enum with one member today, `double_quote`, so unlike the three parameters above it needs no membership test」を次に置き換え:
+- [ ] **Step 1: CLAUDE.md を更新**（5 か所。どれも「旧」と完全一致する範囲だけを置き換える。旧の文が行をまたぐので、1 文だけ当てると前後が重複する — Gate2 L2。行番号は編集前のもので、(a) を当てると後ろがずれるので、旧の文面で探す）
+
+(a) 533〜535 行。旧:
+
+```md
+one-line edit would have made the parse succeed. It is an enum with one member
+today, `double_quote`, so unlike the three parameters above it needs no
+membership test — nothing the user writes can reach the wire through it.
+```
+
+新:
 
 ```md
 one-line edit would have made the parse succeed. It is an enum —
 `double_quote`, `semicolon`, `missing_period` — so unlike the three parameters
-above it needs no membership test — nothing the user writes can reach the wire
+above it needs no membership test: nothing the user writes can reach the wire
 through it.
 
 **The two statement-end kinds (#67) use a stricter acceptance rule than
@@ -701,50 +825,195 @@ through it.
 almost any line look like a finished statement: `console.log('a')` is two
 errors on one row and a period turns it into one, so "the count went down"
 would tell someone who pasted JavaScript that they forgot a period. They are
-kept only if the count went down **and** no error is left on a row they
-targeted (`src/workers/statementEndRepair.ts`). `double_quote` keeps the plain
-count, because its data has been flowing since 2026-09-08 and changing what it
-reports would break the comparison across that date. The same strictness is
-why their hints state the fix flatly while `double_quote`'s stays conditional.
-The search order is `double_quote` → `semicolon` → `missing_period`, first hit
-wins. Known limit: a missing period hidden behind an end-of-line comment
-(`WRITE 'a' " note`) is out of reach — the appended period lands in the comment.
+kept only if the count went down **and** no error is left starting on a row
+of an error they rewrote (`src/workers/statementEndRepair.ts`). The rule has a
+price, and it is measured: over 58 probe inputs it stopped two wrong hints
+(both pasted `console.log`), and a later probe found a real repair it gives
+up — consecutive semicolons that abaplint merges into a single error with a
+misspelt keyword on the next row, pinned in `statementEndRepair.test.ts`. `double_quote` keeps the
+plain count, because its data has been flowing since 2026-09-08 and changing
+what it reports would break the comparison across that date. The same
+strictness is why their hints state the fix flatly while `double_quote`'s
+stays conditional. The search order is `double_quote` → `semicolon` →
+`missing_period`, first hit wins. Known limit: a missing period hidden behind
+an end-of-line comment (`WRITE 'a' " note`) is out of reach — the appended
+period lands in the comment.
 ```
 
-同節の「Reading it」段落の末尾に 1 文追加:
+(b) 611〜615 行。旧:
+
+```md
+The search costs a bounded number of extra parses, and only on the Run path
+after a failure — never on `lint`, which fires on every keystroke. It is
+skipped entirely above 64 kB of source: the candidate cap bounds the parses
+but not the work, and the 20s watchdog ends the *display* without interrupting
+this worker, so an unbounded search would outlive the run it belonged to.
+```
+
+新:
+
+```md
+The search costs a bounded number of extra parses — at most 33 across the
+three kinds — and only on the Run path after a failure, never on `lint`,
+which fires on every keystroke. It is skipped entirely above 16 kB of source
+(`MAX_SOURCE_CHARS`; 64 kB until #75). The candidate cap bounds the parses but
+not the work, and the work of one parse grows far faster than the source: a
+paste that is one long statement took 116 ms to parse at 16 kB and 2,642 ms at
+64 kB (Node, 2026-09-11), and at 64 kB the double-quote search alone took
+12.8 s in Firefox. The 20s watchdog ends the *display* without interrupting
+this worker, so past it a real `syntax_error` is shown and counted as
+`stalled`. A paste over 16 kB — roughly 400 lines — gets no hint.
+```
+
+(c) 620 行（`compare it against \`syntax_statement = WRITE\` over the same period.`）の直後に追記:
 
 ```md
 Since #67 the three kinds split the `WRITE` bucket three ways, so compare
 their sum against `syntax_statement = WRITE`, not `double_quote` alone.
 ```
 
-- [ ] **Step 2: analytics.ts のコメントを更新** — 「An enum with a single member today (`double_quote`), so unlike」を「An enum (`double_quote`, `semicolon`, `missing_period`), so unlike」に置き換え
+(d) 653 行の `a source over 64 kB,` を `a source over 16 kB (64 kB until #75, so absence rises slightly across that release),` に置き換え
 
-- [ ] **Step 3: 最悪ケースの所要時間を 1 回測る**（コミットしない一時テスト）
+(e) 688〜689 行。旧:
+
+```md
+succeeds or throws. It costs the same bounded number of extra parses as its
+sibling (10 candidates, skipped above 64 kB), but unlike its sibling it runs on
+```
+
+新:
+
+```md
+succeeds or throws. It searches the same candidates as the double-quote repair
+(10 plus one that rewrites every pair, skipped above 16 kB), but unlike that
+search it runs on
+```
+
+- [ ] **Step 2: analytics.ts のコメントを更新** — 旧:
+
+```ts
+     * the parse succeed, when one did. An enum with a single member today
+     * (`double_quote`), so unlike the three parameters above it needs no
+```
+
+新:
+
+```ts
+     * the parse succeed, when one did. An enum (`double_quote`, `semicolon`,
+     * `missing_period`), so unlike the three parameters above it needs no
+```
+
+- [ ] **Step 3: 上限ちょうどの最悪ケースの所要時間を測る**（コミットしない。Node と 3 ブラウザ）
+
+入力は Gate2 H1 で重いと分かった形（ファイル全体が 1 つの文になる形）を `MAX_SOURCE_CHARS` ちょうどまで並べたもの。
+300 行の貼り付けは最悪ケースではない（Gate2 M3）。
+
+Node — `npx vitest` はフック G2 が拒否するので `./node_modules/.bin/vitest` を使う。この repo の vitest は
+`console.log` を出さないので結果はファイルに書く:
 
 ```bash
 cat > src/workers/perf.tmp.test.ts <<'TS'
 import { it } from "vitest";
+import { writeFileSync } from "node:fs";
 import { Buffer } from "buffer";
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 import { Config, Registry, MemoryFile } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
-import { errorCounter, countErrors, findSyntaxRepair } from "./syntaxRepair";
+import { errorCounter, countErrors, findSyntaxRepair, MAX_SOURCE_CHARS } from "./syntaxRepair";
 import { errorRowCounter, errorSpanOf, findStatementEndRepair } from "./statementEndRepair";
-it("worst case", async () => {
+
+it("worst case at the size cap", async () => {
   const config = new Config(JSON.stringify(transpilerConfig));
-  const source = "REPORT z.\n" + Array.from({ length: 300 }, (_, i) => `console.log("x${i}");`).join("\n");
-  const reg = new Registry(config); reg.addFile(new MemoryFile("ztest.prog.abap", source)); await reg.parseAsync();
-  const issues = reg.findIssues(); const errors = issues.filter((i) => i.getSeverity().toString() === "Error");
-  const t0 = performance.now();
-  const repair = (await findSyntaxRepair(source, countErrors(issues), errorCounter(config, "ztest.prog.abap")))
-    ?? (await findStatementEndRepair(source, errors.map(errorSpanOf), errorRowCounter(config, "ztest.prog.abap")));
-  console.log(`PERF errors=${errors.length} search_ms=${(performance.now() - t0).toFixed(0)} repair=${JSON.stringify(repair)}`);
-}, 120_000);
+  const file = "ztest.prog.abap";
+  const shapes: Record<string, string> = {
+    dq: `lv = |a#| && 'b' "c";\n`,
+    dqAll: `lv = |a#| && 'b' 'c';\n`,
+    semi: `WRITE 'value#';\n`,
+    period: `WRITE 'a'\n`,
+    js: `console.log("x");\n`,
+  };
+  const rows: string[] = [];
+  let worstParse = 0;
+  for (const [name, line] of Object.entries(shapes)) {
+    const source = line.repeat(Math.floor(MAX_SOURCE_CHARS / line.length));
+    const t0 = performance.now();
+    const reg = new Registry(config);
+    reg.addFile(new MemoryFile(file, source));
+    await reg.parseAsync();
+    const issues = reg.findIssues();
+    const errors = issues.filter((i) => i.getSeverity().toString() === "Error");
+    const parseMs = performance.now() - t0;
+    worstParse = Math.max(worstParse, parseMs);
+    let parses = 0;
+    const count = errorCounter(config, file);
+    const rowsIn = errorRowCounter(config, file);
+    const t1 = performance.now();
+    const repair =
+      (await findSyntaxRepair(source, countErrors(issues), (c) => (parses++, count(c)))) ??
+      (await findStatementEndRepair(source, errors.map(errorSpanOf), (c) => (parses++, rowsIn(c))));
+    rows.push(
+      `${name} chars=${source.length} errors=${errors.length} parse_ms=${parseMs.toFixed(0)} ` +
+        `search_parses=${parses} search_ms=${(performance.now() - t1).toFixed(0)} repair=${JSON.stringify(repair)}`,
+    );
+  }
+  rows.push(`bound_ms=${(worstParse * 34).toFixed(0)} (worst single parse x 34)`);
+  writeFileSync("/tmp/perf.txt", rows.join("\n") + "\n");
+}, 300_000);
 TS
-npx vitest run src/workers/perf.tmp.test.ts 2>&1 | grep PERF; rm src/workers/perf.tmp.test.ts
+./node_modules/.bin/vitest run src/workers/perf.tmp.test.ts > /tmp/perf.log 2>&1; echo "PERF_EXIT=$?"
+cat /tmp/perf.txt; rm src/workers/perf.tmp.test.ts; git status --short src/workers
 ```
-  Expected: `PERF` の行が 1 つ出る。`repair` の値は問わない（二重引用符入りの貼り付けなので #69 の探索が何か返す可能性がある）。`search_ms` を PR 本文に書く
+
+ブラウザ — 本番ビルドで Run を押してからエラー表示までを 3 エンジンで測る（Node とブラウザの比は形によって 0.3〜1 倍と一定しない）:
+
+```bash
+cat > /tmp/browser-perf.mjs <<'JS'
+import { chromium, firefox, webkit } from "/home/feathach/dev/abap-dojo/node_modules/playwright/index.mjs";
+import pako from "/home/feathach/dev/abap-dojo/node_modules/pako/dist/pako.esm.mjs";
+const CAP = 16 * 1024;
+const encode = (s) => Buffer.from(pako.deflate(new TextEncoder().encode(s)))
+  .toString("base64").replace(/\+/g, "-").replace(/\//g, "_");
+const fill = (line) => line.repeat(Math.floor(CAP / line.length));
+const SOURCES = { dq: fill(`lv = |a#| && 'b' "c";\n`), semi: fill(`WRITE 'value#';\n`) };
+const URL = "http://localhost:4173/";
+for (let i = 0; i < 60; i++) {
+  try { await fetch(URL); break; } catch { await new Promise((r) => setTimeout(r, 1000)); }
+}
+const out = [];
+for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
+  const browser = await engine.launch();
+  for (const [label, source] of Object.entries(SOURCES)) {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${URL}#code=${encode(source)}`);
+      const run = page.getByRole("button", { name: /Run/i });
+      await run.waitFor({ timeout: 30_000 });
+      await page.waitForTimeout(8_000); // let the on-load lint parse finish first
+      const t0 = Date.now();
+      await run.click();
+      const end = page.getByText(/Syntax error|stopped responding/i).first();
+      await end.waitFor({ timeout: 40_000 });
+      const text = (await end.textContent()) ?? "";
+      out.push({ name, label, chars: source.length, ms: Date.now() - t0, stalled: /stopped responding/i.test(text) });
+    } catch (e) {
+      out.push({ name, label, error: String(e).slice(0, 160) });
+    }
+    await page.close();
+  }
+  await browser.close();
+}
+console.log(JSON.stringify(out));
+JS
+npm run build > /tmp/build.log 2>&1; echo "BUILD=$?"
+./node_modules/.bin/vite preview --port 4173 --strictPort > /tmp/preview.log 2>&1 &
+echo $! > /tmp/preview.pid
+node /tmp/browser-perf.mjs > /tmp/browser-perf.json 2>&1; echo "BROWSER_EXIT=$?"
+cat /tmp/browser-perf.json
+kill "$(cat /tmp/preview.pid)"
+```
+  Expected: `PERF_EXIT=0`・`BROWSER_EXIT=0`。Node の `bound_ms` と、ブラウザ 6 件の `ms` がすべて **5,000 未満**、`stalled` がすべて `false`、`error` が 0 件。
+  超えたら**上限の値を自分で変えずに止めて**ユーザーに報告する（上限の決め方は仕様 Q6 でユーザーが決めた）。
+  Node の各行とブラウザ 6 件を PR 本文に表で書く
 
 - [ ] **Step 4: 全体検証**
 
@@ -763,12 +1032,15 @@ git diff --stat origin/main -- src/workers/syntaxRepair.test.ts
 
 ```bash
 git add CLAUDE.md src/utils/analytics.ts
-git commit -m "syntax_repair の文書に statement-end の 2 種と厳しい判定の理由を書く (#67)"
+git commit -m "syntax_repair の文書に statement-end の 2 種・厳しい判定の理由・16 kB の上限を書く (#67, #75)"
 ```
+
+PR 本文で #75 を閉じる。#67 は「WRITE バケツの 3 形」全体の issue なので、自動クローズ語を付けるかは
+`gh` を打つ前に skill `github-issues` を読んで決める。
 
 ---
 
-## Gate2 記録（1 周目・2026-09-11）— **この計画は未修正。次のセッションはここから始める**
+## Gate2 記録（1 周目・2026-09-11）— 末尾の「1 周目の反映」で計画に反映済み
 
 fresh サブエージェント（general-purpose）による敵対レビュー。critical 0 / high 2 / medium 4 / low 4。
 計画のコードを一時ファイルに写して実 abaplint で動かし、単体テスト 30 件はそのまま緑だった。
@@ -806,3 +1078,40 @@ fresh サブエージェント（general-purpose）による敵対レビュー�
 - L4 CSS 比較は仕様・計画の文言を構造上検出できない（実害なし: 両ファイルの有無で CSS は同一と実測）
 
 CSS の基準: 変更ゼロのツリーで取得済み（CSS 24,900 B、`index-*.js` 376,062 B）。ただし `/tmp/before.css` はセッションをまたぐと消えうるので、次回は取り直す。
+
+### 1 周目の反映（2026-09-11）
+
+**H1 — ユーザー判断: 探索する大きさの上限を 64 kB → 16 kB に下げ、#75 も同じ変更で直す（仕様 Q6）。**
+最初は「再パースした文字数の合計で上限」が選ばれたが、実測で「パースの重さは文字数に比例する」という前提が崩れたため、
+数字を示して再確認し、変更した。実測（Node は vitest 内で 1 回のパース、2 回のうち速い方）:
+
+| 1 行の中身を並べた形 | 16 kB | 32 kB | 64 kB |
+|---|---|---|---|
+| `lv = \|a#\| && 'b' "c";`（全体が 1 文） | 111 ms | 369 ms | 1,151 ms |
+| `lv = \|a#\| && 'b' 'c';`（まとめ候補の中身） | 69 ms | 273 ms | 2,642 ms |
+| `WRITE 'value#';`（全体が 1 文） | 116 ms | 315 ms | 1,431 ms |
+| `console.log("x");` | 37 ms | 66 ms | 122 ms |
+| `WRTE 'a'.`（行ごとにエラー） | 24 ms | 38 ms | 68 ms |
+
+ブラウザ（本番ビルド、`lv = |a#| && 'b' "c";` の形、Run → エラー表示。二重引用符探索 11 回＋元のパース）:
+16 kB で Chromium 862 / Firefox 942 / WebKit 864 ms、64 kB で 3,883 / 12,756 / 10,600 ms。stalled 0。
+→ Global Constraints、Task 2 Step 1（大きさの上限テスト）/ Step 3、Task 4 Step 1 (b)(d)(e) / Step 3
+
+**H2** → Task 3 Step 5（`✘` と `✓` を別々に数え、集計行も見る）
+
+**M1** → Task 2 Step 1（単体 1・実パーサ 1・届かない形の固定 1）/ Step 4（まとめ候補の targets を、書き換えた行を含むエラーだけに絞る）。
+実パーサで確認: `WRITE 'a'` ⏎ `WRITE 'b'` ⏎ `WRITE 'c'.` ⏎ `WRTE 'd'.` は絞る前は黙り、絞った後は `missing_period`。
+一方 `WRITE 'a';` ⏎ `WRITE 'b';` ⏎ `WRTE 'd'.` は abaplint が 2〜4 行を 1 つのエラーにまとめるため、絞っても黙る。
+「書き換えた行だけ」まで絞ると `console.log` の 2 行貼り付けで別行のエラーが対象から外れ、厳しい判定そのものが弱まるので、そこまではしない。
+既存の正例・負例 10 件は絞る前後で結果が同じ
+
+**M2** → 仕様「厳しい判定の損得」節、Task 2 Step 1 の実パーサ節のコメント、Task 4 Step 1 (a)
+
+**M3** → Task 4 Step 3（`./node_modules/.bin/vitest`、ファイル出力、上限ちょうどの重い形、ブラウザ 3 種）
+
+**M4** → `syntaxRepair.ts:81,92` は Task 2 Step 3、`CLAUDE.md:688-689` は Task 4 Step 1 (e)、`abaplintWorker.ts:93-102` は Task 3 Step 3。
+64 kB に触れる箇所は `grep -rn "64 kB\|64 \* 1024"` で数えた: `syntaxRepair.ts:95,98`、`CLAUDE.md:613,653,689`、
+`syntaxRepair.test.ts:133,576`（入力が 64 kB 超なので 16 kB 化の後も正しい。無修正）、仕様・計画・HANDOFF
+
+**L2** → Task 4 Step 1（旧と新を行単位で示す）。**L1 / L3 / L4 は対応しない**: L1 は誤ったヒントではなく届かない形、
+L3 は直せば通るので内容は正しい、L4 は実害なしと実測済み
