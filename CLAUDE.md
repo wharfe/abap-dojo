@@ -530,9 +530,29 @@ herring: all 20 real forms of the statement parse (`WRITE / x`,
 punctuation borrowed from another language.
 
 So `run_result` also carries `syntax_repair` on `syntax_error` **only**: which
-one-line edit would have made the parse succeed. It is an enum with one member
-today, `double_quote`, so unlike the three parameters above it needs no
-membership test — nothing the user writes can reach the wire through it.
+one-line edit would have made the parse succeed. It is an enum —
+`double_quote`, `semicolon`, `missing_period` — so unlike the three parameters
+above it needs no membership test: nothing the user writes can reach the wire
+through it.
+
+**The two statement-end kinds (#67) use a stricter acceptance rule than
+`double_quote`, and the difference is load-bearing.** Appending a period makes
+almost any line look like a finished statement: `console.log('a')` is two
+errors on one row and a period turns it into one, so "the count went down"
+would tell someone who pasted JavaScript that they forgot a period. They are
+kept only if the count went down **and** no error is left starting on a row
+of an error they rewrote (`src/workers/statementEndRepair.ts`). The rule has a
+price, and it is measured: over 58 probe inputs it stopped two wrong hints
+(both pasted `console.log`), and a later probe found a real repair it gives
+up — consecutive semicolons that abaplint merges into a single error with a
+misspelt keyword on the next row, pinned in `statementEndRepair.test.ts`.
+`double_quote` keeps the plain count, because its data has been flowing since
+2026-09-08 and changing what it reports would break the comparison across that
+date. The same strictness is why their hints state the fix flatly while
+`double_quote`'s stays conditional. The search order is `double_quote` →
+`semicolon` → `missing_period`, first hit wins. Known limit: a missing period
+concealed behind an end-of-line comment (`WRITE 'a' " note`) is out of reach —
+the appended period lands in the comment.
 
 **The value is produced by re-parsing, never by reading the line, and that is
 not a style preference.** A scanner that decides "comment or string?" from the
@@ -608,16 +628,73 @@ intent does, and we do not have it. This is why the hint offers the fix
 what the user meant: the misfire is then harmless to read. Do not "fix" that
 wording into a verdict.
 
-The search costs a bounded number of extra parses, and only on the Run path
-after a failure — never on `lint`, which fires on every keystroke. It is
-skipped entirely above 64 kB of source: the candidate cap bounds the parses
-but not the work, and the 20s watchdog ends the *display* without interrupting
-this worker, so an unbounded search would outlive the run it belonged to.
+**The search no longer sits between the user and the answer.** Since #75 the
+worker replies to a Run twice: the verdict first (`transpile-error` /
+`transpile-result`), then whatever the searches found, on a `syntax-hint` or
+`silent-loss` message carrying the same `requestId`. Before that split, a
+heavy paste could push the verdict past the 20s watchdog in `App.tsx` and a
+real `syntax_error` was shown and counted as `stalled`. Measured 2026-09-12
+against the production build (Chromium, 16 kB of `foo(1, "x");` on every row):
+the error reached the screen 247 ms after the Run while the worker stayed busy
+searching for another 3.3 s. `App.tsx` holds `run_result` until the follow-up
+lands, so the event is still one event with `syntax_repair` on it. Three
+outcomes do not wait, because nobody is looking at a verdict they could
+explain: `stalled` (the worker is by definition not answering), `stopped` (the
+user gave up, and their message is not in the error slot at all) and
+`cancelled` (the other mode took the sandbox). Those are sent at once, as
+before.
+
+Two consequences for reading the numbers. A `run_result` for a failing Run is
+now sent up to 20s after the run ended, so a closed tab can lose it — rare,
+and `pagehide` flushes what it can, but the 1:1 with `run_click` is no longer
+true by construction. And a hint can be SHOWN without being counted: if the
+follow-up arrives after that 20s backstop, the hint is still appended to the
+error on screen while `syntax_repair` is already gone with the event. Both
+only happen where a search ran long, so `syntax_repair` under-reports heavy
+pastes specifically — not at random.
+
+The search costs a bounded number of extra parses — at most 33 across the
+three kinds — and only on the Run path, never on `lint`, which fires on every
+keystroke. It is skipped entirely above 16 kB of source (`MAX_SOURCE_CHARS`;
+64 kB until #75). What the caps now protect is `lint`, not the outcome:
+abaplint's `parseAsync` does not yield to the event loop (0 macrotasks during
+a 1,220 ms parse, Node, 2026-09-12), so every keystroke's lint is frozen
+while a search runs. The candidate cap bounds the parses but not the work, and
+the work of one parse grows far faster than the source: `WRITE 'value#';` on
+every row took 120 ms to parse at 16 kB and 1,249 ms at 64 kB (Node,
+2026-09-12), and `x` on every row took 1.4 s at 16 kB and 9.4 s at 32 kB. So
+every search in a Run also shares a 3 s deadline
+(`src/workers/searchDeadline.ts`): once it has passed no new re-parse starts.
+Neither cap is a guarantee — the deadline cannot stop a parse already running,
+so the worst freeze measured is 5.0 s (Node, 2026-09-12: `x` on 8,192 rows, a
+search that ran 4.0 s past the first parse — and that first parse itself came
+out anywhere from 1.0 s to 1.4 s across runs, so read every number here as an
+order of magnitude and not a bound) — and since #75 neither needs to be:
+overrunning costs a hint and some editor latency, not a wrong `outcome`. A
+paste over 16 kB — roughly 400 lines — gets no hint at all.
 
 Reading it: filter by `outcome = syntax_error`, same trap as the rest. A
 falling `syntax_repair` share is the intended outcome (the hint reaches people
 and they stop making the mistake), which means it cannot be read on its own —
 compare it against `syntax_statement = WRITE` over the same period.
+
+Since #67 the three kinds split the `WRITE` bucket three ways, so compare
+their sum against `syntax_statement = WRITE`, not `double_quote` alone. A line
+with two of the mistakes at once (`WRITE "hello";`) gets no hint from any
+kind, so the sum undercounts what that bucket holds. One more caveat from
+#75: the 3 s deadline can cut a search short on a heavy paste, so
+`double_quote`'s own rate has a small discontinuity at that release too.
+
+**Heavy pastes depress the share the same way the hint working does, and
+nothing in the data separates the two.** Unlike `silent_loss`, this
+parameter has no `none` value and the `syntax-hint` message carries no
+"the search finished" flag, so a search cut off by the 3 s deadline, one whose
+answer missed the 20s backstop, and a Run where there was simply nothing to
+repair all arrive as the same absence. That is deliberate — the dimension's
+documented meaning is "the edit that made the parse succeed", and a `none`
+would have to stand for several unlike things at once — but it means a fall
+has to be read against the sum above and against the size of what people are
+pasting, not on its own.
 
 ### `silent_loss` sees the failure that leaves no trace at all
 
@@ -650,8 +727,13 @@ stay quiet because rewriting the pair in `* he said "hello"` or
    means it never ran, and the largest cause of that is **every `syntax_error`
    run** — about a third of all runs — because the worker answers those from
    the branch above and the search is never reached. The other causes are a
-   search that gave up part way, a source over 64 kB, and a run that ended
-   before the parse (`stalled`, or a Stop pressed before transpiling). So
+   search that gave up part way, a source over 16 kB (64 kB until #75, so
+   absence rises slightly across that release), a search cut off by the 3 s
+   search deadline, a run that ended before the parse (`stalled`, or a Stop
+   pressed before transpiling), a Stop pressed in the first seconds of
+   execution — since #75 the search runs alongside the program instead of
+   before it, and a stopped run does not wait for its answer — and a search
+   whose answer arrived after the 20 s backstop had already sent the event. So
    `(not set)` here is dominated by syntax errors: do not read it as "the run
    stalled", and do not compute a rate over all runs. Merge `none` into it and
    the denominator is gone entirely — the `(not set)` trap `transpile_node` is
@@ -683,16 +765,22 @@ told to filter by `outcome = syntax_error`. Nothing here failed to parse.
 Sharing the dimension would put two definitions behind one name, and GA4
 registration is not retroactive, so they could never be separated afterwards.
 
-The search runs on the Run path only, after a parse that produced no errors and
-before transpilation — so the answer exists whether the transpiler then
-succeeds or throws. It costs the same bounded number of extra parses as its
-sibling (10 candidates, skipped above 64 kB), but unlike its sibling it runs on
-runs that are going to *succeed*: measured 2026-09-08, +97 ms on a 165-line
-class with 40 ABAPDoc comments, +147 ms on 150 lines of end-of-line comments
-containing quote pairs. A pre-filter to avoid that was written and thrown away
-— it dropped three real shapes (a `WRITE:` header line with its operands
-below, a comment line inside a chain) and did not help the chained-declaration
-case anyway, which is the one this feature is about.
+The search runs on the Run path only, and only after a parse that produced no
+errors — but since #75 it runs AFTER transpilation and after the reply that
+carries the JS, on its own `silent-loss` message, so a successful Run starts
+executing before the search rather than after it. The answer still exists
+whether the transpiler succeeded or threw, because both exits are ahead of it.
+One consequence to know when reading the numbers: a Stop pressed in the
+seconds between the program starting and that message arriving now ends the
+run without waiting, so those runs report no `silent_loss` where they used to
+report one. It searches the same candidates as the double-quote repair (10
+plus one that rewrites every pair, skipped above 16 kB), but unlike that
+search it runs on runs that are going to *succeed*: measured 2026-09-08,
++97 ms on a 165-line class with 40 ABAPDoc comments, +147 ms on 150 lines of
+end-of-line comments containing quote pairs. A pre-filter to avoid that was
+written and thrown away — it dropped three real shapes (a `WRITE:` header line
+with its operands below, a comment line inside a chain) and did not help the
+chained-declaration case anyway, which is the one this feature is about.
 
 Only Playground is instrumented. `handleValidate` catches the same throws but
 `validate_result` carries no `transpile_reason`; that is a scope call, not an
