@@ -1,7 +1,7 @@
 # HANDOFF
 
 - 更新: 2026-09-12（Gate2 3 周目まで完了）
-- ブランチ: `feature/statement-end-repair`（**push 済み** = `7e35736`・PR 未作成）
+- ブランチ: `feature/statement-end-repair`（**push 済み**・PR 未作成。SHA は書かない — この行自身の commit で必ず古くなる）
 
 ## ゴール
 
