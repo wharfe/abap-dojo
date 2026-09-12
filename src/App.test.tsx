@@ -797,6 +797,40 @@ describe("App — the worker's follow-up message (#67/#75)", () => {
     ).toHaveLength(1);
   });
 
+  // The `pagehide` flush. It is the one flush path with nothing else standing
+  // behind it: the tab is going away, so the 20s backstop will never fire and
+  // no later Run will come along to push the parked result out. Also the path
+  // most easily broken in silence — `flushPendingResult` is handed to
+  // addEventListener directly, so an `Event` argument would type-check.
+  it("flushes the waiting result on pagehide", () => {
+    const { worker, requestId } = startRun();
+    deliverSyntaxVerdict(worker, requestId);
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(0);
+
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    const calls = trackMock.mock.calls.filter(([name]) => name === "run_result");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({ outcome: "syntax_error" });
+    // The follow-up never landed, so the parameters it carries are absent —
+    // the payload is the one the run parked, not a rebuilt one.
+    expect(calls[0][1]).not.toHaveProperty("syntax_repair", "missing_period");
+
+    // A second pagehide, and the backstop firing afterwards, must not add a
+    // second event for the one run_click.
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+      vi.advanceTimersByTime(20000);
+    });
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+  });
+
   // The tab was closed while a result was waiting. The event is lost by
   // design (不変条件 6 names this as the one loss); what must not happen is a
   // timer firing into an unmounted tree.

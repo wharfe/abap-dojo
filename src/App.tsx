@@ -363,11 +363,14 @@ function App() {
   );
 
   /**
-   * Take the #68 answer off a transpile reply.
+   * Take the #68 answer off the worker's `silent-loss` follow-up.
    *
-   * Called from inside each requestId guard, never outside one: a late reply
-   * from a superseded run would otherwise write its finding over the run the
-   * user is actually watching, which is the correlation bug #42/#50 exist for.
+   * Called from inside the `followUpRef` guard, never outside it: the answer
+   * arrives on its own message now (#67/#75), after `endRun` has already
+   * cleared `playgroundRequestIdRef`, so `followUpRef` is the ref that says
+   * which run this finding belongs to. A late reply from a superseded run
+   * would otherwise write its finding over the run the user is actually
+   * watching, which is the correlation bug #42/#50 exist for.
    *
    * `checked` false or absent means the search never ran, and the ref is left
    * `undefined` so the event omits the parameter rather than claiming `none`.
