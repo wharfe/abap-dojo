@@ -17,7 +17,7 @@
 - **1 回の `transpile` 要求に対して、ワーカーは必ず 2 通返す**（仕様 Q8・不変条件 5）。判定 → 追いかけ。探索が空振りでも、探索が走らなくても、追いかけの 1 通は必ず送る
 - **`duration_ms` は `endRun` が呼ばれた時点で確定させる**（仕様 不変条件 7）。送信を遅らせても数字の意味を変えない
 - **`run_click` と `run_result` は 1:1 のまま**（仕様 不変条件 6）。送るのが遅れるだけで落とさない
-- **`stalled` は追いかけを待たずその場で送る**（仕様 不変条件 10）
+- **`stalled` は追いかけを待たずその場で送る**（仕様 不変条件 8）
 - 探索は Run のときだけ。`handleLint` には一切入れない
 - 16 kB 超のソースはどの探索もしない（`MAX_SOURCE_CHARS`。64 kB から下げる）。種類ごとに行候補は最大 10（`MAX_CANDIDATES`）+ まとめ候補 1。加えて探索開始から `SEARCH_BUDGET_MS`（3 秒）を過ぎたら新しい再パースを始めない
 - 試す順: 二重引用符（既存）→ `semicolon` → `missing_period`
@@ -1143,7 +1143,10 @@ const errorRowsIn = errorRowCounter(abaplintConfig, SOURCE_FILENAME);
  */
 async function handleTranspile(source: string, requestId: string): Promise<void> {
   const reg = new Registry(abaplintConfig);
-  let issues: Issue[];
+  // `readonly`, not `Issue[]`: findIssues returns `readonly Issue[]`
+  // (abaplint.d.ts:4197). The current code infers it; annotating it by hand
+  // is what makes the mismatch visible (TS4104). Gate2 C1.
+  let issues: readonly Issue[];
   try {
     reg.addFile(new MemoryFile(SOURCE_FILENAME, source));
     await reg.parseAsync();
@@ -2482,3 +2485,85 @@ Task 1・2・2b・3 Step 3 を計画どおりに当てて `npm test` 465 件緑�
 **同じ根（上限で時間を抑えきれない）が 3 回。** 周回の規則により実装ではなく仕様へ戻り、
 「目的由来か手段由来か」を問い直して手段を替えた（仕様「手段を替えた理由」節）。
 **この計画で Gate2 を新しい周回（1 周目から）でやり直す。**
+
+---
+
+## Gate2 記録（手段 A 後・1 周目・2026-09-12）— critical 2 / high 3 / medium 4 / low 2
+
+fresh サブエージェント（general-purpose、opus）。計画の Task 1〜5 を scratch tree に実際に当てて
+`tsc -b` / ESLint / vitest を実行。**3 周つぶした根（上限で時間を保証できない）の再提起は 0 件** —
+手段を替えた判断はレビュー側でも支持された。
+
+### critical
+
+- **C1 計画のワーカーコードがコンパイルできない。** `let issues: Issue[];` が TS4104。
+  `findIssues()` は `readonly Issue[]` を返す（`abaplint.d.ts:4197`）。現行コードは推論に任せているので
+  問題が無く、**計画が明示的な注釈を足したことで初めて壊れる**。Task 4 Step 5・Task 5 Step 5・
+  Task 7 Step 5 の受け入れコマンドを全部止める
+  → **修正済み**（`readonly Issue[]` に変更。`abaplint.d.ts:4197` を自分でも確認）
+- **C2 `src/App.test.tsx`（615 行）が存在し、この変更で 4 件落ちる。計画は一度も言及していない。**
+  4 件とも根は 1 つで、FakeWorker が追いかけの 1 通を送らないため `run_result` が 0 件になる。
+  重いのは古いテストがあることではなく、**落ちた 4 件が不変条件 6（`run_click`/`run_result` 1:1）を
+  ピン留めしている唯一のスイート**であること。
+  → **未修正。仕様 239 行の「`App.tsx` には単体テストが無い（#17）ので e2e が唯一の証拠」は事実誤認**
+  （自分でも確認: `wc -l src/App.test.tsx` = 615、`grep -c runResultCalls` = 18）。
+  仕様と Task 6 の位置づけごと直す必要がある
+
+### high（すべて未修正）
+
+- **H1** 上の事実誤認のせいで、最も分岐の多い Task 5（App の状態機械）に赤→緑の証拠がほぼ無い。
+  `App.test.tsx` の FakeWorker は `onmessage` を直接叩けるので、「追いかけが来ないまま 20 秒」
+  「A の追いかけが B に付かない」「unmount 後にタイマーが発火しない」「`stalled` は待たない」は
+  数行で単体テストにできる
+- **H2 `stalled` の後、`data-search` が `pending` のまま二度と `done` にならない。**
+  `endRun` が `followUpRef` を空にしてから即送信するので、後から届く追いかけが捨てられ
+  `setSearchState("done")` に到達しない。`waitForSearchDone` は 30 秒待って落ちる。
+  踏むのは元のパースが 20 秒を超える入力 — **Task 6 Step 2 の `x⏎` × 8,192 がまさに狙っている形**
+- **H3 判定メッセージの組み立てが try の外に出た。** `new Registry(...)`・`first.getMessage()`・
+  `classifySyntaxError(...)` がどの try にも入っていない。ここが投げると `handleTranspile` が reject し、
+  **判定も追いかけも 0 通**になって App は 20 秒後に `stalled`。現行コードは全部 try の中にあり
+  `transpile_error` になる。CLAUDE.md が load-bearing と呼ぶ `transpile_error`/`stalled` の対が壊れ、
+  不変条件 5（必ず 2 通）もこの経路では 0 通
+
+### medium（すべて未修正）
+
+- **M1 `withDeadline` の包み忘れを検出する検証が 1 つも無い。** 3 か所のうちどれを外しても単体も e2e も全緑。
+  新周回 M2 への手当て（Task 6 Step 6）は検査を 1 か所増やしただけで、**Q7 の本体である期限の配線は依然無検証**
+- **M2 トランスパイル中に Stop を押した Run の `run_result` が最大 20 秒遅れる**ことが、計画にも仕様にも無い。
+  不変条件 6 の「落ちうるのはタブを閉じた Run だけ」の母数が「Stop を押した全 Run」に広がった
+- **M3 e2e の重い入力が上限ちょうど**（`x\n`.repeat(8192)` = 16,384 = `MAX_SOURCE_CHARS`）。
+  1 文字増えれば探索が走らず、テストが何も確かめなくなる。境界であることを固定するアサーションが無い
+- **M4** Global Constraints の「仕様 不変条件 10」は**不変条件 8** の誤り → **修正済み**
+
+### low（未修正）
+
+- **L1** `searchState` がモード切替でも Stop でも `idle` に戻らず、`done` が次の Run まで残る。
+  2 回 Run するテストを足した瞬間に `waitForSearchDone` が前の Run の `done` を読む（#70 と同じ形）
+- **L2** `flushPendingResult` は `followUpTimerRef` を消すが `followUpRef` を消さない。
+  今は二重送信にならないが、2 つの ref の寿命が揃っていない理由がどこにも書かれていない
+
+### 正しいと確認されたこと
+
+- **exact-match 27 箇所すべてが現ファイルにちょうど 1 回**（CLAUDE.md (a)〜(f)、`analytics.ts`、
+  `repairHint.ts`、`diagnostics.ts:142`、`syntaxRepair.test.ts:546`）。2 周目 L2 の対策は効いている
+- Task 1〜3 を当てて計画のテスト 4 ファイル **48 件全緑**。実パーサ 23 ケースは記載どおり
+- abaplint のエラースパンは前提どおり（`WRITE: 'a',⏎'b'` → `{2,3}`、`console.log('a')` → 同一行 2 件、
+  `semi+misspelt` → 2〜4 行が 1 件）。`errorSpanOf` + 「終わりの行」方式は正しい
+- `searchSizeCap.test.ts` は **AssertionError で赤**（import 失敗ではない）。2 周目 L-8 の手当ては機能
+- 既存 `syntaxRepair.test.ts` は 16 kB 化後も無修正で緑、アサーション差分ゼロ
+- 「必ず 2 通」は**探索まわりでは成立**。破れるのは H3 の経路だけ
+- 計画が挙げた「無効になる既存 e2e 4 件」の見立ては正しく、触っていない e2e に #70 型の欠陥は無い
+- Task 7 の測定は**合否が未測定の数値に乗っている箇所は無い**
+
+### 確認できなかったこと
+
+e2e は 1 件も実行していない（ビルド込みで長時間・ポート占有のため）。Task 6 Step 4〜6 の実効性と
+**H2 の顕在化**は机上判断のみ。Task 7 の測定スクリプトと Tailwind CSS 差分も未実行。
+
+### 次の周回の前にやること
+
+1. **仕様 239 行を直す**（`App.test.tsx` は存在する）。Task 6 の「e2e が唯一の証拠」を撤回し、
+   Task 5 に単体テストの Step を足す（H1 / C2）
+2. H2・H3 を直す（どちらも状態遷移・例外経路の穴で、実装前に計画で閉じられる）
+3. M1〜M3、L1〜L2 を計画に反映
+4. **2 周目**を fresh サブエージェントで回す（周回上限 3、いま 1 周目を消化）
