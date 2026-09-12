@@ -1,6 +1,6 @@
 # HANDOFF
 
-- 更新: 2026-09-12 11:35
+- 更新: 2026-09-12（Gate2 3 周目まで完了）
 - ブランチ: `feature/statement-end-repair`（push 済み・PR 未作成）
 
 ## ゴール
@@ -15,44 +15,51 @@ GA4 の `syntax_repair` に `missing_period` / `semicolon` を送る（#67 の�
 - 手段 A =「**判定を先に返し、ヒントは後から届ける**」。ワーカーの返信を 2 通に割り、20 秒のウォッチドッグの窓から
   探索を外す。これで探索がどれだけ遅くても `outcome` が嘘にならない（3 周つぶした根がここで消えた）
 - 仕様: `docs/superpowers/specs/2026-09-11-statement-end-repair-design.md`（Q1〜Q13、不変条件 1〜11）
-- 計画: `docs/superpowers/plans/2026-09-11-statement-end-repair.md`（Task 1〜7、約 2,500 行）。末尾に Gate2 記録 5 周分
+- 計画: `docs/superpowers/plans/2026-09-11-statement-end-repair.md`（Task 1〜7、約 3,640 行）。末尾に Gate2 記録
 - 判断用ページ: https://claude.ai/code/artifact/3d780ed4-af18-44a6-b33f-553428f8176c
 
-**Gate2 は新しい周回の 1 周目が終わったところ（周回上限 3 のうち 1 消化）。**
-結果は **critical 2 / high 3 / medium 4 / low 2**。**3 周つぶした根（上限で時間を保証できない）の再提起は 0 件。**
+**Gate2 は 3 周＝上限まで回した。3 周とも fresh サブエージェント。PASS ではない。**
 
-直したのは 2 件だけ:
+| 周 | 結果 | 扱い |
+|---|---|---|
+| 1 | critical 2 / high 3 / medium 4 / low 2 | 全件反映（commit `0c5fbe5`） |
+| 2 | critical 1 / high 1 / medium 4 / low 5 | 全件反映（commit `11313a8`）**— ただし 2 件が本文に落ちていなかった** |
+| 3 | critical 2 / high 5 / medium 11 / low 9 | 全件反映（commit `b5b4b87`）**。修正後のレビューは未実施** |
 
-- **C1** `let issues: Issue[]` が TS4104（`findIssues()` は `readonly Issue[]` を返す — `abaplint.d.ts:4197`）→ 修正済み
-- **M4** 不変条件番号 10 → 8 → 修正済み
-- 仕様 239 行の事実誤認（下記 C2 の根）→ 仕様側は修正済み
+**3 周目の根は 1 つで、設計の穴ではない** — 「2 周目の反映が本文に落ちていない／落とした形を検証していない」。
+2 周目の適用スクリプトで 3 つ目の置換が例外を投げ、**ファイルが書かれないまま前 2 つの置換ごと消えた**のに
+「修正済み」と記録していた（`pagehide` のフラッシュと pending の上書きガード）。教訓は dotfiles#156 に登録済み。
 
-**残り 9 件は未修正。** 全文は計画末尾の「Gate2 記録（手段 A 後・1 周目）」にある。
+3 周目の critical 2 件はどちらも修正済み:
+
+- **C1** `let verdict` を closure の中でしか代入しないと narrowing が残り、`finally` の比較が **TS2367**。
+  `tsc -b` ごと止まるので build も e2e も全滅する。→ `const sent: { verdict: ... }` に変更。
+  **最小再現で赤→緑を自分で検算済み**（`let` 版 `error TS2367` / オブジェクト版 exit 0）
+- **C2** `pagehide` のフラッシュが本文に無かった → Task 5 Step 4 に追加（grep で確認）
 
 ## 次の一手
 
-1. **C2 / H1 — `src/App.test.tsx`（615 行）を計画に組み込む。** 仕様の誤認は直したが、**計画側が未対応**。
-   - この変更で **4 件落ちる**（`App.test.tsx:150 / 216 / 397 / 503`）。根は 1 つで、FakeWorker が追いかけの 1 通を
-     送らないため `endRun` が溜めたまま返り `run_result` が 0 件になる
-   - 落ちる 4 件は **`run_click`/`run_result` の 1:1（不変条件 6）をピン留めしている唯一のスイート**
-   - **Task 5 に単体テストの Step を足す**（e2e に丸投げしない）。FakeWorker の `onmessage` を直接叩けるので
-     「追いかけが来ないまま 20 秒」「A の追いかけが B に付かない」「unmount 後にタイマーが発火しない」
-     「`stalled` は待たない」は数行で書ける
-   - 同じ陳腐化がコードにも 2 か所: `e2e/silentLoss.spec.ts:87`、`e2e/syntaxHint.spec.ts:9`（どちらも
-     `#17` を根拠に「App.tsx に単体テストが無い」と書いている）。Task 6 で触るファイルなので同じ Step で直す
-2. **H3 — 判定メッセージの組み立てが try の外に出ている。** `new Registry(...)`・`first.getMessage()`・
-   `classifySyntaxError(...)` がどの try にも入っておらず、投げると**判定も追いかけも 0 通**になり
-   `transpile_error` が `stalled` に化ける。不変条件 5（必ず 2 通）もこの経路で破れる
-3. **H2 — `stalled` の後、`data-search` が `pending` のまま `done` にならない。** `endRun` が `followUpRef` を
-   空にしてから即送信するので、後から届く追いかけが捨てられ `setSearchState("done")` に到達しない。
-   `waitForSearchDone` が 30 秒待って落ちる。踏むのは Task 6 Step 2 の `x⏎` × 8,192 がまさに狙う入力
-4. **M1〜M3・L1〜L2** を計画に反映（M1 = `withDeadline` の包み忘れを検出する検証が 1 つも無い）
-5. **Gate2 2 周目**を fresh サブエージェント（fork 不可）で回す
-6. 緑になったら実装（subagent-driven-development）→ Gate3 `/code-gate` → PR。
-   PR 本文で **#75 を閉じる**。**#67 を閉じるかは skill `github-issues` を読んでから**。**#76 は閉じない**
+**1. まず人の判断を仰ぐ。** 周回上限に達しており、修正後のレビューを回していない。選べるのは:
+
+- (a) このまま実装へ進む（3 周目の指摘はすべて反映済み・critical は検算済み）
+- (b) 4 周目を回す（上限を 1 つ超える。超えるなら理由を記録する）
+- (c) 仕様へ戻す — **3 周目の根は設計ではないので、推奨しない**
+
+**2. 実装へ進むなら** subagent-driven-development で Task 1 から。順序の注意:
+
+- Task 4 は **Step 2b/2c（ワーカーの単体テスト）を Step 3 より先に**書く。赤を見てから直す
+- Task 4 Step 2c で 3 件目が赤のままなら、**直すのはテストではなく実装**（計画に明記済み）
+- Task 5 Step 4c で `App.test.tsx` が落ちるのは `success` の 1 件だけのはず。`stopped` の 3 件が落ちたら
+  `ABANDONED_OUTCOMES` の配線が入っていない
+
+**3. Gate3** は `/code-gate`（(B) 区分・必須）。**4.** PR 本文で **#75 を閉じる**。
+**#67 を閉じるかは skill `github-issues` を読んでから**。**#76 は閉じない**
 
 ## 注意
 
+- **一括置換スクリプトは、`assert` を全部先に通してから write する。** 後段の例外で前段の置換ごと消え、
+  しかも「修正済み」と記録だけが残る（この repo で実際に 1 周分を失った。dotfiles#156）。
+  記録する前に `grep -c` で本文を確かめる
 - **Gate2 の周回は上限 3 で、いま 1 消化。** 同じ根の指摘が 2 回出たら実装ではなく仕様へ戻す
 - **`npx vitest` / `npx eslint` はガードフックに拒否される。** `./node_modules/.bin/` を使う。vitest は
   `console.log` を出さないのでファイルに書く
