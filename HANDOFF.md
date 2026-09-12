@@ -60,7 +60,7 @@ GA4 の `syntax_repair` に `missing_period` / `semicolon` を送る（#67 の�
 - **一括置換スクリプトは、`assert` を全部先に通してから write する。** 後段の例外で前段の置換ごと消え、
   しかも「修正済み」と記録だけが残る（この repo で実際に 1 周分を失った。dotfiles#156）。
   記録する前に `grep -c` で本文を確かめる
-- **Gate2 の周回は上限 3 で、いま 1 消化。** 同じ根の指摘が 2 回出たら実装ではなく仕様へ戻す
+- **Gate2 の周回は上限 3 で、3 つとも消化済み。** これ以上回すなら上限を超える判断が要る（上の「次の一手」）
 - **`npx vitest` / `npx eslint` はガードフックに拒否される。** `./node_modules/.bin/` を使う。vitest は
   `console.log` を出さないのでファイルに書く
 - **Bash ツールは timeout で処理を殺さず裏へ回す。** 変異確認は `run_in_background` で完了通知を待つ
