@@ -70,8 +70,10 @@ export type WorkerResponse =
    * The searches, which run AFTER the verdict above has been posted (#67/#75).
    *
    * Splitting them off is what keeps a slow search from corrupting an
-   * outcome. Both searches re-parse the whole source up to 11 times each, and
-   * one parse of a 16 kB paste ranges from about 30 ms to well over a second
+   * outcome. The silent-loss search re-parses the whole source up to 11
+   * times; the syntax-hint search reuses that same 11-parse cap for three
+   * kinds (`double_quote`, `semicolon`, `missing_period`, #67), so it costs up
+   * to 33. One parse of a 16 kB paste ranges from about 30 ms to well over a second
    * by shape (32 ms to 1.4 s across seven shapes, Node, 2026-09-12) — so
    * while they shared a message with the verdict, a heavy paste pushed the
    * verdict past App.tsx's 20s watchdog and a real `syntax_error` was shown

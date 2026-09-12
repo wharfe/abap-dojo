@@ -767,8 +767,8 @@ function App() {
     runOutputCountRef.current = 0;
     runSourceRef.current = source;
     // The previous run's follow-up is not coming in time to matter now. Send
-    // its result as it stands rather than dropping it: run_click and
-    // run_result reconcile 1:1, and a gap there means an orphaned run.
+    // its result as it stands rather than dropping it — see the reconciliation
+    // note on `endRun` (:273) for what a gap here would mean.
     flushPendingResult();
     silentLossRef.current = undefined;
     syntaxRepairRef.current = undefined;
