@@ -65,6 +65,7 @@ import {
   type Issue,
 } from "@abaplint/core";
 import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
+import { MAX_CANDIDATES, MAX_SOURCE_CHARS } from "./searchLimits";
 
 /**
  * How many candidate edits are worth a re-parse.
@@ -74,9 +75,11 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  *
  * "On the Run path after a failure" was true when only `findSyntaxRepair` used
  * these candidates. `findSilentLoss` searches the same set on the *success*
- * path, before transpiling, on every run whose parse was clean — the majority
- * of runs, where the user is not already waiting on an error. That is what the
- * cap now bounds, and it is why the size cap below matters more than it did.
+ * path, on every run whose parse was clean — the majority of runs, where the
+ * user is not already waiting on an error. Since #75 it runs after the reply
+ * that carries the transpiled JS, so the program is already executing while
+ * it looks; what the cap bounds is how long this worker is then unavailable,
+ * and it is why the size cap below matters more than it did.
  * The cap bounds each search at eleven parses: ten candidates plus the one
  * that rewrites everything. On the failure path the statement-end search
  * (statementEndRepair.ts, #67) reuses it for two more kinds, so a failing Run
@@ -84,6 +87,7 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  * quote is below the tenth quoted line gets no hint, which is the right way
  * to fail: silence, not a wrong guess.
  */
+export { MAX_CANDIDATES };
 
 /**
  * Above this many characters, do not search at all.
@@ -111,8 +115,7 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  * ranges from 24 ms to 1.5 s by shape — which is why searchDeadline.ts adds
  * a shared 3 s budget on top.
  */
-import { MAX_CANDIDATES, MAX_SOURCE_CHARS } from "./searchLimits";
-export { MAX_CANDIDATES, MAX_SOURCE_CHARS };
+export { MAX_SOURCE_CHARS };
 
 /**
  * The first `"..."` pair on a line, if it has one.
