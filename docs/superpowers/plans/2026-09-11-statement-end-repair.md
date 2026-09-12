@@ -32,7 +32,8 @@
 | `src/types/diagnostics.ts` | 列挙値 `SYNTAX_REPAIRS` に 2 値追加 | 1 |
 | `src/utils/repairHint.ts` | ヒント文言 2 種追加 | 1 |
 | `src/utils/repairHint.test.ts` | 新規・文言のテスト | 1 |
-| `src/workers/syntaxRepair.ts` | 定数 2 つを export、`MAX_SOURCE_CHARS` を 16 kB へ、`errorIssues` を切り出し | 2 |
+| `src/workers/searchLimits.ts` | 新規・`MAX_CANDIDATES` / `MAX_SOURCE_CHARS`（import を持たない） | 2 |
+| `src/workers/syntaxRepair.ts` | 定数 2 つを再 export、`MAX_SOURCE_CHARS` を 16 kB へ、`errorIssues` を切り出し | 2 |
 | `src/workers/statementEndRepair.ts` | 新規・ピリオド抜け／セミコロンの候補生成と探索 | 2 |
 | `src/workers/statementEndRepair.test.ts` | 新規 | 2 |
 | `src/workers/searchSizeCap.test.ts` | 新規・大きさの上限だけを見るテスト | 2 |
@@ -521,7 +522,36 @@ const MAX_CANDIDATES = 10;
 export const MAX_CANDIDATES = 10;
 ```
 
-(ii) `/**` から `const MAX_SOURCE_CHARS = 64 * 1024;` までをまるごと置き換える。新:
+(ii) `/**` から `const MAX_SOURCE_CHARS = 64 * 1024;` までをまるごと置き換える。**本体は新しいファイル
+`src/workers/searchLimits.ts` へ移し、`syntaxRepair.ts` からは再 export する。**
+
+理由は 1 つだけ: **e2e からも同じ値を読めるようにするため**。Task 6 の重いペーストのテストは上限ちょうどの
+入力を使うので、上限が動いたらそのテストは何も確かめなくなる（Gate2 1 周目 M3）。ところが
+`syntaxRepair.ts` を Playwright の spec から import すると `@abaplint/core`（2.7 MB）が Node 側に載る。
+**import が要らないだけの定数ファイルなら、両方から安全に読める。**
+
+`src/workers/searchLimits.ts`（新規。**import を 1 つも持たないこと** — それがこのファイルの存在理由）:
+
+```ts
+// The two caps that bound every re-parse search. They live in a file with no
+// imports because e2e/syntaxHint.spec.ts reads MAX_SOURCE_CHARS too, and
+// importing syntaxRepair.ts from a Playwright spec would pull @abaplint/core
+// (2.7 MB) into the test runner. Their rationale is on the re-exports in
+// syntaxRepair.ts, next to the code that obeys them.
+export const MAX_CANDIDATES = 10;
+export const MAX_SOURCE_CHARS = 16 * 1024;
+```
+
+`syntaxRepair.ts` 側は (i) の `export const MAX_CANDIDATES = 10;` と (ii) の
+`export const MAX_SOURCE_CHARS = ...;` を宣言ではなく再 export にする（JSDoc はここに残す — 読む人は
+こちらに来る）:
+
+```ts
+import { MAX_CANDIDATES, MAX_SOURCE_CHARS } from "./searchLimits";
+export { MAX_CANDIDATES, MAX_SOURCE_CHARS };
+```
+
+置き換える JSDoc の本文:
 
 ```ts
 /**
@@ -550,8 +580,9 @@ export const MAX_CANDIDATES = 10;
  * ranges from 24 ms to 1.5 s by shape — which is why searchDeadline.ts adds
  * a shared 3 s budget on top.
  */
-export const MAX_SOURCE_CHARS = 16 * 1024;
 ```
+
+（値そのものは `searchLimits.ts` にあるので、この JSDoc は上の `export { ... }` に付ける。）
 
 (iii) `countErrors` の直前に `errorIssues` を足し、`countErrors` の中身をそれで数える。旧:
 
@@ -794,7 +825,7 @@ export async function findStatementEndRepair(
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/workers/syntaxRepair.ts src/workers/statementEndRepair.ts src/workers/statementEndRepair.test.ts src/workers/searchSizeCap.test.ts
+git add src/workers/searchLimits.ts src/workers/syntaxRepair.ts src/workers/statementEndRepair.ts src/workers/statementEndRepair.test.ts src/workers/searchSizeCap.test.ts
 git commit -m "ピリオド抜けとセミコロンを再パースで探し、探索の大きさの上限を 16 kB に下げる (#67, #75)"
 ```
 
@@ -1249,6 +1280,12 @@ describe("abaplintWorker — one transpile request, exactly two replies", () => 
   Expected: **この時点では 4 件とも FAIL**（ワーカーはまだ 1 通しか返さず、3 件目は例外がそのまま外へ出る）。
   Step 3 を当てたあとに同じコマンドで 4 件とも PASS。**この順序を守ること** — Step 3 を先に書いてしまうと
   この Task でいちばん確かめたい「0 通になる穴」に赤を一度も見ないまま緑だけを見ることになる。
+
+  **Step 3 を当てても 3 件目（`still sends a verdict and a follow-up when the verdict path throws`）が
+  赤なら、直すのはテストではなく実装。** この計画の 1 つ前の版はまさにそれで赤になった:
+  `verdict` を `self.postMessage` の**前**で立てていたため、引数の中の `classifySyntaxError` が投げると
+  外側 catch の `if (verdict === "none")` が false になり、判定 0 通・追いかけ 1 通で終わっていた
+  （Gate2 2 周目 C1、実測）。Step 3 の `postVerdict` はその順序を固定するためにある。
   （`npx` はガードフックに拒否される。vitest は `console.log` を出さないのでファイルに落とす — HANDOFF の注意）
 
 - [ ] **Step 3: ワーカーを書き換える** — `src/workers/abaplintWorker.ts`
@@ -1317,10 +1354,28 @@ const errorRowsIn = bounded(errorRowCounter(abaplintConfig, SOURCE_FILENAME));
  * message the App received (`syntax-hint` after a syntax verdict,
  * `silent-loss` after everything else). App.tsx treats the two the same, but
  * a mismatched pair would make the protocol unreadable in a trace.
+ *
+ * ## `verdict` is set AFTER the post, never before
+ *
+ * It answers "what has already been sent", and the `catch` below reads it as
+ * "was a verdict sent at all". Setting it first collapses those two into one
+ * flag and breaks exactly the case this structure exists for: the risky calls
+ * (`classifySyntaxError`, `first.getMessage()`, `classifyTranspileError`) are
+ * evaluated as ARGUMENTS to postMessage, so a throw from one of them happens
+ * before anything is sent — and with the flag already set, the catch would
+ * decide a verdict had gone out and send none. Measured in review (Gate2 2
+ * 周目 C1): verdict 0 通・追いかけ 1 通, which is the 20s `stalled` this whole
+ * change is meant to remove. `postVerdict` below exists to make the order
+ * unforgeable: the argument is evaluated, then posted, then recorded.
  */
 async function handleTranspile(source: string, requestId: string): Promise<void> {
   let verdict: "none" | "syntax" | "other" = "none";
   let followUpSent = false;
+  /** Post the verdict and record it — in that order. See the note above. */
+  const postVerdict = (kind: "syntax" | "other", message: WorkerResponse) => {
+    self.postMessage(message);
+    verdict = kind;
+  };
   const postFollowUp = (message: WorkerResponse) => {
     if (followUpSent) return;
     followUpSent = true;
@@ -1340,8 +1395,7 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
     } catch (e) {
       // The parse itself threw, so there is no verdict and nothing to search.
       const msg = e instanceof Error ? e.message : String(e);
-      verdict = "other";
-      self.postMessage({
+      postVerdict("other", {
         type: "transpile-error",
         kind: "transpile",
         message: msg,
@@ -1354,8 +1408,7 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
     const errors = errorIssues(issues);
     if (errors.length > 0) {
       const first = errors[0];
-      verdict = "syntax";
-      self.postMessage({
+      postVerdict("syntax", {
         type: "transpile-error",
         kind: "syntax",
         message: first.getMessage(),
@@ -1418,12 +1471,10 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
         output.initializationScript2,
       ].join("\n");
 
-      verdict = "other";
-      self.postMessage({ type: "transpile-result", js, requestId });
+      postVerdict("other", { type: "transpile-result", js, requestId });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      verdict = "other";
-      self.postMessage({
+      postVerdict("other", {
         type: "transpile-error",
         kind: "transpile",
         message: msg,
@@ -1469,8 +1520,7 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
         // rather than losing the verdict to a second throw.
         diagnostics = undefined;
       }
-      verdict = "other";
-      self.postMessage({
+      postVerdict("other", {
         type: "transpile-error",
         kind: "transpile",
         message: msg,
@@ -1899,9 +1949,12 @@ import { track, lineCount, type EventMap, type RunOutcome } from "./utils/analyt
       setSearchState("idle");
 ```
 
-**`handleRun` の側は追加の手当てが要らない** — React はクリックのような discrete event の中の
-setState を同じフラッシュで反映するので、`await page.click(Run)` が返った時点で `data-search` は
-すでに `pending`。前の Run の `done` を読む隙間は無い。
+**`handleRun` の側も、Stop の側も、追加の手当てが要らない** — React はクリックのような discrete event の
+中の setState を同じフラッシュで反映するので、`await page.click(Run)` が返った時点で `data-search` は
+すでに `pending`。前の Run の `done` を読む隙間は無い。Stop で終わった Run のあと `done` が残るのは
+「もう何も来ない」の意味どおりで正しく、次の Run が必ず `pending` で始まる以上それを `idle` に戻す必要は無い
+（Gate2 2 周目 L1）。`handleModeChange` だけ別なのは、**Validator 側には `handleRun` が無い**から —
+モードをまたいだ `done` を消せるのはここだけ。
 
 `handleRun` の中、`silentLossRef.current = undefined;` の行の前後を書き換える。旧:
 
@@ -2311,6 +2364,31 @@ export async function waitForSearchDone(page: Page): Promise<void> {
     timeout: 30_000,
   });
 }
+
+/**
+ * Wait until the lint the user's own typing queued has come back.
+ *
+ * One worker, one thread. `typeProgram` inserts the whole program in a single
+ * input event, which schedules a lint (debounced 400 ms, src/App.tsx), and the
+ * worker's boot also lints whatever is in the editor by then. A Run pressed
+ * while one of those is parsing does not race it — it QUEUES behind it, and
+ * the verdict then costs two heavy parses instead of one. For a paste at the
+ * size cap that is the difference between answering and reaching App.tsx's
+ * 20s watchdog, so a test about a heavy paste fails for a reason that has
+ * nothing to do with what it is testing.
+ *
+ * The Lint tab's own count is the signal: it can only change once a
+ * `lint-result` has come back from the worker, which means the thread is free.
+ * A fixed sleep would be a guess about a parse whose cost varies by shape.
+ *
+ * Only for programs that DO produce lint issues — which is every program in
+ * the suites that need this, since they all fail to parse.
+ */
+export async function waitForLintToSettle(page: Page): Promise<void> {
+  await expect(page.getByRole("button", { name: /Lint \([1-9]/ })).toBeVisible({
+    timeout: 60_000,
+  });
+}
 ```
 
 `clickRun` の JSDoc の該当段落を直す。旧:
@@ -2340,7 +2418,12 @@ export async function waitForSearchDone(page: Page): Promise<void> {
 
 - [ ] **Step 2: 失敗する e2e を書く** — `e2e/syntaxHint.spec.ts`
 
-import 行を `import { typeProgram, clickRun, waitForSearchDone } from "./helpers";` にする。
+import 行を 2 つにする:
+
+```ts
+import { typeProgram, clickRun, waitForLintToSettle, waitForSearchDone } from "./helpers";
+import { MAX_SOURCE_CHARS } from "../src/workers/searchLimits";
+```
 
 ファイル冒頭のコメント（`e2e/syntaxHint.spec.ts:5-11`）を直す。**2 か所ある** — メッセージの説明と、
 「`App.tsx` には単体テストが無い（#17）」という**事実誤認**。#17 は 2026-08-04 時点では真だったが、
@@ -2464,17 +2547,24 @@ test("the verdict does not wait for the search on a heavy paste", async ({
   // real syntax error was shown as "The ABAP engine stopped responding".
   //
   // The size is the point of the test and it sits ON the boundary: one more
-  // character and MAX_SOURCE_CHARS skips every search, so the run gets fast
-  // for a reason that has nothing to do with the fix and this test silently
-  // stops testing anything (Gate2 1 周目 M3). Assert it, so a change to the
-  // cap fails here instead of going quiet. MAX_SOURCE_CHARS itself is pinned
-  // in src/workers/searchSizeCap.test.ts.
-  const MAX_SOURCE_CHARS = 16_384;
+  // character and the search is skipped, so the run gets fast for a reason
+  // that has nothing to do with the fix and this test silently stops testing
+  // anything (Gate2 1 周目 M3). The real constant is imported rather than
+  // retyped — a literal here would make the assertion arithmetic, true
+  // whatever the app does (Gate2 2 周目 M1). searchLimits.ts has no imports
+  // of its own precisely so this line does not drag abaplint into the runner.
   const source = `x\n`.repeat(MAX_SOURCE_CHARS / 2);
   expect(source.length).toBe(MAX_SOURCE_CHARS);
 
   await page.goto("/");
   await typeProgram(page, source);
+  // Let the keystroke-driven lint finish before pressing Run. The worker is
+  // one thread: if the boot-time lint of this same 16 kB source is still
+  // parsing, the Run queues behind it and the verdict costs two heavy parses
+  // instead of one — enough to reach the 20s watchdog and fail this test for
+  // a reason the change cannot fix (Gate2 2 周目 H1). Task 7's measurement
+  // script waits for the same reason.
+  await waitForLintToSettle(page);
   await clickRun(page);
 
   await expect(page.getByText(/Syntax error/i)).toBeVisible({ timeout: 30_000 });
@@ -2710,9 +2800,21 @@ heavy paste could push the verdict past the 20s watchdog in `App.tsx` and a
 real `syntax_error` was shown and counted as `stalled`. Measured 2026-09-12:
 the verdict reaches the parent 2.5 ms after the request while the worker stays
 busy for another 1,699 ms. `App.tsx` holds `run_result` until the follow-up
-lands, so the event is still one event with `syntax_repair` on it — the
-exception is `stalled`, which is sent at once because the worker is by
-definition not answering.
+lands, so the event is still one event with `syntax_repair` on it. Three
+outcomes do not wait, because nobody is looking at a verdict they could
+explain: `stalled` (the worker is by definition not answering), `stopped` (the
+user gave up, and their message is not in the error slot at all) and
+`cancelled` (the other mode took the sandbox). Those are sent at once, as
+before.
+
+Two consequences for reading the numbers. A `run_result` for a failing Run is
+now sent up to 20s after the run ended, so a closed tab can lose it — rare,
+and `pagehide` flushes what it can, but the 1:1 with `run_click` is no longer
+true by construction. And a hint can be SHOWN without being counted: if the
+follow-up arrives after that 20s backstop, the hint is still appended to the
+error on screen while `syntax_repair` is already gone with the event. Both
+only happen where a search ran long, so `syntax_repair` under-reports heavy
+pastes specifically — not at random.
 
 The search costs a bounded number of extra parses — at most 33 across the
 three kinds — and only on the Run path, never on `lint`, which fires on every
@@ -2968,7 +3070,19 @@ await browser.close();
 JS
 node /tmp/success-perf.mjs; echo "EXIT=$?"
 ```
-  この計画を当てる**前**（`git stash` してビルドし直す。未追跡ファイルがあるので `git stash -u`）と**後**で 1 回ずつ走らせ、
+  この計画を当てる**前**と**後**で 1 回ずつ走らせる。**前は `git stash` ではなく別の worktree で作る**:
+
+```bash
+BASE=$(git merge-base HEAD origin/main)
+git worktree add /tmp/abap-before "$BASE"
+ln -s "$PWD/node_modules" /tmp/abap-before/node_modules
+( cd /tmp/abap-before && npm run build )   # 測り終えたら git worktree remove /tmp/abap-before
+```
+
+  `git stash` を使わない理由は 2 つ。この時点の作業ツリーには Task 1〜6 のコミット済み差分と未コミットの
+  測定用スクリプトが混ざっていて「戻した先」が曖昧になること、そして Tailwind v4 が
+  **ディスク上の非 ignore ファイルを走査する**ので stash の残し方でビルド結果が変わること（CLAUDE.md）。
+  worktree なら前の状態がそれ自身のディレクトリとして存在する。そのうえで
   `firstOutputMs` を比べる。Expected: 後のほうが小さい。`searchDoneMs` との差が「探索を待たずに実行が始まった分」。
   合否にはせず PR 本文に 2 つの数字を書く。preview サーバの起動と後始末は Step 3 のブロックと同じ手順で行う
 
@@ -3229,3 +3343,78 @@ e2e は 1 件も実行していない（ビルド込みで長時間・ポート�
 **仕様側の変更**: 不変条件 6（待つのは判定が出た Run だけ）・8（3 つに拡大）・9（撤回）、Q13（`done` の意味）、
 e2e の証明項目 3（`done` を待つ否定テストは判定も主張する）、受け入れコマンドの `npx playwright` →
 `./node_modules/.bin/playwright`（`npx` はフック G2 に拒まれうる）。
+
+## Gate2 記録（手段 A 後・2 周目・2026-09-12）— critical 1 / high 1 / medium 4 / low 5
+
+fresh サブエージェント（general-purpose、opus）。**今回は scratch worktree に Task 1・4・5 を実際に当てて
+vitest / tsc を走らせている**（元 repo は無変更）。3 周つぶした根の再提起は 0 件。
+
+### critical
+
+- **C1 「必ず 2 通」が H3 の経路でそのまま破れていた。** `verdict = "syntax"` を `self.postMessage` の
+  **前**で立てていたので、引数の中の `classifySyntaxError(...)` が投げると外側 catch の
+  `if (verdict === "none")` が false になり、**判定 0 通・追いかけ 1 通**。1 周目 H3 が直そうとした失敗
+  そのものが残っていた。実測（scratch tree）: Step 2b の 3 件目が `Tests 1 failed | 3 passed` で赤のまま
+  → **修正済み**。`postVerdict(kind, message)` を足し、「引数を評価 → post → 記録」の順序を固定した
+  （5 か所すべて）。レビュアーの実測では同じ入れ替えで 4 件とも緑
+
+### high
+
+- **H1 重いペーストの e2e が lint と同じスレッドを奪い合う。** `typeProgram` の直後に `clickRun` すると、
+  ワーカーの boot 時 lint（同じ 16 kB）がまだ走っていた場合に Run がその後ろに**並ぶ**。判定が
+  「重い lint 1 回＋重い parse 1 回」になり、20 秒に触れて `stopped responding` が出る
+  — **手段 A が効いていても赤になる**。計画自身が Task 7 の測定で 8 秒待っていたのに、本体の e2e に
+  同じ手当てが無かった → **修正済み**。`waitForLintToSettle`（Lint タブの件数が 1 以上になるのを待つ =
+  `lint-result` が返ってスレッドが空いた証拠）を足し、固定の sleep は使わない
+
+### medium（すべて修正済み）
+
+- **M1 1 周目 M3 への手当てが算術恒真だった。** `"x\n".repeat(8192).length === 16384` は常に真で、
+  アプリの `MAX_SOURCE_CHARS` を一切参照していない。コメントの「a change to the cap fails here」も偽
+  → `src/workers/searchLimits.ts`（**import を 1 つも持たない**）を作り、`syntaxRepair.ts` は再 export、
+  e2e は実定数を import する。Playwright の spec から `syntaxRepair.ts` を読むと `@abaplint/core`
+  2.7 MB がテストランナーに載るので、それを避けるためのファイル
+- **M2 取りこぼしの窓が 0 →最大 20 秒に広がるのに `pagehide` が無かった。** `syntax_error` は全 Run の
+  約 3 割。`window.addEventListener("pagehide", flushPendingResult)` を足し、**不変条件 6 に
+  「構造的に真」から「ほぼ真」への後退である**と明記した
+- **M3 Task 7 (b) の CLAUDE.md 文面が「例外は `stalled` だけ」のままだった** → 3 つに直した
+- **M4 ヒントが画面に出たのに `syntax_repair` が乗らない経路**（20 秒のバックストップ後に追いかけが届く）が
+  どこにも書かれていなかった → 仕様に不変条件 6b、CLAUDE.md (b) に 1 段落。**重い貼り付けをねらって
+  取りこぼす**（ランダムではない）と書いた
+
+### low
+
+- **L1 Stop 後に `data-search` が `done` のまま** → 仕様どおりなので直さず、理由を書いた
+  （`handleModeChange` だけ別扱いなのは Validator 側に `handleRun` が無いから）
+- **L2 `endRun` が同一 Run で 2 回呼ばれると溜めた結果が消える**（到達経路は見つからず）→ 1 行の
+  構造ガードを入れ、「探して見つからなかった」を「形で保証」に変えた
+- **L3 `finally` の中の `postFollowUp` が投げたら 0 通** → plain object の `postMessage` は投げないので未対応
+- **L4 仕様の e2e 項目の番号が `4.` 重複** → 直した
+- **L5 Task 7 Step 3b が `git stash -u`** → `git worktree add <tmp> <base-sha>` に変えた
+  （Tailwind v4 がディスクを走査するため stash は基準が曖昧になる）
+
+### 正しいと確認されたこと（実走。次の周回で再確認不要）
+
+- **1 周目 C2 への見立ては正しかった**: Task 4+5 を当てて `App.test.tsx` を無修正実行 →
+  **落ちるのは 503 の 1 件だけ**（`Tests 1 failed | 8 passed`）。`deliverFollowUp` を 1 か所足して 14/14 緑
+- **Step 4d の新規 5 件はそのまま動く**（`act` / fake timers / `repairHint` / jest-dom 非依存）
+- **Step 4e の変異 2 種はどちらも赤**。MUT2 は 6 件落ちる（期待の「stalled 1 + stopped 3」より広いだけ）
+- **Step 2b のワーカー単体テストは jsdom で実際に動く**（`self.onmessage` 代入・`vi.spyOn(self,"postMessage")`
+  ＋ `mockImplementation`・`vi.mock` の hoisting・top-level `await import`）。1 ファイル 1.33 s
+- **`bounded()` は包み忘れを型エラーにする**（実測 `error TS2345`）。ただし「作った場所で包む」規約に依存
+- Task 4+5 を当てた全体で `tsc -b --noEmit` exit 0、vitest 426 件中 C1 の 1 件だけが赤
+- exact-match アンカーはすべてちょうど 1 回。`grep -n isError` は 57 と 90 のみ。`SilentLossSearch` の型も計画どおり
+- **e2e が空振りで緑になる経路は見つからなかった** — 4 件とも `done` を待つ前に肯定的主張がある
+  （`OutputPanel.tsx:118` のプレースホルダは `!error` のときしか描かれないので、stalled したビルドでは先に落ちる）
+- **同一ワーカーでの要求の並走は壊れない**（`verdict` / `followUpSent` は呼び出しごとのクロージャ）
+- **`stopped` を待たないことで失う `silent_loss` は無い**（実行中の Stop なら追いかけは既に届いており、
+  トランスパイル中の Stop は CLAUDE.md が既に absence の原因として挙げている形そのもの）
+
+### 確認できなかったこと
+
+e2e は 1 件も実走していない（H1 が実際に踏むかも未確認）。Task 2・3 のコードは書いておらず、1 周目の
+「48 件全緑」の実測を信頼している。Task 7 の測定スクリプト・Tailwind の CSS 差分・`npm run build` は未実行。
+
+### 次の周回（3 周目 = 上限）
+
+C1 と H1 を直したので、3 周目は **critical 0 の確認**が主目的。同じ根が 2 回出たら実装ではなく仕様へ戻す。
