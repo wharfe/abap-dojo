@@ -16,7 +16,8 @@ GA4 の `syntax_repair` に `missing_period` / `semicolon` を送る（#67 の�
   探索を外す。これで探索がどれだけ遅くても `outcome` が嘘にならない（3 周つぶした根がここで消えた）
 - 仕様: `docs/superpowers/specs/2026-09-11-statement-end-repair-design.md`（Q1〜Q13、不変条件 1〜11 + 6b）
 - 計画: `docs/superpowers/plans/2026-09-11-statement-end-repair.md`（Task 1〜7、3,642 行）。末尾に Gate2 記録
-- 判断用ページ: https://claude.ai/code/artifact/3d780ed4-af18-44a6-b33f-553428f8176c
+- 現在地の地図（2026-09-12・Gate2 3 周分と次の一手）: https://claude.ai/code/artifact/a062ed95-7f09-43b4-aa13-80d0bda618f1
+- 手段 A を選ぶときの判断用ページ（2026-09-11）: https://claude.ai/code/artifact/3d780ed4-af18-44a6-b33f-553428f8176c
 
 **Gate2 は 3 周＝上限まで回した。3 周とも fresh サブエージェント。PASS ではない。**
 
