@@ -1,52 +1,67 @@
 # HANDOFF
 
-- 更新: 2026-09-12 00:55
+- 更新: 2026-09-12 11:35
 - ブランチ: `feature/statement-end-repair`（push 済み・PR 未作成）
 
 ## ゴール
 
 Run が構文エラーで失敗したとき、**ピリオド抜け**と**行末セミコロン**についても「何を直せば通るか」を 1 行で出し、
-GA4 の `syntax_repair` に `missing_period` / `semicolon` を送る（#67 の残り 2 形）。あわせて #75（再パース探索が重い貼り付けで
-ワーカーを塞ぎ、本物の構文エラーが 20 秒のウォッチドッグで `stalled` に化けうる）を同じ PR で直す。
+GA4 の `syntax_repair` に `missing_period` / `semicolon` を送る（#67 の残り 2 形）。あわせて #75 を同じ PR で直す。
 
 ## 現在地
 
-- 仕様: `docs/superpowers/specs/2026-09-11-statement-end-repair-design.md`（Q1〜Q7。Q6 = 探索の大きさの上限 64→16 kB、Q7 = Run ごとに共有する 3 秒の打ち切り）
-- 計画: `docs/superpowers/plans/2026-09-11-statement-end-repair.md`（Task 1 / 2 / 2b / 3 / 4）。末尾に Gate2 の全記録
-- コードはまだ 1 行も書いていない（commit は仕様・計画・Gate2 記録だけ）
-- Gate2 の経過:
-  - 旧周回 1〜3 周目 → 3 周目で high 2 が残り、ユーザー判断で Q7（3 秒の打ち切り）を追加
-  - **新しい周回 1 周目: high 1 — 1 回のパースが期限 3 秒を超える形が 16 kB 以内にある**（`x⏎` × 8,192 行。元 1.5 秒、
-    最終行にピリオドの候補 1 回 4.6〜5.8 秒。手元で再現済み）。打ち切りは次のパースを止めるだけで、同じワーカーで始まったパースは止められない
-  - **「上限で時間を抑えきれない」という同じ根が 3 回目** → 規則により実装ではなく仕様へ戻す。手段（同じワーカーの同じ応答で判定とヒントを返す）を替える判断待ち
-- 判断用ページ: https://claude.ai/code/artifact/d1d97c72-dd1f-49d3-849b-c8fca5023e04（最新の選択肢が先頭）
+**手段は替わった。仕様も計画も書き直し済み。コードはまだ 1 行も書いていない。**
+
+- 手段 A =「**判定を先に返し、ヒントは後から届ける**」。ワーカーの返信を 2 通に割り、20 秒のウォッチドッグの窓から
+  探索を外す。これで探索がどれだけ遅くても `outcome` が嘘にならない（3 周つぶした根がここで消えた）
+- 仕様: `docs/superpowers/specs/2026-09-11-statement-end-repair-design.md`（Q1〜Q13、不変条件 1〜11）
+- 計画: `docs/superpowers/plans/2026-09-11-statement-end-repair.md`（Task 1〜7、約 2,500 行）。末尾に Gate2 記録 5 周分
+- 判断用ページ: https://claude.ai/code/artifact/3d780ed4-af18-44a6-b33f-553428f8176c
+
+**Gate2 は新しい周回の 1 周目が終わったところ（周回上限 3 のうち 1 消化）。**
+結果は **critical 2 / high 3 / medium 4 / low 2**。**3 周つぶした根（上限で時間を保証できない）の再提起は 0 件。**
+
+直したのは 2 件だけ:
+
+- **C1** `let issues: Issue[]` が TS4104（`findIssues()` は `readonly Issue[]` を返す — `abaplint.d.ts:4197`）→ 修正済み
+- **M4** 不変条件番号 10 → 8 → 修正済み
+- 仕様 239 行の事実誤認（下記 C2 の根）→ 仕様側は修正済み
+
+**残り 9 件は未修正。** 全文は計画末尾の「Gate2 記録（手段 A 後・1 周目）」にある。
 
 ## 次の一手
 
-1. **手段は決定済み（2026-09-11、ユーザー）: A「判定を先に返し、ヒントは後から届ける」。** 採らなかった: B 専用 Worker で terminate、
-   C 重いときは探索しない。設計で決めること（新しいセッションで brainstorming から）:
-   - ワーカーのメッセージ: `transpile-error`（判定）を先に送り、探索の結果を別メッセージ（例 `syntax-hint`、同じ `requestId`）で追いかける
-   - App 側: 判定の受信でウォッチドッグを止めて表示し、後から来たヒントを同じ Run のエラーに付ける。別の Run が始まっていたら捨てる
-   - GA4: `run_result` を判定の時点で送るとヒントの値が載らない。ヒントを待つ（上限つき）か、`syntax_repair` を別経路で送るか。
-     **新しいパラメータやイベントは GA4 登録が要り、遡及しない**（CLAUDE.md Analytics 節）ので最初に決める
-   - 探索中はそのワーカーの lint が待たされる。16 kB の上限（Q6）と 3 秒の打ち切り（Q7）を lint の待ちを抑える目的で残すか
-   - 成功側 `silent_loss` も同じ形（transpile 結果を先に返す）にするか、今回は失敗側だけか
-   - **#76 との線引き**: 元のパースそのもの（lint と Run が上限なしに毎回行う）が `x⏎` の形で 32 kB 19 秒、64 kB で Node がメモリ不足。
-     A は探索の遅さを判定から切り離すだけで、これには効かない。#76 を同じ PR に入れるか、別にするかを最初に決める
-2. 決まった手段で仕様を更新（brainstorming → grilling の軽量 Gate1。Q7 を置き換えるか残すかも決める）→ 計画を書き直す →
-   Gate2 を新しい周回で fresh サブエージェントに回す
-3. 新しい周回 1 周目の medium / low（M1 lint を含まない測定、M2 配線漏れ検査が 1 か所だけ、M3 不変条件 1 と打ち切りの矛盾、
-   L1〜L3）は、手段が変われば前提ごと変わるので、書き直した計画に対して要否を判断する
-4. 実装（subagent-driven-development）→ Gate3 `/code-gate` → PR（本文に最悪ケースの所要時間。PR 本文で #75 を閉じる。
-   #67 を閉じるかは skill `github-issues` を読んでから）
+1. **C2 / H1 — `src/App.test.tsx`（615 行）を計画に組み込む。** 仕様の誤認は直したが、**計画側が未対応**。
+   - この変更で **4 件落ちる**（`App.test.tsx:150 / 216 / 397 / 503`）。根は 1 つで、FakeWorker が追いかけの 1 通を
+     送らないため `endRun` が溜めたまま返り `run_result` が 0 件になる
+   - 落ちる 4 件は **`run_click`/`run_result` の 1:1（不変条件 6）をピン留めしている唯一のスイート**
+   - **Task 5 に単体テストの Step を足す**（e2e に丸投げしない）。FakeWorker の `onmessage` を直接叩けるので
+     「追いかけが来ないまま 20 秒」「A の追いかけが B に付かない」「unmount 後にタイマーが発火しない」
+     「`stalled` は待たない」は数行で書ける
+   - 同じ陳腐化がコードにも 2 か所: `e2e/silentLoss.spec.ts:87`、`e2e/syntaxHint.spec.ts:9`（どちらも
+     `#17` を根拠に「App.tsx に単体テストが無い」と書いている）。Task 6 で触るファイルなので同じ Step で直す
+2. **H3 — 判定メッセージの組み立てが try の外に出ている。** `new Registry(...)`・`first.getMessage()`・
+   `classifySyntaxError(...)` がどの try にも入っておらず、投げると**判定も追いかけも 0 通**になり
+   `transpile_error` が `stalled` に化ける。不変条件 5（必ず 2 通）もこの経路で破れる
+3. **H2 — `stalled` の後、`data-search` が `pending` のまま `done` にならない。** `endRun` が `followUpRef` を
+   空にしてから即送信するので、後から届く追いかけが捨てられ `setSearchState("done")` に到達しない。
+   `waitForSearchDone` が 30 秒待って落ちる。踏むのは Task 6 Step 2 の `x⏎` × 8,192 がまさに狙う入力
+4. **M1〜M3・L1〜L2** を計画に反映（M1 = `withDeadline` の包み忘れを検出する検証が 1 つも無い）
+5. **Gate2 2 周目**を fresh サブエージェント（fork 不可）で回す
+6. 緑になったら実装（subagent-driven-development）→ Gate3 `/code-gate` → PR。
+   PR 本文で **#75 を閉じる**。**#67 を閉じるかは skill `github-issues` を読んでから**。**#76 は閉じない**
 
 ## 注意
 
-- `npx vitest` / `npx eslint` はガードフックに拒否される。`./node_modules/.bin/` を使う。vitest は `console.log` を出さないのでファイルに書く
-- abaplint の probe は `new Config(JSON.stringify(require("@abaplint/transpiler").config))`。`Config.getDefault()` は答えが変わる
-- **パースの重さは文字数に比例せず、同じ大きさでも形で数十倍違う**（16 kB で 24 ms〜1.5 秒、候補はさらに重くなりうる）。時間の見積もりは
-  「1 パース × 回数」ではなく、形ごとに実測（Node とブラウザ、3 回の中央値）。重い形の例: `x⏎`、`<⏎`、`foo(1);`、`foo(1, "x");`、`WRITE 'value#';`
-- Bash ツールは timeout で処理を殺さず裏へ回す。変異を当てる手順は `run_in_background` で完了通知を待つ
+- **Gate2 の周回は上限 3 で、いま 1 消化。** 同じ根の指摘が 2 回出たら実装ではなく仕様へ戻す
+- **`npx vitest` / `npx eslint` はガードフックに拒否される。** `./node_modules/.bin/` を使う。vitest は
+  `console.log` を出さないのでファイルに書く
+- **Bash ツールは timeout で処理を殺さず裏へ回す。** 変異確認は `run_in_background` で完了通知を待つ
+- **長い Write は黙って切れる。** このセッションで約 2,300 行の計画が heredoc の途中で切れ、しかも上書きで
+  Gate2 記録 4 周分が消えた（ツールは成功を返す）。大きく書いたら `wc -l` とフェンス数で構造を検算する
+- abaplint の probe は `new Config(JSON.stringify(require("@abaplint/transpiler").config))`。
+  `Config.getDefault()` は答えが変わる
+- **パースの重さは文字数に比例せず、同じ大きさでも形で数十倍違う。** 時間の見積もりは形ごとに実測
 - Tailwind v4 は `docs/superpowers/*.md` も走査する。CSS 比較の基準を取るときは `docs/superpowers` を一時的に外す
-- 「件数が減ったら採用」はピリオド系では誤発火する。厳しい判定は Q1 で確定済み — 再議論しない
+- **「件数が減ったら採用」はピリオド系では誤発火する。** 厳しい判定は Q1 で確定済み — 再議論しない
 - e2e で「無いこと」を確かめるときは、待つ対象が「それが現れうる最後の瞬間」より後かを確認する（#70）
