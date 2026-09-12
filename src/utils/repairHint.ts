@@ -27,6 +27,11 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  * ignored — always true) and offers the fix conditionally. Someone who did
  * mean a comment reads "if you meant that as literal data" and moves on.
  *
+ * That argument is about the double quote. `semicolon` and `missing_period`
+ * are stated flatly: their search keeps a rewrite only when it clears every
+ * error it targeted, and neither mistake is something anyone does on purpose,
+ * so a conditional would only make a near-certain fix harder to read.
+ *
  * Kept apart from App.tsx so the wording can be asserted in a test rather than
  * rendered to check it, and so there is one place to look when a second repair
  * kind is added. The exhaustive switch is the point: a new
@@ -66,6 +71,16 @@ export function repairHint(repair: SyntaxRepair): string {
         `If you meant that as literal data rather than a comment, ` +
         `single quotes are what ABAP uses: WRITE 'hello'.`
       );
+    case "semicolon":
+      return repair.line === undefined
+        ? `Hint: ABAP ends a statement with a period, not a semicolon.`
+        : `Hint: ABAP ends a statement with a period, not a semicolon — ` +
+            `change the one on line ${repair.line}.`;
+    case "missing_period":
+      return repair.line === undefined
+        ? `Hint: every ABAP statement ends with a period, and some here have none.`
+        : `Hint: every ABAP statement ends with a period, and the one ending ` +
+            `on line ${repair.line} has none.`;
   }
 }
 
