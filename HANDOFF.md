@@ -1,7 +1,7 @@
 # HANDOFF
 
 - 更新: 2026-09-12（Gate2 3 周目まで完了）
-- ブランチ: `feature/statement-end-repair`（**ローカルに 6 commit・未 push**・PR 未作成）
+- ブランチ: `feature/statement-end-repair`（**push 済み** = `7e35736`・PR 未作成）
 
 ## ゴール
 
@@ -14,8 +14,8 @@ GA4 の `syntax_repair` に `missing_period` / `semicolon` を送る（#67 の�
 
 - 手段 A =「**判定を先に返し、ヒントは後から届ける**」。ワーカーの返信を 2 通に割り、20 秒のウォッチドッグの窓から
   探索を外す。これで探索がどれだけ遅くても `outcome` が嘘にならない（3 周つぶした根がここで消えた）
-- 仕様: `docs/superpowers/specs/2026-09-11-statement-end-repair-design.md`（Q1〜Q13、不変条件 1〜11）
-- 計画: `docs/superpowers/plans/2026-09-11-statement-end-repair.md`（Task 1〜7、約 3,640 行）。末尾に Gate2 記録
+- 仕様: `docs/superpowers/specs/2026-09-11-statement-end-repair-design.md`（Q1〜Q13、不変条件 1〜11 + 6b）
+- 計画: `docs/superpowers/plans/2026-09-11-statement-end-repair.md`（Task 1〜7、3,642 行）。末尾に Gate2 記録
 - 判断用ページ: https://claude.ai/code/artifact/3d780ed4-af18-44a6-b33f-553428f8176c
 
 **Gate2 は 3 周＝上限まで回した。3 周とも fresh サブエージェント。PASS ではない。**
@@ -39,19 +39,21 @@ GA4 の `syntax_repair` に `missing_period` / `semicolon` を送る（#67 の�
 
 ## 次の一手
 
-**1. 判断は済んでいる（2026-09-12、ユーザー）: (a) このまま実装へ進む。**
-周回上限 3 を使い切り、3 周目の修正はレビューしていない — その状態で進むことを承知のうえでの決定。
-根拠は「3 周目の根は設計ではなく文書の反映漏れで、実装すれば `tsc` と vitest が計画のコードを
-本当に検査するため、同じ根はそこで消える」。**4 周目は回さない。仕様へは戻さない。**
+**1. Task 1 から実装する**（subagent-driven-development）。**Gate2 はもう回さない。**
 
-**2. 実装**は subagent-driven-development で Task 1 から。順序の注意:
+判断は済んでいる（2026-09-12、ユーザー）: **(a) このまま実装へ進む**。周回上限 3 を使い切り、
+3 周目の修正はレビューしていない — その状態で進むことを承知のうえでの決定。根拠は
+「3 周目の根は設計ではなく文書の反映漏れで、実装すれば `tsc` と vitest が計画の中のコードを
+**本当に検査する**ため、同じ根はそこで消える」。**4 周目は回さない。仕様へは戻さない。**
+
+順序の注意:
 
 - Task 4 は **Step 2b/2c（ワーカーの単体テスト）を Step 3 より先に**書く。赤を見てから直す
 - Task 4 Step 2c で 3 件目が赤のままなら、**直すのはテストではなく実装**（計画に明記済み）
 - Task 5 Step 4c で `App.test.tsx` が落ちるのは `success` の 1 件だけのはず。`stopped` の 3 件が落ちたら
   `ABANDONED_OUTCOMES` の配線が入っていない
 
-**3. Gate3** は `/code-gate`（(B) 区分・必須）。**4.** PR 本文で **#75 を閉じる**。
+**2. Gate3** は `/code-gate`（(B) 区分・必須）。**3.** PR 本文で **#75 を閉じる**。
 **#67 を閉じるかは skill `github-issues` を読んでから**。**#76 は閉じない**
 
 ## 注意
