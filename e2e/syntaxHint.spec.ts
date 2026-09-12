@@ -199,5 +199,18 @@ test("the verdict does not wait for the search on a heavy paste", async ({
   await clickRun(page);
 
   await expect(page.getByText(/Syntax error/i)).toBeVisible({ timeout: 30_000 });
+  // The ordering itself, while it is still observable. The line below only
+  // catches a search that got in front of the verdict by MORE than the 20s
+  // watchdog; put the search back in front and keep the whole thing under 20s
+  // and that assertion stays green while the claim of #75 is false. So assert
+  // what the claim actually says: at the moment the verdict is on screen, the
+  // search has not answered yet.
+  //
+  // The window is the search's own budget — up to 3s of re-parsing at 16 kB
+  // (SEARCH_BUDGET_MS), against a verdict that arrives one parse after Run —
+  // so this is not a photo finish. `pending` can only ever become `done`, so a
+  // retry cannot turn a late read into a pass: the worst this can do is fail
+  // when it should not, never pass when it should not.
+  await expect(page.locator('[data-search="pending"]')).toHaveCount(1);
   await expect(page.getByText(/stopped responding/i)).toHaveCount(0);
 });
