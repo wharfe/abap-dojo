@@ -22,6 +22,27 @@ interface OutputPanelProps {
    * it ran.
    */
   silentLossHint: string | null;
+  /**
+   * Whether the searches that explain a failure have answered for the run on
+   * screen (#67/#75).
+   *
+   * The worker replies twice now — the verdict, then whatever the re-parse
+   * searches found — so "there is no hint" is not decided at the moment the
+   * error appears. Nothing renders differently for `pending` today; it is
+   * here because the difference is real state, and because a test that
+   * asserts a hint is ABSENT has no other way to know it waited long enough.
+   * That gap is #70: a negative assertion that runs before the last moment
+   * the element could appear passes against a build without the fix.
+   *
+   * `done` means "nothing more is coming for this run", NOT "the follow-up
+   * arrived". A run that ends `stalled` is exactly the case where the worker
+   * may never answer at all, and reading it the other way left this stuck on
+   * `pending` for good — the negative tests above then waited out their own
+   * timeout instead of asserting anything (Gate2 1 周目 H2). The cost of the
+   * wider meaning: `done` alone no longer proves a search ran, so a test that
+   * waits for it must also assert the verdict it expected is on screen.
+   */
+  searchState: "idle" | "pending" | "done";
   lintIssues: LintIssue[];
   isRunning: boolean;
   activeTab: Tab;
@@ -45,13 +66,14 @@ export function OutputPanel({
   error,
   statusMessage,
   silentLossHint,
+  searchState,
   lintIssues,
   isRunning,
   activeTab,
   onTabChange,
 }: OutputPanelProps) {
   return (
-    <div className="flex flex-col h-full bg-gray-900">
+    <div className="flex flex-col h-full bg-gray-900" data-search={searchState}>
       {/* Tab bar */}
       <div className="flex border-b border-gray-700">
         <button

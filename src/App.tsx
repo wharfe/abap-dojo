@@ -14,7 +14,7 @@ import {
 } from "./components/ExecutionSandbox";
 import { debounce } from "./utils/debounce";
 import { encodeSource, decodeSource } from "./utils/urlShare";
-import { track, lineCount, type RunOutcome } from "./utils/analytics";
+import { track, lineCount, type EventMap, type RunOutcome } from "./utils/analytics";
 import { scheduleIdle } from "./utils/scheduleIdle";
 import { computeSummary } from "./utils/validationSummary";
 import type { LintIssue, WorkerResponse } from "./types/messages";
@@ -42,6 +42,27 @@ WRITE 'Hello, ABAP Dojo!'.`;
  * legitimately slow; this is a deadlock breaker, not a performance budget.
  */
 const WORKER_TIMEOUT_MS = 20000;
+
+/**
+ * The outcomes that do not wait for the worker's follow-up message.
+ *
+ * All three end a run nobody is waiting on an explanation for. `stalled` IS
+ * the finding that the worker is not answering, so waiting on it would add
+ * 20s to nothing. `stopped` is the user's own choice and puts its message in
+ * `statusMessage`, not `error` — there is no error on screen for a hint to be
+ * appended to. `cancelled` means the other mode took the sandbox away.
+ *
+ * For every other outcome the user is looking at a verdict, so the follow-up
+ * has somewhere to go and the run is measured once, with it. Waiting on these
+ * three instead would put every Stop press into the window where closing the
+ * tab loses the `run_result` — and `run_click`/`run_result` reconciling 1:1
+ * is how an orphaned run is detected at all (Gate2 1 周目 M2).
+ */
+const ABANDONED_OUTCOMES: ReadonlySet<RunOutcome> = new Set<RunOutcome>([
+  "stalled",
+  "stopped",
+  "cancelled",
+]);
 
 function parseHash(): { mode: AppMode; code: string | null } {
   const hash = window.location.hash;
@@ -123,6 +144,40 @@ function App() {
    */
   const silentLossRef = useRef<SilentLoss | null | undefined>(undefined);
   /**
+   * The run whose follow-up message (`syntax-hint` / `silent-loss`) has not
+   * arrived yet, or "" when none is outstanding.
+   *
+   * Deliberately NOT `playgroundRequestIdRef`. That one is cleared by
+   * `endRun` so a late `transpile-result` cannot hand stale JS to the sandbox
+   * (#50) — and on a syntax error `endRun` runs BEFORE the follow-up arrives,
+   * so reusing it would discard every hint. The follow-up messages start no
+   * execution, so they are safe to correlate on their own ref.
+   */
+  const followUpRef = useRef<string>("");
+  /** The repair the follow-up reported, for the run in flight. */
+  const syntaxRepairRef = useRef<SyntaxRepair | undefined>(undefined);
+  /**
+   * A `run_result` built but not yet sent, because its follow-up is still
+   * outstanding. The user has already been shown the verdict; this is only
+   * about measuring the run once, with `syntax_repair` and `silent_loss` on
+   * it (spec Q10 — a second event would need a GA4 registration that is not
+   * retroactive).
+   */
+  const pendingResultRef = useRef<EventMap["run_result"] | null>(null);
+  /**
+   * The 20s backstop for the result above.
+   *
+   * It and `followUpRef` do NOT have the same lifetime, and that is the
+   * point: `followUpRef` says "a follow-up may still arrive and still
+   * belongs to the run on screen", while this one says "a result is waiting
+   * to be sent". `endRun` can clear the first and arm the second (a run that
+   * ended before its follow-up), and `flushPendingResult` clears the second
+   * without touching the first (a follow-up that arrived on time). Tying
+   * them together would mean either dropping a hint that is still relevant,
+   * or sending the same `run_result` twice. Gate2 1 周目 L2.
+   */
+  const followUpTimerRef = useRef<number | undefined>(undefined);
+  /**
    * The source this run was started with.
    *
    * Not `sourceRef`, which tracks the editor: by the time the worker answers,
@@ -151,6 +206,7 @@ function App() {
     silentLossHint_ !== null && silentLossHint_.source === source
       ? silentLossHint_.text
       : null;
+  const [searchState, setSearchState] = useState<"idle" | "pending" | "done">("idle");
   const validateStartRef = useRef(0);
   const validateLineCountRef = useRef(0);
   const wasValidatingRef = useRef(false);
@@ -189,6 +245,30 @@ function App() {
   }, []);
 
   /**
+   * Send the `run_result` that was waiting for its follow-up.
+   *
+   * `syntax_repair` and `silent_loss` are read here rather than captured with
+   * the rest, because they are exactly the two the follow-up carries.
+   * Everything else — `duration_ms` above all — was fixed when the run ended,
+   * so deferring the send does not change what any number means.
+   */
+  const flushPendingResult = useCallback(() => {
+    const pending = pendingResultRef.current;
+    if (pending === null) return;
+    pendingResultRef.current = null;
+    window.clearTimeout(followUpTimerRef.current);
+    followUpTimerRef.current = undefined;
+    track("run_result", {
+      ...pending,
+      syntax_repair: syntaxRepairRef.current?.kind,
+      silent_loss:
+        silentLossRef.current === undefined
+          ? undefined
+          : (silentLossRef.current?.kind ?? "none"),
+    });
+  }, []);
+
+  /**
    * End the Playground run, whatever the reason. Every exit path goes through
    * here so that `run_click` and `run_result` reconcile 1:1 — a missing
    * `run_result` means a run got orphaned, not that a user walked away.
@@ -222,9 +302,6 @@ function App() {
       // failure it is holding, and so a value meant for one outcome cannot ride
       // along on the other.
       syntaxDiagnostics?: SyntaxDiagnostics,
-      // Also syntax_error only. Separate from `syntaxDiagnostics` because only
-      // its `kind` may be measured — `line` belongs to the hint in `message`.
-      syntaxRepair?: SyntaxRepair,
     ) => {
       disarmPlaygroundWatchdog();
       playgroundRequestIdRef.current = "";
@@ -240,7 +317,7 @@ function App() {
         }
       }
       setIsRunning(false);
-      track("run_result", {
+      const params = {
         outcome,
         duration_ms: Math.round(performance.now() - runStartRef.current),
         // The sandbox reports the true total on success; otherwise all we have
@@ -251,19 +328,38 @@ function App() {
         syntax_key: syntaxDiagnostics?.key,
         syntax_error_count: syntaxDiagnostics?.errorCount,
         syntax_statement: syntaxDiagnostics?.statement,
-        syntax_repair: syntaxRepair?.kind,
-        // Not outcome-scoped, unlike everything above it: the failure it
-        // describes leaves no error, so it usually rides on a `success`, and
-        // the same program can still time out for reasons of its own. `none`
-        // is sent explicitly; `undefined` (a run that ended before the parse)
-        // sends nothing, and that difference is the denominator.
-        silent_loss:
-          silentLossRef.current === undefined
-            ? undefined
-            : (silentLossRef.current?.kind ?? "none"),
-      });
+      };
+      // Wait for the follow-up so the run is measured once, with whatever the
+      // searches found on it — but only for a run whose verdict the user is
+      // actually looking at (see ABANDONED_OUTCOMES).
+      if (followUpRef.current !== "" && !ABANDONED_OUTCOMES.has(outcome)) {
+        pendingResultRef.current = params;
+        window.clearTimeout(followUpTimerRef.current);
+        followUpTimerRef.current = window.setTimeout(
+          flushPendingResult,
+          WORKER_TIMEOUT_MS,
+        );
+        return;
+      }
+      // Nothing more is coming for this run. Dropping the correlation stops a
+      // late follow-up from appending a hint to a message it does not belong
+      // to, and `done` has to be said HERE rather than left to that message:
+      // a stalled worker may never send one, and this attribute stuck on
+      // `pending` is what made the negative e2e tests wait out their own
+      // timeout (Gate2 1 周目 H2).
+      followUpRef.current = "";
+      setSearchState("done");
+      // A pending result from an earlier call would be overwritten by the
+      // assignment below and vanish. No path reaches that today (the Stop
+      // button only exists while `isRunning`, and the sandbox's terminal
+      // events cannot arrive before the verdict), but "we looked and could
+      // not find one" is a weaker guarantee than the 1:1 deserves — one line
+      // makes it structural instead (Gate2 2 周目 L2).
+      if (pendingResultRef.current !== null) flushPendingResult();
+      pendingResultRef.current = params;
+      flushPendingResult();
     },
-    [disarmPlaygroundWatchdog],
+    [disarmPlaygroundWatchdog, flushPendingResult],
   );
 
   /**
@@ -347,8 +443,8 @@ function App() {
           playgroundRequestIdRef.current &&
           data.requestId === playgroundRequestIdRef.current
         ) {
-          recordSilentLoss(data.silentLossChecked, data.silentLoss);
-          // The sandbox owns the deadline from here on.
+          // The sandbox owns the deadline from here on. The #68 answer is not
+          // here any more — it follows on its own message while this runs.
           disarmPlaygroundWatchdog();
           sandboxRef.current?.execute(data.js, playgroundRequestIdRef.current);
         }
@@ -361,19 +457,21 @@ function App() {
           playgroundRequestIdRef.current &&
           data.requestId === playgroundRequestIdRef.current
         ) {
-          recordSilentLoss(data.silentLossChecked, data.silentLoss);
           const isSyntax = data.kind === "syntax";
           const label = isSyntax ? "Syntax error" : "Transpile error";
-          const repair = isSyntax ? data.repair : undefined;
           const head = data.line
             ? `${label} (L${data.line}): ${data.message}`
             : `${label}: ${data.message}`;
+          // The hint is NOT here. abaplint names neither the quote nor the
+          // argument it swallowed, so this text alone cannot be acted on by
+          // someone who does not already know ABAP comment syntax — but the
+          // search that says what to change takes seconds on a heavy paste,
+          // and waiting for it here is what made a real syntax error arrive
+          // after the watchdog (#75). Show the error now; the `syntax-hint`
+          // handler below appends the explanation when it lands.
           endRun(
             isSyntax ? "syntax_error" : "transpile_error",
-            // abaplint names neither the quote nor the argument it swallowed,
-            // so the message above cannot be acted on by someone who does not
-            // already know ABAP comment syntax. Say what to change and where.
-            repair ? `${head}\n\n${repairHint(repair)}` : head,
+            head,
             undefined,
             // "set on no other outcome" is the documented invariant, so enforce
             // it here rather than trusting the worker to keep omitting it: both
@@ -382,8 +480,32 @@ function App() {
             // the other's measurements.
             isSyntax ? undefined : data.diagnostics,
             isSyntax ? data.syntaxDiagnostics : undefined,
-            repair,
           );
+        }
+      } else if (data.type === "syntax-hint") {
+        // Guarded on followUpRef, not playgroundRequestIdRef: endRun already
+        // cleared the latter (see the note on followUpRef).
+        if (followUpRef.current && data.requestId === followUpRef.current) {
+          followUpRef.current = "";
+          syntaxRepairRef.current = data.repair;
+          const repair = data.repair;
+          if (repair !== undefined) {
+            // Appended to the error this run put on screen. `null` means no
+            // error is showing — the user pressed Stop, or a new run cleared
+            // it — so there is nothing this hint belongs to.
+            setError((prev) =>
+              prev === null ? prev : `${prev}\n\n${repairHint(repair)}`,
+            );
+          }
+          setSearchState("done");
+          flushPendingResult();
+        }
+      } else if (data.type === "silent-loss") {
+        if (followUpRef.current && data.requestId === followUpRef.current) {
+          followUpRef.current = "";
+          recordSilentLoss(data.completed, data.loss);
+          setSearchState("done");
+          flushPendingResult();
         }
       }
 
@@ -433,7 +555,13 @@ function App() {
         }
       }
     };
-  }, [disarmPlaygroundWatchdog, disarmValidationWatchdog, endRun, recordSilentLoss]);
+  }, [
+    disarmPlaygroundWatchdog,
+    disarmValidationWatchdog,
+    endRun,
+    flushPendingResult,
+    recordSilentLoss,
+  ]);
 
   // Boot the abaplint worker once the browser is idle. Creating it during mount
   // meant parsing 1.8 MB of JavaScript before the page could respond to input,
@@ -454,6 +582,7 @@ function App() {
       cancel();
       worker?.terminate();
       if (appWorker === worker) appWorker = null;
+      window.clearTimeout(followUpTimerRef.current);
     };
   }, [attachWorkerHandlers]);
 
@@ -605,6 +734,20 @@ function App() {
     wasValidatingRef.current = isValidating;
   }, [isValidating, validationStages]);
 
+  // A `run_result` waiting for its follow-up is lost if the tab goes away,
+  // and on a heavy paste that wait is seconds. Before this change the event
+  // went out in the same flush as the verdict, so the 1:1 with `run_click`
+  // held by construction; deferring it opens a window, and a gap between the
+  // two is exactly what CLAUDE.md tells the reader to interpret as an
+  // orphaned run. `pagehide` is the last event that fires reliably on a tab
+  // close or navigation (including into the bfcache, where `unload` does
+  // not), and gtag sends over sendBeacon, so a flush here still arrives.
+  // Gate2 2 周目 M2.
+  useEffect(() => {
+    window.addEventListener("pagehide", flushPendingResult);
+    return () => window.removeEventListener("pagehide", flushPendingResult);
+  }, [flushPendingResult]);
+
   // Run (Playground mode)
   const handleRun = useCallback(() => {
     setOutput([]);
@@ -617,7 +760,14 @@ function App() {
     runStartRef.current = performance.now();
     runOutputCountRef.current = 0;
     runSourceRef.current = source;
+    // The previous run's follow-up is not coming in time to matter now. Send
+    // its result as it stands rather than dropping it: run_click and
+    // run_result reconcile 1:1, and a gap there means an orphaned run.
+    flushPendingResult();
     silentLossRef.current = undefined;
+    syntaxRepairRef.current = undefined;
+    followUpRef.current = requestId;
+    setSearchState("pending");
     setSilentLossHint(null);
     track("run_click", { line_count: lineCount(source) });
     appWorker?.postMessage({ type: "transpile", source, requestId });
@@ -627,7 +777,7 @@ function App() {
     playgroundWatchdogRef.current = window.setTimeout(() => {
       endRun("stalled", "The ABAP engine stopped responding. Try running again.");
     }, WORKER_TIMEOUT_MS);
-  }, [source, endRun, disarmPlaygroundWatchdog]);
+  }, [source, endRun, disarmPlaygroundWatchdog, flushPendingResult]);
 
   // Stop (Playground mode). Always ask the sandbox first and trust its
   // answer — `stop()` returns whether IT is the one responsible for
@@ -681,6 +831,11 @@ function App() {
       // happened and inflate the denominator of "users who tried the other mode".
       if (newMode === mode) return;
       setMode(newMode);
+      // The next run in this mode starts from `idle`, not from whatever the
+      // last one left behind. Only `handleRun` sets `pending`, so a stale
+      // `done` sitting here would let a test (or a reader) take the previous
+      // run's answer for this one. Gate2 1 周目 L1.
+      setSearchState("idle");
       track("mode_switch", { to_mode: newMode });
       const encoded = encodeSource(source);
       if (newMode === "playground") {
@@ -771,6 +926,7 @@ function App() {
         <div className="h-1/2 md:h-auto md:w-1/2 min-h-0">
           {mode === "playground" ? (
             <OutputPanel
+              searchState={searchState}
               silentLossHint={silentLossHintText}
               output={output}
               error={error}

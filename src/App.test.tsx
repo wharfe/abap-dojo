@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { forwardRef, useEffect, useImperativeHandle } from "react";
 import { render, act, screen, fireEvent } from "@testing-library/react";
 import type { ExecutionSandboxHandle } from "./components/ExecutionSandbox";
+import { repairHint } from "./utils/repairHint";
 
 /**
  * A fake AbaplintWorker whose `onmessage` the test can drive directly, so a
@@ -98,6 +99,22 @@ function lastTranspileRequestId(worker: InstanceType<typeof FakeWorker>): string
     throw new Error("no transpile request was posted");
   }
   return call[0].requestId;
+}
+
+/**
+ * Deliver the worker's second reply — the one the real abaplintWorker.ts
+ * always sends after its verdict (#67/#75). Nothing in App.tsx sends
+ * `run_result` for a run that ended on a verdict until this arrives, so a
+ * test that ends a run and then counts events has to play this side of the
+ * protocol or it is asserting against a half-finished round trip.
+ */
+function deliverFollowUp(
+  worker: InstanceType<typeof FakeWorker>,
+  message: { type: "syntax-hint" | "silent-loss" } & Record<string, unknown>,
+) {
+  act(() => {
+    worker.onmessage?.({ data: message } as MessageEvent);
+  });
 }
 
 describe("App — Stop during the transpile round trip", () => {
@@ -498,6 +515,13 @@ describe("App — Playground and Validator each own their own watchdog (#49)", (
     act(() => {
       sandboxProps!.onDone(playgroundRequestId, 1);
     });
+    // The worker's follow-up for this run — App holds `run_result` until it
+    // lands (or 20s pass), so without it the count below is 0.
+    deliverFollowUp(worker, {
+      type: "silent-loss",
+      requestId: playgroundRequestId,
+      completed: true,
+    });
     expect(
       trackMock.mock.calls.filter(([name]) => name === "run_result"),
     ).toHaveLength(1);
@@ -611,5 +635,183 @@ describe("App — Playground and Validator each own their own watchdog (#49)", (
       ([name]) => name === "run_result",
     );
     expect(runResultCallsAfterLateReply).toHaveLength(1);
+  });
+});
+
+describe("App — the worker's follow-up message (#67/#75)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    workerInstances.length = 0;
+    executeMock.mockClear();
+    stopMock.mockReset();
+    trackMock.mockClear();
+    sandboxProps = null;
+    window.location.hash = "";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * The OutputPanel's `data-search`. Read with getAttribute, not jest-dom's
+   * `toHaveAttribute`: `@testing-library/jest-dom` is a dependency but is
+   * imported nowhere and `vite.config.ts` declares no `setupFiles`, so its
+   * matchers are not registered in this suite.
+   */
+  function searchStateOf(view: ReturnType<typeof render>): string | null | undefined {
+    return view.container.querySelector("[data-search]")?.getAttribute("data-search");
+  }
+
+  /** Render, boot the fake worker, press Run, and hand back the run in flight. */
+  function startRun() {
+    const view = render(<App />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const worker = workerInstances[0];
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    return { view, worker, requestId: lastTranspileRequestId(worker) };
+  }
+
+  /** The verdict half of a syntax failure, as the worker now sends it. */
+  function deliverSyntaxVerdict(
+    worker: InstanceType<typeof FakeWorker>,
+    requestId: string,
+  ) {
+    act(() => {
+      worker.onmessage?.({
+        data: {
+          type: "transpile-error",
+          kind: "syntax",
+          message: "Statement does not exist",
+          line: 3,
+          requestId,
+        },
+      } as MessageEvent);
+    });
+  }
+
+  const repair = { kind: "missing_period" as const, line: 3 };
+
+  // The verdict is shown immediately and the hint is appended when it lands.
+  // This is the whole of 手段 A from the user's side: the two used to arrive
+  // together, and a slow search delayed both past the watchdog (#75).
+  it("shows the error at once and appends the hint when the follow-up lands", () => {
+    const { view, worker, requestId } = startRun();
+    deliverSyntaxVerdict(worker, requestId);
+
+    // Already on screen, with no hint yet.
+    expect(view.container.textContent).toContain("Statement does not exist");
+    expect(view.container.textContent).not.toContain(repairHint(repair));
+    // ...and nothing has been measured yet: the follow-up is what completes it.
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(0);
+    expect(searchStateOf(view)).toBe("pending");
+
+    deliverFollowUp(worker, { type: "syntax-hint", requestId, repair });
+
+    expect(view.container.textContent).toContain(repairHint(repair));
+    expect(searchStateOf(view)).toBe("done");
+    const calls = trackMock.mock.calls.filter(([name]) => name === "run_result");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({
+      outcome: "syntax_error",
+      syntax_repair: "missing_period",
+    });
+  });
+
+  // The follow-up never comes. The run must still be measured — once — just
+  // without the parameters that message carries. 不変条件 6.
+  it("sends run_result without the search parameters if no follow-up arrives", () => {
+    const { worker, requestId } = startRun();
+    deliverSyntaxVerdict(worker, requestId);
+
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+
+    const calls = trackMock.mock.calls.filter(([name]) => name === "run_result");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({ outcome: "syntax_error" });
+    expect(calls[0][1]).not.toHaveProperty("syntax_repair", "missing_period");
+    // A follow-up that turns up afterwards must not produce a second event.
+    deliverFollowUp(worker, { type: "syntax-hint", requestId, repair });
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+  });
+
+  // A's answer must not be attached to B — the same correlation bug as
+  // #42/#50, one message later.
+  it("does not attach run A's follow-up to run B", () => {
+    const { view, worker, requestId: requestIdA } = startRun();
+    deliverSyntaxVerdict(worker, requestIdA);
+    trackMock.mockClear();
+
+    // B starts. A's result was still pending, so it is flushed as it stands.
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    const requestIdB = lastTranspileRequestId(worker);
+    expect(requestIdB).not.toBe(requestIdA);
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+    trackMock.mockClear();
+
+    // A's follow-up finally lands.
+    deliverFollowUp(worker, { type: "syntax-hint", requestId: requestIdA, repair });
+
+    // Nothing for B: no event, no hint on screen, and B is still waiting.
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(0);
+    expect(view.container.textContent).not.toContain(repairHint(repair));
+    expect(searchStateOf(view)).toBe("pending");
+  });
+
+  // 不変条件 8. `stalled` is the finding that the worker is not answering, so
+  // waiting for one more message from it would only widen the window in which
+  // the tab can close and the event be lost.
+  it("does not wait for a follow-up when the run ends `stalled`", () => {
+    const { view, worker, requestId } = startRun();
+
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+
+    const calls = trackMock.mock.calls.filter(([name]) => name === "run_result");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({ outcome: "stalled" });
+    // And `data-search` reaches `done` here rather than waiting on a message
+    // that may never come — an e2e negative assertion hangs otherwise
+    // (Gate2 1 周目 H2).
+    expect(searchStateOf(view)).toBe("done");
+
+    // The worker recovers and answers late: no hint is appended to the
+    // "engine stopped responding" message, and no second event.
+    deliverFollowUp(worker, { type: "syntax-hint", requestId, repair });
+    expect(view.container.textContent).not.toContain(repairHint(repair));
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+  });
+
+  // The tab was closed while a result was waiting. The event is lost by
+  // design (不変条件 6 names this as the one loss); what must not happen is a
+  // timer firing into an unmounted tree.
+  it("drops the waiting result when the component unmounts", () => {
+    const { view, worker, requestId } = startRun();
+    deliverSyntaxVerdict(worker, requestId);
+    trackMock.mockClear();
+
+    view.unmount();
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(0);
   });
 });
