@@ -56,7 +56,7 @@ Gate2 で **「上限では探索の時間を抑えきれない」という同�
 | Q6 | 探索する大きさの上限を 64 kB → **16 kB** に下げ、既存の二重引用符・`silent_loss` の探索にも同じ値で効かせる。**守るものは「`outcome` の正しさ」ではなく「探索中に `lint` が止まる時間」**（下の「lint が止まる時間」） |
 | Q7 | 16 kB に加えて、**Run ごとに探索全体で共有する 3 秒の打ち切り**を入れる。守るものは Q6 と同じ。**超えても `outcome` は壊れない**ので、「超えたら人へ戻す」合格線は撤回する |
 | **Q12** | **#76（元のパースそのものが重い）は別 PR**。手段 A は探索の遅さを判定から切り離すだけで、元のパースには効かない |
-| **Q13** | 出力パネルに `data-search`（`idle` / `pending` / `done`）を持たせる。**追いかけの 1 通が届いたか**を表すひとつの状態で、失敗側（`syntax-hint`）と成功側（`silent-loss`）の両方を覆う。ヒントが「出ない」ことを e2e で確かめる足場（#70）— `done` を待ってから不在を主張する |
+| **Q13** | 出力パネルに `data-search`（`idle` / `pending` / `done`）を持たせる。**`done` の意味は「この Run について、もう何も来ない」** — 追いかけが届いた場合と、待つのをやめた場合（不変条件 8 の 3 つ）の両方が `done` になる。「届いた」だけにすると `stalled` のあと二度と `done` にならず、不在を確かめる e2e が 30 秒待って落ちる（Gate2 1 周目 H2）。失敗側（`syntax-hint`）と成功側（`silent-loss`）の両方を覆う。ヒントが「出ない」ことを e2e で確かめる足場（#70）— `done` を待ってから不在を主張する |
 
 ## プロトコル（Q8 / Q9）
 
@@ -200,13 +200,19 @@ Run 1 回あたりの平均は約 20 行（GA4 2026-08-28..09-10、7,312 回）�
 5. **1 回の `transpile` 要求に対して、ワーカーは必ず 2 通返す。** 追いかけの 1 通が欠けると、親は `run_result` を
    20 秒待ってから送ることになる（壊れはしないが遅れる）
 6. **`run_click` と `run_result` は 1:1 のまま。** 送るのが遅れるだけで、落とさない。落ちうるのは
-   「追いかけを待っている間にタブを閉じた Run」だけ
+   「追いかけを待っている間にタブを閉じた Run」だけ — そして待つのは**判定が画面に出た Run だけ**なので
+   （不変条件 8）、その窓に入るのは「エラーか出力を見せられた状態で 20 秒以内にタブを閉じた人」に限られる
 7. **`duration_ms` の意味を変えない** — `endRun` が呼ばれた時点で確定させ、追いかけ待ちを足さない
-8. **`stalled` は追いかけを待たない。** ワーカーが答えないという判定そのものなので、待てば 20 秒足して送ることになり、
-   取りこぼしの窓が倍になる。`stalled` はその場で送る
-9. **変わることを 1 つ受け入れる**: トランスパイル中に Stop を押した Run は、いままで `silent_loss` が付かなかったが、
-   これからは追いかけを待つあいだに探索が終わるので値が付きうる。`CLAUDE.md` が挙げる「absence の原因」から
-   「トランスパイル前の Stop」が減る。データは増える方向なので受け入れ、文書を直す
+8. **見捨てられた Run は追いかけを待たない。** `stalled` / `stopped` / `cancelled` の 3 つ。
+   根っこは 1 つで、**ヒントを見る人がいない Run に測定を遅らせない**こと。`stalled` はワーカーが答えないという判定
+   そのものなので待てば 20 秒足すだけ。`stopped` はユーザーが自分でやめた Run で、画面にエラーは出ておらず
+   （`stopped` のメッセージは `error` ではなく `statusMessage`）継ぎ足す先が無い。`cancelled` は
+   もう一方のモードがサンドボックスを取った Run で、同じく誰も見ていない。**この 3 つはその場で送る**
+9. **Stop を押した Run の `silent_loss` は今までどおり付かない。** 手段 A の初稿では追いかけを待たせていて、
+   その結果「`CLAUDE.md` の absence の原因からトランスパイル前の Stop が減る」という変化を受け入れる話になっていたが、
+   不変条件 8 を 3 つに広げたのでこの変化は起きない。**`CLAUDE.md` の absence の記述は直さなくてよい**
+   （Gate2 1 周目 M2。待たせると「Stop を押した全 Run」が最大 20 秒ぶん取りこぼしの窓に入り、
+   `run_click`/`run_result` の 1:1 を守る母数がそのぶん薄くなる）
 10. `syntax_key` / `syntax_statement` / 表示されるエラーメッセージは今までどおり `errors[0]` から
 11. ヒントの文言は作者が書いた固定文。Tailwind のユーティリティ名になる英単語を裸で書かない（#44）
 
@@ -229,7 +235,7 @@ npm test -- src/workers/statementEndRepair.test.ts src/workers/searchSizeCap.tes
                                                 # 候補の表の全行は statementEndRepair.test.ts、16 kB は searchSizeCap.test.ts、
                                                 # 3 秒の打ち切りは searchDeadline.test.ts（時計を差し替えた単体テスト）。
                                                 # 既存 syntaxRepair.test.ts は無修正。実装前に新ケースが赤であること
-npx playwright test e2e/syntaxHint.spec.ts --project=chromium --project=firefox --repeat-each=5
+./node_modules/.bin/playwright test e2e/syntaxHint.spec.ts --project=chromium --project=firefox --repeat-each=5
 npm run lint && npm run typecheck && npm test && npm run build   # すべて exit 0
 diff <(tr "}" "\n" < before.css) <(tr "}" "\n" < dist/assets/index-*.css)  # 新しい CSS ルールが増えていない
 ```
@@ -246,7 +252,10 @@ e2e が唯一の証拠になる」と書いていた。**事実として誤り�
 - `App.tsx` — **単体テストがある。** FakeWorker の `onmessage` を直接叩けるので、「追いかけが来ないまま 20 秒」
   「A の追いかけが B に付かない」「unmount 後にタイマーが発火しない」「`stalled` は待たない」は単体で書ける。
   **Task 5 は赤→緑の証拠をここで取る**（e2e に丸投げしない）
-- `abaplintWorker.ts` — 単体テストは無い。ワーカーの 2 通プロトコルは e2e が証拠になる
+- `abaplintWorker.ts` — **単体テストをこの PR で足す**（`src/workers/abaplintWorker.test.ts`）。
+  `self.onmessage` を直接呼んで `self.postMessage` を数えるだけで「1 要求につき必ず 2 通」が固定でき、
+  **判定の経路が投げたら 0 通**という穴（Gate2 1 周目 H3）は e2e では作れない。ブラウザ 3 種での
+  実際の到着順は引き続き e2e が証拠
 
 1. **判定が先に出ること** — 16 kB の重い形（`x⏎` × 8,192）を貼って Run し、`stopped responding` が出ずにエラーが表示される。
    これが手段 A の効き目そのもの。**時間の合格線は先に測ってから置く**: 同じ入力の「元のパース 1 回」をそのブラウザで測り、
@@ -255,7 +264,10 @@ e2e が唯一の証拠になる」と書いていた。**事実として誤り�
 2. **ヒントが後から届いて継ぎ足されること** — `WRITE 'a';` で `semicolon`、`WRITE: 'a',` ⏎ `'b'` で `missing_period`
 3. **ヒントが「出ない」こと**（`console.log('a')` の貼り付け）— **エラーが見えただけでは証拠にならない**。
    いまはエラーとヒントが同じ更新で決まるので不在が同時に確定していたが、A のあとヒントは後から来る。
-   `data-search`（Q13）が `pending` から `done` に変わるまで待ってから、ヒントが無いことを確かめる（#70 の教訓）
+   `data-search`（Q13）が `pending` から `done` に変わるまで待ってから、ヒントが無いことを確かめる（#70 の教訓）。
+   **`done` は「待つのをやめた」ときにも立つ**ので、`done` を待つ否定テストは**必ず同じテストの中で
+   期待するエラー文が出ていることも主張する** — さもないと `stalled` した Run（`done` が即座に立つ）に対して
+   空振りで緑になり、壊れたビルドを通してしまう
 4. **既存の e2e 4 件が同じ理由で無効になるので、同じ足場で直す** — `syntaxHint.spec.ts` の否定 2 件、
    `silentLoss.spec.ts` の `a correct program that prints nothing gets no hint`（プレースホルダが出た時点では
    `silent-loss` がまだ届いていない）と `a partly eaten chain still prints what survived`（出力の表示と

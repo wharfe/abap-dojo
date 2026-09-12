@@ -40,7 +40,9 @@
 | `src/workers/searchDeadline.test.ts` | 新規 | 3 |
 | `src/types/messages.ts` | `syntax-hint` / `silent-loss` を追加、`repair` / `silentLoss*` を判定メッセージから降ろす | 4 |
 | `src/workers/abaplintWorker.ts` | 判定を先に post し、探索の後で追いかけを post する | 4 |
+| `src/workers/abaplintWorker.test.ts` | 新規・1 要求につき必ず 2 通（判定の経路が投げても） | 4 |
 | `src/App.tsx` | 判定で表示、追いかけで `run_result`。`data-search` の状態 | 5 |
+| `src/App.test.tsx` | 既存 1 件を新プロトコルへ、追いかけの状態機械の新規 5 件 | 5 |
 | `src/components/OutputPanel.tsx` | `data-search` 属性 | 5 |
 | `e2e/helpers.ts` | `waitForSearchDone` を足し、`waitForRunToEnd` の説明を直す | 6 |
 | `e2e/syntaxHint.spec.ts` | 新規 3 件 + 既存の否定 2 件を直す | 6 |
@@ -808,7 +810,12 @@ git commit -m "ピリオド抜けとセミコロンを再パースで探し、�
 
 **Interfaces:**
 - Consumes: `findSyntaxRepair`, `findSilentLoss`（`syntaxRepair.ts`）、`findStatementEndRepair`（Task 2）
-- Produces: `SEARCH_BUDGET_MS = 3000`、`class SearchDeadlineExceeded extends Error`、`withDeadline<T>(reparse: (c: string) => Promise<T>, deadline: number, now?: () => number): (c: string) => Promise<T>`
+- Produces: `SEARCH_BUDGET_MS = 3000`、`class SearchDeadlineExceeded extends Error`、`withDeadline<T>(reparse: (c: string) => Promise<T>, deadline: number, now?: () => number): (c: string) => Promise<T>`、`bounded<T>(reparse, now?): (deadline: number) => (c: string) => Promise<T>`
+
+**`bounded` は Gate2 1 周目 M1 への答え。** 指摘は「3 か所のうちどれで `withDeadline` を外しても単体も e2e も全緑」
+＝期限の配線に検証が 1 つも無い、というもの。テストを足して見張るのではなく、**外すとコンパイルが通らない形**にする。
+`bounded` は「期限を渡して初めて再パース関数になる」ものを返すので、ワーカーが持つ 3 つの定数は
+`(deadline) => reparse` 型になり、期限を渡し忘れたものを探索に渡すと型が合わない。**包み忘れは型エラーになる。**
 
 - [ ] **Step 1: 失敗するテストを書く** — `src/workers/searchDeadline.test.ts`
 
@@ -817,7 +824,12 @@ import { describe, it, expect } from "vitest";
 import { Buffer } from "buffer";
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
-import { SEARCH_BUDGET_MS, SearchDeadlineExceeded, withDeadline } from "./searchDeadline";
+import {
+  bounded,
+  SEARCH_BUDGET_MS,
+  SearchDeadlineExceeded,
+  withDeadline,
+} from "./searchDeadline";
 import { findSilentLoss, findSyntaxRepair } from "./syntaxRepair";
 import { findStatementEndRepair } from "./statementEndRepair";
 
@@ -841,6 +853,21 @@ describe("withDeadline", () => {
     const clock = fakeClock();
     const reparse = withDeadline(() => Promise.resolve(7), 100, clock.now);
     await expect(reparse("x")).resolves.toBe(7);
+  });
+
+  it("hands out a re-parse only once a deadline is named", async () => {
+    const clock = fakeClock();
+    let calls = 0;
+    const build = bounded(() => {
+      calls++;
+      return Promise.resolve(7);
+    }, clock.now);
+    // `build` itself is not a re-parse — it takes the deadline and returns one.
+    const reparse = build(100);
+    await expect(reparse("x")).resolves.toBe(7);
+    clock.advance(100);
+    await expect(reparse("x")).rejects.toBeInstanceOf(SearchDeadlineExceeded);
+    expect(calls).toBe(1);
   });
 
   it("refuses to start one at or after the deadline, without calling through", async () => {
@@ -976,6 +1003,26 @@ export function withDeadline<T>(
       ? Promise.reject(new SearchDeadlineExceeded())
       : reparse(candidate);
 }
+
+/**
+ * The same, as the only way to obtain a re-parse function at all.
+ *
+ * A caller holding one of these cannot hand it to a search without naming a
+ * deadline first — the types do not line up — so a forgotten wrapper is a
+ * compile error rather than a search that quietly runs forever. That matters
+ * because nothing else can see the omission: the searches behave identically
+ * with and without a deadline until an input heavy enough to reach it turns
+ * up, and no test in this repo uses one (they pass their own fake re-parse).
+ *
+ * Wrap the raw counter where it is created (abaplintWorker.ts does this on
+ * the same line), so the unbounded form is never in scope at a call site.
+ */
+export function bounded<T>(
+  reparse: (candidate: string) => Promise<T>,
+  now: () => number = () => performance.now(),
+): (deadline: number) => (candidate: string) => Promise<T> {
+  return (deadline) => withDeadline(reparse, deadline, now);
+}
 ```
 
 - [ ] **Step 4: 緑を確認** — Run: `npm test -- src/workers/searchDeadline.test.ts src/workers/statementEndRepair.test.ts src/workers/syntaxRepair.test.ts && npm run typecheck && npm run lint`
@@ -998,6 +1045,7 @@ git commit -m "再パースの探索に Run ごとの 3 秒の打ち切りを足
 - Modify: `src/types/messages.ts`（`WorkerResponse` に 2 つ追加、`repair` / `silentLoss` / `silentLossChecked` を判定メッセージから降ろす）
 - Modify: `src/workers/abaplintWorker.ts`（`handleTranspile` を `void` にして自分で post する）
 - Modify: `src/workers/syntaxRepair.test.ts:546`（消える変数名を指すコメント 1 行だけ）
+- Create: `src/workers/abaplintWorker.test.ts`（「必ず 2 通」の単体テスト。Gate2 1 周目 H3）
 
 **Interfaces:**
 - Consumes: `errorRowCounter`, `errorSpanOf`, `findStatementEndRepair`（Task 2）、`errorIssues`（Task 2）、`withDeadline`, `SEARCH_BUDGET_MS`（Task 3）
@@ -1096,6 +1144,113 @@ git commit -m "再パースの探索に Run ごとの 3 秒の打ち切りを足
 - [ ] **Step 2: 赤を確認（型で）** — Run: `npm run typecheck 2>&1 | head -30; echo "EXIT=$?"`
   Expected: 非 0。`abaplintWorker.ts` と `App.tsx` が、無くなったプロパティを参照して落ちる（`silentLoss`・`silentLossChecked`・`repair`）。**この Step の赤はこの計画で唯一「実装前に配線の穴が型で見える」地点**なので、落ちたファイルと行を控えてから進む
 
+- [ ] **Step 2b: ワーカーに「必ず 2 通」の単体テストを足す** — Create: `src/workers/abaplintWorker.test.ts`
+
+Gate2 1 周目 H3 への赤→緑。**判定の経路が投げたら 0 通になる**という穴は e2e では作れない（abaplint に
+投げさせる入力が要る）が、ここでは依存を 1 つ差し替えるだけで作れる。Vitest の environment は `jsdom`
+（`vite.config.ts:34`）なので `self` があり、ワーカー本体は `self.onmessage = ...` を代入するだけの
+モジュールとして import できる。`self.postMessage` を spy に置き換えて、受け取った順に数える。
+
+```ts
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Buffer } from "buffer";
+(globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
+
+import type { WorkerResponse } from "../types/messages";
+
+// The verdict path calls this, and making it throw is the only way to build
+// the case Gate2 H3 found: an exception between "the parse succeeded" and
+// "the verdict was posted". `vi.mock` is hoisted, so the flag it reads has to
+// be hoisted too.
+const { failClassify } = vi.hoisted(() => ({ failClassify: { on: false } }));
+vi.mock("./syntaxDiagnostics", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./syntaxDiagnostics")>();
+  return {
+    ...actual,
+    classifySyntaxError: (...args: Parameters<typeof actual.classifySyntaxError>) => {
+      if (failClassify.on) throw new Error("classifier blew up");
+      return actual.classifySyntaxError(...args);
+    },
+  };
+});
+
+await import("./abaplintWorker");
+
+const posted: WorkerResponse[] = [];
+let postSpy: ReturnType<typeof vi.spyOn>;
+
+/** Drive one request through the worker's own onmessage and wait for it. */
+async function request(source: string, requestId = "r1"): Promise<WorkerResponse[]> {
+  posted.length = 0;
+  await (self.onmessage as (e: MessageEvent) => Promise<void>)({
+    data: { type: "transpile", source, requestId },
+  } as MessageEvent);
+  return posted;
+}
+
+describe("abaplintWorker — one transpile request, exactly two replies", () => {
+  beforeEach(() => {
+    failClassify.on = false;
+    postSpy = vi
+      .spyOn(self, "postMessage")
+      .mockImplementation(((m: WorkerResponse) => {
+        posted.push(m);
+      }) as unknown as typeof self.postMessage);
+  });
+
+  afterEach(() => {
+    postSpy.mockRestore();
+  });
+
+  it("answers a syntax error with the verdict first, then the hint", async () => {
+    const messages = await request(`WRITE 'a';`);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ type: "transpile-error", kind: "syntax" });
+    expect(messages[1]).toMatchObject({ type: "syntax-hint", requestId: "r1" });
+  });
+
+  it("answers a clean program with the JS first, then the silent-loss result", async () => {
+    const messages = await request(`WRITE 'a'.`);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ type: "transpile-result" });
+    expect(messages[1]).toMatchObject({ type: "silent-loss", completed: true });
+  });
+
+  // The H3 case. Before the try/finally, this posted nothing at all and the
+  // App sat until its 20s watchdog turned a real syntax error into `stalled`.
+  it("still sends a verdict and a follow-up when the verdict path throws", async () => {
+    failClassify.on = true;
+    const messages = await request(`WRITE 'a';`);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      type: "transpile-error",
+      kind: "transpile",
+      requestId: "r1",
+    });
+    expect(messages[1]).toMatchObject({ type: "silent-loss", completed: false });
+  });
+
+  it("echoes the requestId on both replies", async () => {
+    const messages = await request(`WRITE 'a'.`, "abc-123");
+    expect(messages.map((m) => (m as { requestId?: string }).requestId)).toEqual([
+      "abc-123",
+      "abc-123",
+    ]);
+  });
+});
+```
+
+**注意 3 つ。** ①`self.onmessage` は `async` なので `await` して初めて 2 通目まで揃う。await せずに数えると
+1 通目しか見えない。②`vi.spyOn(self, "postMessage")` は jsdom の `window.postMessage`（引数の数が違う）を
+置き換えるので、`mockImplementation` を必ず付ける（素の spy だと本物が呼ばれて投げる）。
+③このテストは実 abaplint を回すので 1 ケース数百 ms かかる。入力は最小に保つ。
+
+- [ ] **Step 2c: 赤を確認してから緑にする** — Run: `./node_modules/.bin/vitest run src/workers/abaplintWorker.test.ts > /tmp/wt.txt 2>&1; tail -30 /tmp/wt.txt`
+  Expected: **この時点では 4 件とも FAIL**（ワーカーはまだ 1 通しか返さず、3 件目は例外がそのまま外へ出る）。
+  Step 3 を当てたあとに同じコマンドで 4 件とも PASS。**この順序を守ること** — Step 3 を先に書いてしまうと
+  この Task でいちばん確かめたい「0 通になる穴」に赤を一度も見ないまま緑だけを見ることになる。
+  （`npx` はガードフックに拒否される。vitest は `console.log` を出さないのでファイルに落とす — HANDOFF の注意）
+
 - [ ] **Step 3: ワーカーを書き換える** — `src/workers/abaplintWorker.ts`
 
 import に追加（`} from "./syntaxRepair";` の直後）:
@@ -1106,15 +1261,27 @@ import {
   errorSpanOf,
   findStatementEndRepair,
 } from "./statementEndRepair";
-import { SEARCH_BUDGET_MS, withDeadline } from "./searchDeadline";
+import { bounded, SEARCH_BUDGET_MS } from "./searchDeadline";
 ```
 
 既存の `} from "./syntaxRepair";` の import 一覧に `errorIssues` を足す。
 
-`const scoreIn = ...`（35 行目）の直後:
+`errorsIn` / `scoreIn`（34〜35 行目）を `bounded` で包み、3 つ目を足す。旧:
 
 ```ts
-const errorRowsIn = errorRowCounter(abaplintConfig, SOURCE_FILENAME);
+const errorsIn = errorCounter(abaplintConfig, SOURCE_FILENAME);
+const scoreIn = statementScorer(abaplintConfig, SOURCE_FILENAME);
+```
+
+新:
+
+```ts
+// Wrapped where they are created, so the unbounded form is never in scope at
+// a call site and a forgotten deadline cannot compile (Gate2 1 周目 M1).
+// Each is now `(deadline) => reparse`, not a re-parse.
+const errorsIn = bounded(errorCounter(abaplintConfig, SOURCE_FILENAME));
+const scoreIn = bounded(statementScorer(abaplintConfig, SOURCE_FILENAME));
+const errorRowsIn = bounded(errorRowCounter(abaplintConfig, SOURCE_FILENAME));
 ```
 
 `function isError`（57〜59 行）を削除する（唯一の呼び出しは 90 行で、`errorIssues` に置き換わる。エラーの定義を 1 か所に揃える — Gate2 3 周目 L-a）。削除前に `grep -n isError src/workers/abaplintWorker.ts` が 57 と 90 だけを出すことを確かめる。
@@ -1135,140 +1302,196 @@ const errorRowsIn = errorRowCounter(abaplintConfig, SOURCE_FILENAME);
  * this function post them itself keeps "exactly one follow-up, always" in one
  * place instead of spread across the caller's branches.
  *
- * Every search swallows its own parse failures, and each `post*` below is
- * still wrapped, because the invariant App.tsx depends on is that the
- * follow-up is sent NO MATTER WHAT. A throw escaping after the verdict would
- * not corrupt the verdict any more — it is already gone — but it would strand
- * the App waiting 20s for a message that never comes.
+ * ## Why the whole body is inside one try/finally
+ *
+ * The invariant App.tsx waits on is that a follow-up is sent NO MATTER WHAT.
+ * Wrapping only the parts known to be risky is what broke it once already:
+ * `new Registry(...)`, `first.getMessage()` and `classifySyntaxError(...)` sit
+ * on the verdict path, and a throw from any of them left the request with
+ * zero messages — the App then showed a real syntax error as `stalled` 20s
+ * later, which is the exact failure this change exists to remove (Gate2 1
+ * 周目 H3). So the rule here is structural, not a list of risky calls: every
+ * exit runs `finally`, and `finally` sends a follow-up if nothing else did.
+ *
+ * `verdict` records which one is owed, so the follow-up still pairs with the
+ * message the App received (`syntax-hint` after a syntax verdict,
+ * `silent-loss` after everything else). App.tsx treats the two the same, but
+ * a mismatched pair would make the protocol unreadable in a trace.
  */
 async function handleTranspile(source: string, requestId: string): Promise<void> {
-  const reg = new Registry(abaplintConfig);
-  // `readonly`, not `Issue[]`: findIssues returns `readonly Issue[]`
-  // (abaplint.d.ts:4197). The current code infers it; annotating it by hand
-  // is what makes the mismatch visible (TS4104). Gate2 C1.
-  let issues: readonly Issue[];
+  let verdict: "none" | "syntax" | "other" = "none";
+  let followUpSent = false;
+  const postFollowUp = (message: WorkerResponse) => {
+    if (followUpSent) return;
+    followUpSent = true;
+    self.postMessage(message);
+  };
+
   try {
-    reg.addFile(new MemoryFile(SOURCE_FILENAME, source));
-    await reg.parseAsync();
-    issues = reg.findIssues();
-  } catch (e) {
-    // The parse itself threw, so there is no verdict and nothing to search.
-    const msg = e instanceof Error ? e.message : String(e);
-    self.postMessage({
-      type: "transpile-error",
-      kind: "transpile",
-      message: msg,
-      diagnostics: classifyTranspileError(msg),
-      requestId,
-    });
-    self.postMessage({ type: "silent-loss", requestId, completed: false });
-    return;
-  }
-
-  const errors = errorIssues(issues);
-  if (errors.length > 0) {
-    const first = errors[0];
-    self.postMessage({
-      type: "transpile-error",
-      kind: "syntax",
-      message: first.getMessage(),
-      line: first.getStart().getRow(),
-      // The message above is what the user reads and it embeds their source;
-      // this is the half we are allowed to count. `first` is deliberately the
-      // same issue in both, so the metric can be checked against the screen.
-      syntaxDiagnostics: classifySyntaxError(
-        first.getKey(),
-        errors.length,
-        first.getMessage(),
-      ),
-      requestId,
-    });
-
-    // The verdict is out. Everything below only decides whether a hint
-    // follows it, and costs at most 33 re-parses — 11 per kind, none above
-    // MAX_SOURCE_CHARS, none started once SEARCH_BUDGET_MS has passed. Never
-    // on `lint`, which fires on every keystroke. Not scoped to the
-    // parse-failure keys: any Error-severity outcome gets the search, which is
-    // a superset of what can ever match and one fewer rule to keep in step
-    // with abaplint.
-    //
-    // The double quote is tried first and unchanged; the statement-end search
-    // (#67) only runs when it found nothing, so what `double_quote` reports
-    // cannot move except where the deadline cuts a search short.
-    let repair: SyntaxRepair | undefined;
+    const reg = new Registry(abaplintConfig);
+    // `readonly`, not `Issue[]`: findIssues returns `readonly Issue[]`
+    // (abaplint.d.ts:4197). The current code infers it; annotating it by hand
+    // is what makes the mismatch visible (TS4104). Gate2 C1.
+    let issues: readonly Issue[];
     try {
-      const deadline = performance.now() + SEARCH_BUDGET_MS;
-      repair =
-        (await findSyntaxRepair(
-          source,
-          countErrors(issues),
-          withDeadline(errorsIn, deadline),
-        )) ??
-        (await findStatementEndRepair(
-          source,
-          errors.map(errorSpanOf),
-          withDeadline(errorRowsIn, deadline),
-        ));
-    } catch {
-      repair = undefined;
+      reg.addFile(new MemoryFile(SOURCE_FILENAME, source));
+      await reg.parseAsync();
+      issues = reg.findIssues();
+    } catch (e) {
+      // The parse itself threw, so there is no verdict and nothing to search.
+      const msg = e instanceof Error ? e.message : String(e);
+      verdict = "other";
+      self.postMessage({
+        type: "transpile-error",
+        kind: "transpile",
+        message: msg,
+        diagnostics: classifyTranspileError(msg),
+        requestId,
+      });
+      return;
     }
-    self.postMessage({ type: "syntax-hint", requestId, repair });
-    return;
-  }
 
-  // No error, so the hint search has nothing to improve on. Transpile and
-  // answer FIRST — the sandbox can start executing while we look — then run
-  // the other search: a chained statement whose operand a comment ate, which
-  // parses, transpiles and runs while printing less than the user wrote
-  // (#68). It used to run before transpiling so its answer existed on both
-  // exits; running it after both exits below gives the same coverage and
-  // stops every successful Run from waiting on it.
-  try {
-    const transpiler = new Transpiler({ ignoreSourceMap: true });
-    const output = await transpiler.run(reg);
+    const errors = errorIssues(issues);
+    if (errors.length > 0) {
+      const first = errors[0];
+      verdict = "syntax";
+      self.postMessage({
+        type: "transpile-error",
+        kind: "syntax",
+        message: first.getMessage(),
+        line: first.getStart().getRow(),
+        // The message above is what the user reads and it embeds their source;
+        // this is the half we are allowed to count. `first` is deliberately the
+        // same issue in both, so the metric can be checked against the screen.
+        syntaxDiagnostics: classifySyntaxError(
+          first.getKey(),
+          errors.length,
+          first.getMessage(),
+        ),
+        requestId,
+      });
 
-    // Combine all transpiled chunks into a single JS string
-    const jsChunks = output.objects.map((o) => o.chunk.getCode());
-    const js = [
-      ...jsChunks,
-      output.initializationScript,
-      output.initializationScript2,
-    ].join("\n");
+      // The verdict is out. Everything below only decides whether a hint
+      // follows it, and costs at most 33 re-parses — 11 per kind, none above
+      // MAX_SOURCE_CHARS, none started once SEARCH_BUDGET_MS has passed. Never
+      // on `lint`, which fires on every keystroke. Not scoped to the
+      // parse-failure keys: any Error-severity outcome gets the search, which is
+      // a superset of what can ever match and one fewer rule to keep in step
+      // with abaplint.
+      //
+      // The double quote is tried first and unchanged; the statement-end search
+      // (#67) only runs when it found nothing, so what `double_quote` reports
+      // cannot move except where the deadline cuts a search short.
+      let repair: SyntaxRepair | undefined;
+      try {
+        const deadline = performance.now() + SEARCH_BUDGET_MS;
+        repair =
+          (await findSyntaxRepair(source, countErrors(issues), errorsIn(deadline))) ??
+          (await findStatementEndRepair(
+            source,
+            errors.map(errorSpanOf),
+            errorRowsIn(deadline),
+          ));
+      } catch {
+        repair = undefined;
+      }
+      postFollowUp({ type: "syntax-hint", requestId, repair });
+      return;
+    }
 
-    self.postMessage({ type: "transpile-result", js, requestId });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    self.postMessage({
-      type: "transpile-error",
-      kind: "transpile",
-      message: msg,
-      diagnostics: classifyTranspileError(msg),
+    // No error, so the hint search has nothing to improve on. Transpile and
+    // answer FIRST — the sandbox can start executing while we look — then run
+    // the other search: a chained statement whose operand a comment ate, which
+    // parses, transpiles and runs while printing less than the user wrote
+    // (#68). It used to run before transpiling so its answer existed on both
+    // exits; running it after both exits below gives the same coverage and
+    // stops every successful Run from waiting on it.
+    try {
+      const transpiler = new Transpiler({ ignoreSourceMap: true });
+      const output = await transpiler.run(reg);
+
+      // Combine all transpiled chunks into a single JS string
+      const jsChunks = output.objects.map((o) => o.chunk.getCode());
+      const js = [
+        ...jsChunks,
+        output.initializationScript,
+        output.initializationScript2,
+      ].join("\n");
+
+      verdict = "other";
+      self.postMessage({ type: "transpile-result", js, requestId });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      verdict = "other";
+      self.postMessage({
+        type: "transpile-error",
+        kind: "transpile",
+        message: msg,
+        diagnostics: classifyTranspileError(msg),
+        requestId,
+      });
+    }
+
+    let search: SilentLossSearch = { completed: false };
+    try {
+      search = await findSilentLoss(
+        source,
+        { errors: 0, real: countRealStatements(reg) },
+        scoreIn(performance.now() + SEARCH_BUDGET_MS),
+      );
+    } catch {
+      search = { completed: false };
+    }
+    // Only a search that ran to the end may be reported as having run. A search
+    // that gave up leaves `loss` unset with `completed: false`, so the event
+    // omits `silent_loss` rather than claiming `none` for a look that never
+    // finished.
+    postFollowUp({
+      type: "silent-loss",
       requestId,
+      completed: search.completed,
+      loss: search.completed ? search.loss : undefined,
     });
-  }
-
-  let search: SilentLossSearch = { completed: false };
-  try {
-    search = await findSilentLoss(
-      source,
-      { errors: 0, real: countRealStatements(reg) },
-      withDeadline(scoreIn, performance.now() + SEARCH_BUDGET_MS),
+  } catch (e) {
+    // Reached only from the verdict path — every search above swallows its
+    // own failures. If no verdict went out, send one: a `transpile_error` is
+    // both true (we could not produce JS) and the outcome this code produced
+    // before the message was split, so the `transpile_error`/`stalled` pair
+    // CLAUDE.md calls load-bearing keeps its meaning.
+    if (verdict === "none") {
+      const msg = e instanceof Error ? e.message : String(e);
+      let diagnostics: TranspileDiagnostics | undefined;
+      try {
+        diagnostics = classifyTranspileError(msg);
+      } catch {
+        // The classifier is the other thing on this path that can throw, and
+        // the field is optional — report the failure without its diagnosis
+        // rather than losing the verdict to a second throw.
+        diagnostics = undefined;
+      }
+      verdict = "other";
+      self.postMessage({
+        type: "transpile-error",
+        kind: "transpile",
+        message: msg,
+        diagnostics,
+        requestId,
+      });
+    }
+  } finally {
+    // The one place "exactly one follow-up" is enforced. A no-op on every
+    // path that already sent one.
+    postFollowUp(
+      verdict === "syntax"
+        ? { type: "syntax-hint", requestId }
+        : { type: "silent-loss", requestId, completed: false },
     );
-  } catch {
-    search = { completed: false };
   }
-  // Only a search that ran to the end may be reported as having run. A search
-  // that gave up leaves `loss` unset with `completed: false`, so the event
-  // omits `silent_loss` rather than claiming `none` for a look that never
-  // finished.
-  self.postMessage({
-    type: "silent-loss",
-    requestId,
-    completed: search.completed,
-    loss: search.completed ? search.loss : undefined,
-  });
 }
 ```
+
+`TranspileDiagnostics` は `../types/diagnostics` から型として import する（`classifyTranspileError` の戻り値型。
+既存の import 行に足す。すでにあるなら足さない — `grep -n TranspileDiagnostics src/workers/abaplintWorker.ts` で確かめる）。
 
 import を直す。旧（23 行）:
 
@@ -1327,7 +1550,7 @@ import type { SilentLossSearch } from "./syntaxRepair";
 
 ```bash
 if ! git diff src/workers/abaplintWorker.ts | grep -q 'type: "syntax-hint"'; then echo "WIRING_MISSING"; exit 1; fi
-git add src/types/messages.ts src/workers/abaplintWorker.ts src/workers/syntaxRepair.test.ts
+git add src/types/messages.ts src/workers/abaplintWorker.ts src/workers/abaplintWorker.test.ts src/workers/syntaxRepair.test.ts
 git commit -m "ワーカーの返信を判定と探索結果の 2 通に割る (#75, #67)"
 ```
 
@@ -1342,6 +1565,7 @@ git commit -m "ワーカーの返信を判定と探索結果の 2 通に割る (
 **Files:**
 - Modify: `src/App.tsx`
 - Modify: `src/components/OutputPanel.tsx`
+- Modify: `src/App.test.tsx`（既存 1 件を新プロトコルへ。新規 5 件。Gate2 1 周目 C2 / H1）
 
 **Interfaces:**
 - Consumes: `syntax-hint` / `silent-loss`（Task 4）、`repairHint`（Task 1）
@@ -1363,6 +1587,14 @@ git commit -m "ワーカーの返信を判定と探索結果の 2 通に割る (
    * asserts a hint is ABSENT has no other way to know it waited long enough.
    * That gap is #70: a negative assertion that runs before the last moment
    * the element could appear passes against a build without the fix.
+   *
+   * `done` means "nothing more is coming for this run", NOT "the follow-up
+   * arrived". A run that ends `stalled` is exactly the case where the worker
+   * may never answer at all, and reading it the other way left this stuck on
+   * `pending` for good — the negative tests above then waited out their own
+   * timeout instead of asserting anything (Gate2 1 周目 H2). The cost of the
+   * wider meaning: `done` alone no longer proves a search ran, so a test that
+   * waits for it must also assert the verdict it expected is on screen.
    */
   searchState: "idle" | "pending" | "done";
 ```
@@ -1405,7 +1637,44 @@ git commit -m "ワーカーの返信を判定と探索結果の 2 通に割る (
    * retroactive).
    */
   const pendingResultRef = useRef<EventMap["run_result"] | null>(null);
+  /**
+   * The 20s backstop for the result above.
+   *
+   * It and `followUpRef` do NOT have the same lifetime, and that is the
+   * point: `followUpRef` says "a follow-up may still arrive and still
+   * belongs to the run on screen", while this one says "a result is waiting
+   * to be sent". `endRun` can clear the first and arm the second (a run that
+   * ended before its follow-up), and `flushPendingResult` clears the second
+   * without touching the first (a follow-up that arrived on time). Tying
+   * them together would mean either dropping a hint that is still relevant,
+   * or sending the same `run_result` twice. Gate2 1 周目 L2.
+   */
   const followUpTimerRef = useRef<number | undefined>(undefined);
+```
+
+`WORKER_TIMEOUT_MS`（44 行）の直後に、追いかけを待たない outcome を置く:
+
+```ts
+/**
+ * The outcomes that do not wait for the worker's follow-up message.
+ *
+ * All three end a run nobody is waiting on an explanation for. `stalled` IS
+ * the finding that the worker is not answering, so waiting on it would add
+ * 20s to nothing. `stopped` is the user's own choice and puts its message in
+ * `statusMessage`, not `error` — there is no error on screen for a hint to be
+ * appended to. `cancelled` means the other mode took the sandbox away.
+ *
+ * For every other outcome the user is looking at a verdict, so the follow-up
+ * has somewhere to go and the run is measured once, with it. Waiting on these
+ * three instead would put every Stop press into the window where closing the
+ * tab loses the `run_result` — and `run_click`/`run_result` reconciling 1:1
+ * is how an orphaned run is detected at all (Gate2 1 周目 M2).
+ */
+const ABANDONED_OUTCOMES: ReadonlySet<RunOutcome> = new Set<RunOutcome>([
+  "stalled",
+  "stopped",
+  "cancelled",
+]);
 ```
 
 `track` の署名は `track<K extends EventName>(name: K, params: EventMap[K])`（`src/utils/analytics.ts:464`）
@@ -1475,10 +1744,9 @@ import { track, lineCount, type EventMap, type RunOutcome } from "./utils/analyt
         syntax_statement: syntaxDiagnostics?.statement,
       };
       // Wait for the follow-up so the run is measured once, with whatever the
-      // searches found on it. `stalled` is the exception: it means the worker
-      // is not answering, so waiting would only add 20s to the window in which
-      // the tab can be closed and the event lost.
-      if (followUpRef.current !== "" && outcome !== "stalled") {
+      // searches found on it — but only for a run whose verdict the user is
+      // actually looking at (see ABANDONED_OUTCOMES).
+      if (followUpRef.current !== "" && !ABANDONED_OUTCOMES.has(outcome)) {
         pendingResultRef.current = params;
         window.clearTimeout(followUpTimerRef.current);
         followUpTimerRef.current = window.setTimeout(
@@ -1487,7 +1755,14 @@ import { track, lineCount, type EventMap, type RunOutcome } from "./utils/analyt
         );
         return;
       }
+      // Nothing more is coming for this run. Dropping the correlation stops a
+      // late follow-up from appending a hint to a message it does not belong
+      // to, and `done` has to be said HERE rather than left to that message:
+      // a stalled worker may never send one, and this attribute stuck on
+      // `pending` is what made the negative e2e tests wait out their own
+      // timeout (Gate2 1 周目 H2).
       followUpRef.current = "";
+      setSearchState("done");
       pendingResultRef.current = params;
       flushPendingResult();
     },
@@ -1607,11 +1882,26 @@ import { track, lineCount, type EventMap, type RunOutcome } from "./utils/analyt
 
 - [ ] **Step 4: `handleRun` と表示の状態** — `src/App.tsx`
 
-`searchState` の state を `silentLossHint_` の宣言の直後に足す:
+`searchState` の state を `silentLossHint_` の宣言の直後（`src/App.tsx:146` の塊の後、
+`endRun` の 212 行より前）に足す。**`endRun` が読むので宣言はそれより前でなければならない。**
 
 ```ts
   const [searchState, setSearchState] = useState<"idle" | "pending" | "done">("idle");
 ```
+
+`handleModeChange` の `setMode(newMode);` の直後に 1 行足す:
+
+```ts
+      // The next run in this mode starts from `idle`, not from whatever the
+      // last one left behind. Only `handleRun` sets `pending`, so a stale
+      // `done` sitting here would let a test (or a reader) take the previous
+      // run's answer for this one. Gate2 1 周目 L1.
+      setSearchState("idle");
+```
+
+**`handleRun` の側は追加の手当てが要らない** — React はクリックのような discrete event の中の
+setState を同じフラッシュで反映するので、`await page.click(Run)` が返った時点で `data-search` は
+すでに `pending`。前の Run の `done` を読む隙間は無い。
 
 `handleRun` の中、`silentLossRef.current = undefined;` の行の前後を書き換える。旧:
 
@@ -1674,6 +1964,302 @@ import { track, lineCount, type EventMap, type RunOutcome } from "./utils/analyt
     };
 ```
 
+- [ ] **Step 4b: 既存の `src/App.test.tsx` を新しいプロトコルに合わせる** — Gate2 1 周目 C2
+
+**まず事実を確かめる。** レビューは「この変更で 4 件落ちる」と報告した（`App.test.tsx:150 / 216 / 397 / 503`）。
+根は 1 つ — FakeWorker が追いかけの 1 通を送らないので `endRun` が結果を溜めたまま返り、`run_result` が 0 件になる。
+**ただしその 4 件のうち 3 件は `stopped` の Run で、この計画が `ABANDONED_OUTCOMES` を入れたことで待たなくなった**
+（Gate2 M2 への手当てと同じ 1 行）。残る 1 件だけが本当に直す対象:
+
+| 行 | outcome | この計画での扱い |
+|---|---|---|
+| 150 | `stopped`（トランスパイル中の Stop） | 待たない → **無修正で緑のはず** |
+| 216 | `stopped` | 同上 |
+| 397 | `stopped` | 同上 |
+| 503 | `success`（`onDone`） | **待つ → テストが追いかけを送る必要がある** |
+
+「はず」は証拠ではない。**Step 4c で実際に走らせて確かめる**（3 件が緑であることも含めて）。もし
+`stopped` の 3 件が落ちるなら、`ABANDONED_OUTCOMES` の配線が入っていない。
+
+`App.test.tsx` の `lastTranspileRequestId` の直後に、追いかけを送るヘルパーを足す:
+
+```ts
+/**
+ * Deliver the worker's second reply — the one the real abaplintWorker.ts
+ * always sends after its verdict (#67/#75). Nothing in App.tsx sends
+ * `run_result` for a run that ended on a verdict until this arrives, so a
+ * test that ends a run and then counts events has to play this side of the
+ * protocol or it is asserting against a half-finished round trip.
+ */
+function deliverFollowUp(
+  worker: InstanceType<typeof FakeWorker>,
+  message: { type: "syntax-hint" | "silent-loss" } & Record<string, unknown>,
+) {
+  act(() => {
+    worker.onmessage?.({ data: message } as MessageEvent);
+  });
+}
+```
+
+503 の `onDone` の直後（`expect(...run_result...).toHaveLength(1)` の前）に 1 行入れる:
+
+```ts
+    act(() => {
+      sandboxProps!.onDone(playgroundRequestId, 1);
+    });
+    // The worker's follow-up for this run — App holds `run_result` until it
+    // lands (or 20s pass), so without it the count below is 0.
+    deliverFollowUp(worker, {
+      type: "silent-loss",
+      requestId: playgroundRequestId,
+      completed: true,
+    });
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+```
+
+- [ ] **Step 4c: 4 件の現状を実測する** — Run:
+
+```bash
+./node_modules/.bin/vitest run src/App.test.tsx > /tmp/app-test.txt 2>&1
+echo "EXIT=$?"; tail -40 /tmp/app-test.txt
+```
+
+Expected: 全件 PASS。落ちた場合は**行番号ごとに上の表と突き合わせる** — `stopped` の 3 件が落ちたなら
+原因は `ABANDONED_OUTCOMES` 側で、テストを直して合わせにいってはいけない。
+
+- [ ] **Step 4d: 追いかけの状態機械に単体テストを足す** — Gate2 1 周目 H1
+
+いちばん分岐の多いのが Task 5 の App で、そこに赤→緑の証拠がほとんど無い、という指摘。FakeWorker の
+`onmessage` を直接叩けるので、e2e に持っていく必要は無い。`App.test.tsx` の末尾に足す:
+
+```ts
+describe("App — the worker's follow-up message (#67/#75)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    workerInstances.length = 0;
+    executeMock.mockClear();
+    stopMock.mockReset();
+    trackMock.mockClear();
+    sandboxProps = null;
+    window.location.hash = "";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * The OutputPanel's `data-search`. Read with getAttribute, not jest-dom's
+   * `toHaveAttribute`: `@testing-library/jest-dom` is a dependency but is
+   * imported nowhere and `vite.config.ts` declares no `setupFiles`, so its
+   * matchers are not registered in this suite.
+   */
+  function searchStateOf(view: ReturnType<typeof render>): string | null | undefined {
+    return view.container.querySelector("[data-search]")?.getAttribute("data-search");
+  }
+
+  /** Render, boot the fake worker, press Run, and hand back the run in flight. */
+  function startRun() {
+    const view = render(<App />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const worker = workerInstances[0];
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    return { view, worker, requestId: lastTranspileRequestId(worker) };
+  }
+
+  /** The verdict half of a syntax failure, as the worker now sends it. */
+  function deliverSyntaxVerdict(
+    worker: InstanceType<typeof FakeWorker>,
+    requestId: string,
+  ) {
+    act(() => {
+      worker.onmessage?.({
+        data: {
+          type: "transpile-error",
+          kind: "syntax",
+          message: "Statement does not exist",
+          line: 3,
+          requestId,
+        },
+      } as MessageEvent);
+    });
+  }
+
+  const repair = { kind: "missing_period" as const, line: 3 };
+
+  // The verdict is shown immediately and the hint is appended when it lands.
+  // This is the whole of 手段 A from the user's side: the two used to arrive
+  // together, and a slow search delayed both past the watchdog (#75).
+  it("shows the error at once and appends the hint when the follow-up lands", () => {
+    const { view, worker, requestId } = startRun();
+    deliverSyntaxVerdict(worker, requestId);
+
+    // Already on screen, with no hint yet.
+    expect(view.container.textContent).toContain("Statement does not exist");
+    expect(view.container.textContent).not.toContain(repairHint(repair));
+    // ...and nothing has been measured yet: the follow-up is what completes it.
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(0);
+    expect(searchStateOf(view)).toBe("pending");
+
+    deliverFollowUp(worker, { type: "syntax-hint", requestId, repair });
+
+    expect(view.container.textContent).toContain(repairHint(repair));
+    expect(searchStateOf(view)).toBe("done");
+    const calls = trackMock.mock.calls.filter(([name]) => name === "run_result");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({
+      outcome: "syntax_error",
+      syntax_repair: "missing_period",
+    });
+  });
+
+  // The follow-up never comes. The run must still be measured — once — just
+  // without the parameters that message carries. 不変条件 6.
+  it("sends run_result without the search parameters if no follow-up arrives", () => {
+    const { worker, requestId } = startRun();
+    deliverSyntaxVerdict(worker, requestId);
+
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+
+    const calls = trackMock.mock.calls.filter(([name]) => name === "run_result");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({ outcome: "syntax_error" });
+    expect(calls[0][1]).not.toHaveProperty("syntax_repair", "missing_period");
+    // A follow-up that turns up afterwards must not produce a second event.
+    deliverFollowUp(worker, { type: "syntax-hint", requestId, repair });
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+  });
+
+  // A's answer must not be attached to B — the same correlation bug as
+  // #42/#50, one message later.
+  it("does not attach run A's follow-up to run B", () => {
+    const { view, worker, requestId: requestIdA } = startRun();
+    deliverSyntaxVerdict(worker, requestIdA);
+    trackMock.mockClear();
+
+    // B starts. A's result was still pending, so it is flushed as it stands.
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+    const requestIdB = lastTranspileRequestId(worker);
+    expect(requestIdB).not.toBe(requestIdA);
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+    trackMock.mockClear();
+
+    // A's follow-up finally lands.
+    deliverFollowUp(worker, { type: "syntax-hint", requestId: requestIdA, repair });
+
+    // Nothing for B: no event, no hint on screen, and B is still waiting.
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(0);
+    expect(view.container.textContent).not.toContain(repairHint(repair));
+    expect(searchStateOf(view)).toBe("pending");
+  });
+
+  // 不変条件 8. `stalled` is the finding that the worker is not answering, so
+  // waiting for one more message from it would only widen the window in which
+  // the tab can close and the event be lost.
+  it("does not wait for a follow-up when the run ends `stalled`", () => {
+    const { view, worker, requestId } = startRun();
+
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+
+    const calls = trackMock.mock.calls.filter(([name]) => name === "run_result");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({ outcome: "stalled" });
+    // And `data-search` reaches `done` here rather than waiting on a message
+    // that may never come — an e2e negative assertion hangs otherwise
+    // (Gate2 1 周目 H2).
+    expect(searchStateOf(view)).toBe("done");
+
+    // The worker recovers and answers late: no hint is appended to the
+    // "engine stopped responding" message, and no second event.
+    deliverFollowUp(worker, { type: "syntax-hint", requestId, repair });
+    expect(view.container.textContent).not.toContain(repairHint(repair));
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(1);
+  });
+
+  // The tab was closed while a result was waiting. The event is lost by
+  // design (不変条件 6 names this as the one loss); what must not happen is a
+  // timer firing into an unmounted tree.
+  it("drops the waiting result when the component unmounts", () => {
+    const { view, worker, requestId } = startRun();
+    deliverSyntaxVerdict(worker, requestId);
+    trackMock.mockClear();
+
+    view.unmount();
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+
+    expect(
+      trackMock.mock.calls.filter(([name]) => name === "run_result"),
+    ).toHaveLength(0);
+  });
+});
+```
+
+`repairHint` を import する（`import { repairHint } from "./utils/repairHint";`）。**モックしない** —
+文言そのものは Task 1 の `repairHint.test.ts` が持っているので、ここは「画面に出たか」だけを見る。
+**jest-dom のマッチャは使えない**（`package.json:38` に依存はあるが import している場所が無く、
+`vite.config.ts` に `setupFiles` も無い。2026-09-12 確認）。上の `searchStateOf` のように
+`getAttribute` で読む。
+
+- [ ] **Step 4e: 新しい 5 件が本当に配線を見ていることを変異で確かめる**
+
+Step 4d の 5 件は実装のあとに書くので、赤を一度も見ていない。**赤の代わりに変異で取る**（単体なので数秒。
+e2e の変異確認と違ってポートもビルドも要らない）。2 つとも「型は通るが配線が外れる」形にすること。
+変異は `sed` ではなく Python で入れ、**当てる前に対象がちょうど 1 回であることを確かめて止める**。
+
+```bash
+if grep -q '// MUTANT' src/App.tsx; then echo "ALREADY_MUTATED"; exit 1; fi
+BAK=$(mktemp /tmp/app.XXXXXX.bak); cp src/App.tsx "$BAK"
+trap 'cp "$BAK" src/App.tsx' EXIT INT TERM HUP
+
+# (1) 追いかけが届いても溜めた結果を送らない
+python3 -c "
+import sys
+p='src/App.tsx'; s=open(p).read()
+old='          syntaxRepairRef.current = data.repair;'
+if s.count(old)!=1: sys.exit('wiring not found (1)')
+open(p,'w').write(s.replace(old,'          syntaxRepairRef.current = undefined; // MUTANT'))
+" || exit 1
+./node_modules/.bin/vitest run src/App.test.tsx > /tmp/mut-app1.txt 2>&1; echo "MUT1_EXIT=$?"
+grep -E 'Tests ' /tmp/mut-app1.txt
+cp "$BAK" src/App.tsx
+
+# (2) stalled でも追いかけを待つ（不変条件 8 を外す）
+python3 -c "
+import sys
+p='src/App.tsx'; s=open(p).read()
+old='!ABANDONED_OUTCOMES.has(outcome)'
+if s.count(old)!=1: sys.exit('wiring not found (2)')
+open(p,'w').write(s.replace(old,'true /* MUTANT */'))
+" || exit 1
+./node_modules/.bin/vitest run src/App.test.tsx > /tmp/mut-app2.txt 2>&1; echo "MUT2_EXIT=$?"
+grep -E 'Tests ' /tmp/mut-app2.txt
+cp "$BAK" src/App.tsx && git diff --stat src/App.tsx
+```
+  Expected: `MUT1_EXIT` も `MUT2_EXIT` も非 0。(1) は Step 4d の 1 件目（`syntax_repair` が `run_result` に
+  乗らなくなる）、(2) は `stalled` の 1 件と **`stopped` の既存 3 件**が落ちる
+  — 後者は `ABANDONED_OUTCOMES` が既存スイートに効いていることの裏取りでもある。
+  復元後の `git diff --stat src/App.tsx` に `// MUTANT` が残っていないこと
+
 - [ ] **Step 5: 型と lint を通す** — Run: `npm run typecheck; echo "TYPECHECK=$?"; npm run lint; echo "LINT=$?"; npm test; echo "VITEST=$?"`
   Expected: すべて 0。`react-hooks/exhaustive-deps` が出たら deps を足して直す（ref を deps に入れないこと）
 
@@ -1682,7 +2268,7 @@ import { track, lineCount, type EventMap, type RunOutcome } from "./utils/analyt
 ```bash
 if grep -q 'data\.silentLossChecked\|data\.repair' src/App.tsx; then echo "OLD_FIELDS_LEFT"; exit 1; fi
 if ! grep -q 'followUpRef' src/App.tsx; then echo "WIRING_MISSING"; exit 1; fi
-git add src/App.tsx src/components/OutputPanel.tsx
+git add src/App.tsx src/App.test.tsx src/components/OutputPanel.tsx
 git commit -m "判定で表示し、探索の結果が届いてから run_result を送る (#75, #67)"
 ```
 
@@ -1714,6 +2300,11 @@ git commit -m "判定で表示し、探索の結果が届いてから run_result
  * a hint is ABSENT has to come after this, or it is #70 again: a negative
  * that runs before the last moment the element could appear passes against a
  * build with no fix in it at all.
+ *
+ * `done` also covers "App stopped waiting" — a run that ends `stalled`,
+ * `stopped` or `cancelled` reaches it without any search having answered. So
+ * this wait orders a negative assertion; it does not establish that the run
+ * did what the test is about. Assert the expected verdict as well.
  */
 export async function waitForSearchDone(page: Page): Promise<void> {
   await expect(page.locator('[data-search="done"]')).toHaveCount(1, {
@@ -1751,22 +2342,33 @@ export async function waitForSearchDone(page: Page): Promise<void> {
 
 import 行を `import { typeProgram, clickRun, waitForSearchDone } from "./helpers";` にする。
 
-ファイル冒頭のコメントの該当箇所を直す。旧:
+ファイル冒頭のコメント（`e2e/syntaxHint.spec.ts:5-11`）を直す。**2 か所ある** — メッセージの説明と、
+「`App.tsx` には単体テストが無い（#17）」という**事実誤認**。#17 は 2026-08-04 時点では真だったが、
+`src/App.test.tsx`（615 行）はその後に作られており、`run_click`/`run_result` の 1:1 を守っている
+唯一のスイートでもある（Gate2 1 周目 C2）。旧:
 
 ```ts
+ * The hint is produced in the abaplint worker, travels on the
  * `transpile-error` message, and is rendered by OutputPanel. Nothing in the
  * Vitest suite crosses that boundary: `syntaxRepair.test.ts` proves the search
  * and abaplint's judgement, and stops at the module. App.tsx's worker wiring
+ * has no unit tests at all (#17), so a hint that is computed correctly and
+ * then dropped on the way to the screen would look green everywhere except
+ * here.
 ```
 
 新:
 
 ```ts
+ * The hint is produced in the abaplint worker, travels on its own
  * `syntax-hint` message — which arrives AFTER the `transpile-error` that
  * failed the run (#67/#75) — and is rendered by OutputPanel. Nothing in the
  * Vitest suite crosses that boundary: `syntaxRepair.test.ts` and
  * `statementEndRepair.test.ts` prove the searches and abaplint's judgement,
- * and stop at the module. App.tsx's worker wiring
+ * and stop at the module; `App.test.tsx` drives a fake worker, so it proves
+ * App's half of the protocol but never that the real worker sends what App
+ * waits for. A hint that is computed correctly and then dropped on the way to
+ * the screen would look green everywhere except here.
 ```
 
 既存の否定テスト 2 件を直す。1 件目、旧:
@@ -1839,7 +2441,13 @@ test("pasted JavaScript is not told it forgot a period", async ({ page }) => {
   await typeProgram(page, `REPORT ztest.\nconsole.log('a')`);
   await clickRun(page);
 
+  // Assert the verdict we expect BEFORE waiting, and keep it asserted: since
+  // #75 `data-search="done"` also means "we stopped waiting", which a
+  // `stalled` run reaches immediately. Without this line a build that stalls
+  // on everything would satisfy the two negatives below and report success
+  // for the opposite of what they claim (Gate2 1 周目 H2).
   await expect(page.getByText(/Syntax error/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/stopped responding/i)).toHaveCount(0);
   // The hint is a separate message now, so the error being on screen proves
   // nothing about its absence. Wait for the searches to answer first (#70).
   await waitForSearchDone(page);
@@ -1854,8 +2462,19 @@ test("the verdict does not wait for the search on a heavy paste", async ({
   // seconds per parse, and the search re-parses it up to 33 times. While that
   // sat in front of the reply, App.tsx's 20s watchdog fired first and this
   // real syntax error was shown as "The ABAP engine stopped responding".
+  //
+  // The size is the point of the test and it sits ON the boundary: one more
+  // character and MAX_SOURCE_CHARS skips every search, so the run gets fast
+  // for a reason that has nothing to do with the fix and this test silently
+  // stops testing anything (Gate2 1 周目 M3). Assert it, so a change to the
+  // cap fails here instead of going quiet. MAX_SOURCE_CHARS itself is pinned
+  // in src/workers/searchSizeCap.test.ts.
+  const MAX_SOURCE_CHARS = 16_384;
+  const source = `x\n`.repeat(MAX_SOURCE_CHARS / 2);
+  expect(source.length).toBe(MAX_SOURCE_CHARS);
+
   await page.goto("/");
-  await typeProgram(page, `x\n`.repeat(8192));
+  await typeProgram(page, source);
   await clickRun(page);
 
   await expect(page.getByText(/Syntax error/i)).toBeVisible({ timeout: 30_000 });
@@ -1904,6 +2523,22 @@ import 行に `waitForSearchDone` を足す。
 });
 ```
 
+`the hint does not outlive the program it describes` のコメント（`e2e/silentLoss.spec.ts:87`）も
+同じ事実誤認を含む。旧:
+
+```ts
+  // warning instead of an invitation to run. Found by review; there was no
+  // test for it because App.tsx's wiring has none at all (#17).
+```
+
+新:
+
+```ts
+  // warning instead of an invitation to run. Found by review; it belongs here
+  // rather than in App.test.tsx because the sample dropdown, the placeholder
+  // and the hint are three real components' rendering, not App's wiring.
+```
+
 同じファイル冒頭のコメント、旧:
 
 ```ts
@@ -1934,7 +2569,7 @@ import 行に `waitForSearchDone` を足す。
   // without it this passes with no fix at all (#70: 5 of 12 runs).
 ```
 
-- [ ] **Step 4: 緑を確認（繰り返し）** — Run: `npx playwright test e2e/syntaxHint.spec.ts e2e/silentLoss.spec.ts --project=chromium --project=firefox --repeat-each=5`
+- [ ] **Step 4: 緑を確認（繰り返し）** — Run: `./node_modules/.bin/playwright test e2e/syntaxHint.spec.ts e2e/silentLoss.spec.ts --project=chromium --project=firefox --repeat-each=5`
   Expected: 全件 PASS（WebKit は両ファイル先頭で skip）。Bash の `timeout` は 600000
 
 - [ ] **Step 5: 配線を外すと赤になることを確認（#70 の教訓）**
@@ -1962,7 +2597,7 @@ if s.count(old) != 1:
     sys.exit('wiring not found')
 open(p, 'w').write(s.replace(old, 'errors.map(errorSpanOf).slice(0, 0),'))
 PY
-npx playwright test e2e/syntaxHint.spec.ts --project=chromium --grep "missing period|semicolon used" --repeat-each=5 > /tmp/mutant.log 2>&1; echo "MUTANT_EXIT=$?"
+./node_modules/.bin/playwright test e2e/syntaxHint.spec.ts --project=chromium --grep "missing period|semicolon used" --repeat-each=5 > /tmp/mutant.log 2>&1; echo "MUTANT_EXIT=$?"
 sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -c '✘'
 sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -c '✓'
 sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant.log | grep -E '^\s+[0-9]+ (failed|passed)'
@@ -1990,7 +2625,7 @@ if s.count(old) != 1:
     sys.exit('wiring not found')
 open(p, 'w').write(s.replace(old, '    completed: false, // MUTANT\n'))
 PY
-npx playwright test e2e/silentLoss.spec.ts --project=chromium --repeat-each=5 > /tmp/mutant2.log 2>&1; echo "MUTANT_EXIT=$?"
+./node_modules/.bin/playwright test e2e/silentLoss.spec.ts --project=chromium --repeat-each=5 > /tmp/mutant2.log 2>&1; echo "MUTANT_EXIT=$?"
 sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant2.log | grep -c '✘'
 sed 's/\x1b\[[0-9;]*m//g' /tmp/mutant2.log | grep -c '✓'
 grep -c 'was not able to start\|error TS' /tmp/mutant2.log
@@ -2130,13 +2765,12 @@ the same candidates as the double-quote repair (10 plus one that rewrites
 every pair, skipped above 16 kB), but unlike that search it runs on
 ```
 
-(f) `silent_loss` の absence の原因を挙げている箇所に 1 文足す（(d) を当てた段落の末尾）:
+(f) **`silent_loss` の absence の原因を挙げている箇所は変更しない。**
 
-```md
-One cause shrank at #75: a Stop pressed during transpilation used to end the
-run before any answer existed, and now the run's `run_result` waits for the
-follow-up, so those runs often carry a real `silent_loss` value.
-```
+以前のこの計画はここに「トランスパイル中の Stop はもう absence の原因ではない」という 1 文を足す予定だった
+（仕様の旧・不変条件 9）。**撤回する。** `stopped` は `ABANDONED_OUTCOMES` に入り追いかけを待たなくなったので、
+Stop を押した Run に `silent_loss` は付かないまま — CLAUDE.md の記述は正しいままである（Gate2 1 周目 M2）。
+**(f) として当てる diff は無い。** 以前の記録にある「exact-match 27 箇所」は、この 1 か所ぶん減って 26 箇所になる。
 
 - [ ] **Step 2: analytics.ts のコメントを更新** — 旧:
 
@@ -2563,12 +3197,35 @@ e2e は 1 件も実行していない（ビルド込みで長時間・ポート�
 ### 次の周回の前にやること
 
 1. **仕様 239 行を直す**（`App.test.tsx` は存在する）→ **対応済み（2026-09-12）**。Task 6 の
-   「e2e が唯一の証拠」を撤回し、**Task 5 に単体テストの Step を足す**（H1 / C2）のは未対応。
+   「e2e が唯一の証拠」を撤回し、**Task 5 に単体テストの Step を足す**（H1 / C2）→ **対応済み（2026-09-12）**。
    落ちる 4 件（`App.test.tsx:150 / 216 / 397 / 503`）を直す Step も要る
    — FakeWorker が追いかけの 1 通を送らないので `run_result` が 0 件になる。
    **同じ陳腐化がコード側に 2 か所ある**: `e2e/silentLoss.spec.ts:87`（`App.tsx's wiring has none at all (#17)`）と
    `e2e/syntaxHint.spec.ts:9`（`has no unit tests at all (#17)`）。どちらも Task 6 で触るファイルなので、
    同じ Step で直す
-2. H2・H3 を直す（どちらも状態遷移・例外経路の穴で、実装前に計画で閉じられる）
-3. M1〜M3、L1〜L2 を計画に反映
+2. H2・H3 を直す（どちらも状態遷移・例外経路の穴で、実装前に計画で閉じられる）→ **対応済み（2026-09-12）**
+3. M1〜M3、L1〜L2 を計画に反映 → **対応済み（2026-09-12）**
 4. **2 周目**を fresh サブエージェントで回す（周回上限 3、いま 1 周目を消化）
+
+**→ 1〜3 の全件を次節「Gate2 1 周目への対応」に反映済み。**
+
+### Gate2 1 周目への対応（2026-09-12）
+
+9 件すべてを計画に反映した。**根っこは 2 つ** — ①追いかけを「待つ Run」と「待たない Run」の線が細すぎた、
+②「必ず 2 通」を約束していたのに、それを守る仕組みがコードの形になっていなかった。
+
+| 指摘 | どう閉じたか | どこで確かめるか |
+|---|---|---|
+| **C2 / H1** `App.test.tsx` を計画が無視していた | Task 5 に Step 4b〜4d を追加。落ちるのは**実は 1 件**（`success` の 503）で、残り 3 件は `stopped` — M2 の手当てで待たなくなるので無修正で緑。追いかけの状態機械に新規 5 件 | Step 4c で実測（表と突き合わせる）。Step 4d の 5 件 |
+| **H3** 判定の組み立てが try の外 | Task 4 Step 3 で `handleTranspile` 全体を 1 つの `try`/`finally` に入れ、`finally` が追いかけを 1 通必ず送る。`verdict` 変数で対を保つ | Step 4b の新テスト（`classifySyntaxError` を投げさせて 2 通来ることを見る）。**これは e2e では作れない** |
+| **H2** `stalled` 後に `data-search` が `pending` のまま | `done` の意味を「もう何も来ない」に変え、`endRun` の待たない経路で `setSearchState("done")`。`followUpRef` もそこで空にするので、遅れて来た追いかけが無関係なメッセージにヒントを継ぎ足すこともできない | Step 4d の `stalled` のテスト。e2e は `done` を待つ否定テストに「期待する判定」の主張を足した |
+| **M1** `withDeadline` の包み忘れが検出されない | 検証を足すのではなく**型で落とす**。`bounded()` を足し、ワーカーの 3 定数は `(deadline) => reparse` になった。期限を渡し忘れたものは探索に渡せない | `tsc -b`。`searchDeadline.test.ts` に 1 件追加 |
+| **M2** Stop 中の Run の `run_result` が最大 20 秒遅れる | `ABANDONED_OUTCOMES = {stalled, stopped, cancelled}` を足し、**判定を見ている人がいる Run だけ待つ**。仕様の不変条件 8 を 3 つに広げ、不変条件 9（Stop で `silent_loss` が付くようになる）を撤回。Task 7 (f) の CLAUDE.md 差分も取り下げ | Step 4c（`stopped` の 3 件が無修正で緑）。Step 4d |
+| **M3** e2e の重い入力が上限ちょうど | 上限を定数にして `expect(source.length).toBe(MAX_SOURCE_CHARS)` を足した。**境界であることを意図として固定する**（1 文字増えれば探索が走らず、テストが何も確かめなくなることを明示） | e2e 自身 |
+| **L1** `searchState` が `idle` に戻らない | `handleModeChange` で `idle` に戻す。`handleRun` 側は discrete event の同一フラッシュで `pending` になるので隙間が無い、という理由を書いた | Step 4d（Run B が `pending` のままであることを見る） |
+| **L2** 2 つの ref の寿命が揃っていない理由が無い | `followUpTimerRef` の JSDoc に「揃えないのが意図」と書いた（揃えるとヒントを落とすか、同じ `run_result` を 2 回送る） | レビュー |
+| C1 / M4 | 1 周目で修正済み | — |
+
+**仕様側の変更**: 不変条件 6（待つのは判定が出た Run だけ）・8（3 つに拡大）・9（撤回）、Q13（`done` の意味）、
+e2e の証明項目 3（`done` を待つ否定テストは判定も主張する）、受け入れコマンドの `npx playwright` →
+`./node_modules/.bin/playwright`（`npx` はフック G2 に拒まれうる）。
