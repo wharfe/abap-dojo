@@ -271,7 +271,10 @@ function App() {
   /**
    * End the Playground run, whatever the reason. Every exit path goes through
    * here so that `run_click` and `run_result` reconcile 1:1 — a missing
-   * `run_result` means a run got orphaned, not that a user walked away.
+   * `run_result` means a run got orphaned, not that a user walked away. Since
+   * #75 that is nearly rather than structurally true: a run whose result waits
+   * on the follow-up search loses it if the tab closes first, which is what
+   * `flushPendingResult` on `pagehide` narrows.
    *
    * Declared above the worker handlers on purpose: they list it as a dependency
    * and a deps array is evaluated eagerly, so a later `const` would be in its

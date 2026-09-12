@@ -71,12 +71,15 @@ export type WorkerResponse =
    *
    * Splitting them off is what keeps a slow search from corrupting an
    * outcome. Both searches re-parse the whole source up to 11 times each, and
-   * one parse of a 16 kB paste ranges from 24 ms to 1.5 s by shape — so while
-   * they shared a message with the verdict, a heavy paste pushed the verdict
-   * past App.tsx's 20s watchdog and a real `syntax_error` was shown and
-   * counted as `stalled` (#75). Now the verdict leaves the worker first
-   * (measured 2026-09-12: it reaches the parent 2.5 ms after the request,
-   * while the worker stays busy for another 1,699 ms), and these follow.
+   * one parse of a 16 kB paste ranges from about 30 ms to well over a second
+   * by shape (32 ms to 1.4 s across seven shapes, Node, 2026-09-12) — so
+   * while they shared a message with the verdict, a heavy paste pushed the
+   * verdict past App.tsx's 20s watchdog and a real `syntax_error` was shown
+   * and counted as `stalled` (#75). Now the verdict leaves the worker first:
+   * measured against the production build (Chromium, 16 kB of `foo(1, "x");`
+   * on every row, 2026-09-12) the error was on screen about 250 ms after the
+   * Run while the worker searched for another 3.3 s. One run, so it is the
+   * gap between the two that the number is for.
    *
    * **Exactly one of these is sent for every `transpile` request**, whichever
    * branch the verdict took, and it is sent even when the search found

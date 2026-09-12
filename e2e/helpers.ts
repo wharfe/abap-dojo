@@ -97,8 +97,8 @@ export async function lintCount(page: Page): Promise<number> {
  *
  * The Lint tab's own count is the signal: it can only change once a
  * `lint-result` came back from the worker, which means the thread is free. A
- * fixed sleep would be a guess about a parse that costs 24 ms or 1.5 s
- * depending on shape.
+ * fixed sleep would be a guess about a parse that costs 32 ms or 1.4 s
+ * depending on shape (Node, 2026-09-12).
  *
  * Takes the count from BEFORE the program was typed and waits for it to
  * change, rather than waiting for "not zero". Not-zero happens to work today

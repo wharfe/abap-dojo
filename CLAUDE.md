@@ -234,9 +234,13 @@ makes the report unusable. Note `outcome` is shared by `run_result` and
 `validate_result` (`pass`/`warn`/`fail`), so always filter by `event_name`
 when reading it.
 
-`run_result` reports one of nine outcomes, and `run_click`/`run_result` are
-meant to reconcile 1:1 — a gap between them is an orphaned execution, not a
-user who walked away. Adding a *value* to an already-registered dimension
+`run_result` reports one of nine outcomes. `run_click`/`run_result` were
+meant to reconcile 1:1, and a gap between them meant an orphaned execution
+rather than a user who walked away — but **since #75 that no longer holds by
+construction**: a failing Run's event waits for the hint search, so a tab
+closed in between can lose it. Read a small gap against the `syntax_repair`
+section below, which says what the wait is and what flushes it, before
+calling it an orphan. Adding a *value* to an already-registered dimension
 needs no GA4 change; only a new *parameter* does.
 
 | Outcome | Means |
@@ -591,8 +595,9 @@ one.
 
 Three traps if you touch it:
 
-1. **The score is the plain Error-severity count, and probing it under
-   `Config.getDefault()` will mislead you.** This worker configures abaplint
+1. **The score is the plain Error-severity count — for `double_quote`; the
+   two statement-end kinds add the stricter test described above — and
+   probing it under `Config.getDefault()` will mislead you.** This worker configures abaplint
    from `@abaplint/transpiler`'s own `config`, which enables almost no style
    rules — `implicit_start_of_selection`, `check_comments` and `keyword_case`
    all fire under the default config and none of them fire here. A probe run
@@ -634,9 +639,10 @@ worker replies to a Run twice: the verdict first (`transpile-error` /
 `silent-loss` message carrying the same `requestId`. Before that split, a
 heavy paste could push the verdict past the 20s watchdog in `App.tsx` and a
 real `syntax_error` was shown and counted as `stalled`. Measured 2026-09-12
-against the production build (Chromium, 16 kB of `foo(1, "x");` on every row):
-the error reached the screen 247 ms after the Run while the worker stayed busy
-searching for another 3.3 s. `App.tsx` holds `run_result` until the follow-up
+against the production build (Chromium, 16 kB of `foo(1, "x");` on every
+row): the error reached the screen about 250 ms after the Run while the
+worker stayed busy searching for another 3.3 s — one run, so read it as the
+gap between the two, not as a latency figure. `App.tsx` holds `run_result` until the follow-up
 lands, so the event is still one event with `syntax_repair` on it. Three
 outcomes do not wait, because nobody is looking at a verdict they could
 explain: `stalled` (the worker is by definition not answering), `stopped` (the
@@ -665,13 +671,17 @@ every row took 120 ms to parse at 16 kB and 1,249 ms at 64 kB (Node,
 2026-09-12), and `x` on every row took 1.4 s at 16 kB and 9.4 s at 32 kB. So
 every search in a Run also shares a 3 s deadline
 (`src/workers/searchDeadline.ts`): once it has passed no new re-parse starts.
-Neither cap is a guarantee — the deadline cannot stop a parse already running,
-so the worst freeze measured is 5.0 s (Node, 2026-09-12: `x` on 8,192 rows, a
-search that ran 4.0 s past the first parse — and that first parse itself came
-out anywhere from 1.0 s to 1.4 s across runs, so read every number here as an
-order of magnitude and not a bound) — and since #75 neither needs to be:
-overrunning costs a hint and some editor latency, not a wrong `outcome`. A
-paste over 16 kB — roughly 400 lines — gets no hint at all.
+Neither cap is a guarantee, and the shape of what is left is the durable
+part: the deadline cannot stop a parse already running, only refuse to start
+the next one, so a search costs at most the budget plus one parse — whatever
+one parse of that shape costs on that machine. Measured 2026-09-12 (Node,
+`x` on 8,192 rows) that came to a 4.0 s search after a 1.0 s first parse, so
+5.0 s in which `lint` is frozen; the same first parse came out between 1.0
+and 1.4 s across runs of the same script, and an earlier session put one
+candidate parse of that shape at 5.8 s. Take the bound, not the digits.
+Since #75 neither cap needs to be a guarantee anyway: overrunning costs a
+hint and some editor latency, not a wrong `outcome`. A paste over 16 kB —
+roughly 400 lines — gets no hint at all.
 
 Reading it: filter by `outcome = syntax_error`, same trap as the rest. A
 falling `syntax_repair` share is the intended outcome (the hint reaches people

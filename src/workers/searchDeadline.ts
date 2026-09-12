@@ -10,7 +10,7 @@
  * guarantee enough — which is why the message was split instead.
  *
  * What it protects is `lint`. abaplint's `parseAsync` does not yield to the
- * event loop — 0 macrotasks during a 1,502 ms parse (Node, 2026-09-12) — so
+ * event loop — 0 macrotasks during a 1,220 ms parse (Node, 2026-09-12) — so
  * while a search runs, every `lint` queued behind it by the user's typing is
  * frozen, and the editor's underlines stop updating.
  *
@@ -18,12 +18,17 @@
  *
  * The size cap (MAX_SOURCE_CHARS, in searchLimits.ts) bounds how large a
  * source the searches look at, but not how long one parse of it takes: at
- * 16 kB that ranges from 24 ms to 1.5 s by shape alone (Node, 2026-09-11).
- * This deadline cannot stop a parse already running, only refuse to start the
- * next one, so the worst case is the budget plus one parse — about 10 s for
- * the heaviest 16 kB shape measured (`x` on 8,192 rows: 1.5 s original,
- * 5.8 s for one candidate). That is a real cost paid in editor
- * responsiveness, and it is the reason this file exists rather than nothing.
+ * 16 kB that ranges from about 30 ms to well over a second by shape alone
+ * (32 ms to 1.4 s across seven shapes, Node, 2026-09-12). This deadline
+ * cannot stop a parse already running, only refuse to start the next one, so
+ * the worst case is the budget plus one parse — and that is the part worth
+ * remembering, because the parse is what varies. On the heaviest 16 kB shape
+ * (`x` on 8,192 rows) that came to a 4.0 s search after a 1.0 s first parse,
+ * 5.0 s of frozen `lint` in total (Node, 2026-09-12); the same first parse
+ * ranged 1.0-1.4 s between runs, and an earlier session measured one
+ * candidate parse of that shape at 5.8 s. Either way it is a real cost paid
+ * in editor responsiveness, and it is the reason this file exists rather
+ * than nothing.
  *
  * The deadline is enforced by throwing from the wrapped re-parse, because
  * every search already treats a throwing re-parse as "no answer" —

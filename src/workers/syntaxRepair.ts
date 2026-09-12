@@ -95,7 +95,7 @@ export { MAX_CANDIDATES };
  * What this bounds is how long this worker is unavailable to `lint`, which
  * fires on every keystroke. It cannot interleave with a search: abaplint's
  * `parseAsync` does not yield to the event loop (0 macrotasks during a
- * 1,502 ms parse, Node, 2026-09-12), so every re-parse blocks the thread
+ * 1,220 ms parse, Node, 2026-09-12), so every re-parse blocks the thread
  * outright.
  *
  * It no longer bounds anything about correctness. The worker posts the
@@ -105,15 +105,16 @@ export { MAX_CANDIDATES };
  * The candidate cap bounds the number of parses but not the work, and the
  * work of one parse does not grow in proportion to the source. A paste whose
  * quotes or semicolons swallow every period is one statement the length of
- * the file: measured 2026-09-11 (Node), one parse of `WRITE 'value#';` on
- * every row took 116 ms at 16 kB and 1,431 ms at 64 kB — four times the text,
- * about twelve times the work, and worse for other shapes. At the old 64 kB
+ * the file: measured 2026-09-12 (Node), one parse of `WRITE 'value#';` on
+ * every row took 120 ms at 16 kB and 1,249 ms at 64 kB — four times the text,
+ * about ten times the work, and worse for other shapes. At the old 64 kB
  * cap the double-quote search alone took 12.8 s in Firefox. 16 kB is roughly
  * 400 lines; a longer paste gets no hint and no `silent_loss`.
  *
  * The cap does not bound the time on its own — at 16 kB one parse still
- * ranges from 24 ms to 1.5 s by shape — which is why searchDeadline.ts adds
- * a shared 3 s budget on top.
+ * ranges from about 30 ms to well over a second by shape (32 ms to 1.4 s
+ * across seven shapes, Node, 2026-09-12) — which is why searchDeadline.ts
+ * adds a shared 3 s budget on top.
  */
 export { MAX_SOURCE_CHARS };
 

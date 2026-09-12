@@ -7,14 +7,15 @@ import { doubleQuoteCandidates, findSilentLoss } from "./syntaxRepair";
 /**
  * #75: every search shares one size cap, lowered from 64 kB. The work of one
  * parse grows far faster than the source — `WRITE 'value#';` on every row
- * took 116 ms at 16 kB and 1,431 ms at 64 kB in Node (2026-09-11) — so at
- * 64 kB the double-quote search alone took 12.8 s in Firefox.
+ * took 120 ms at 16 kB and 1,249 ms at 64 kB in Node (2026-09-12), about ten
+ * times the work for four times the text — so at 64 kB the double-quote
+ * search alone took 12.8 s in Firefox.
  *
  * Since the worker now answers with the verdict BEFORE searching (#67 plan
  * Task 4), a slow search no longer turns a real `syntax_error` into
  * `stalled`. What the cap now bounds is how long this worker is unavailable
  * to `lint`, which runs on every keystroke and cannot interleave: abaplint's
- * `parseAsync` does not yield (0 macrotasks during a 1,502 ms parse,
+ * `parseAsync` does not yield (0 macrotasks during a 1,220 ms parse,
  * measured 2026-09-12).
  */
 describe("the size cap every search shares", () => {

@@ -211,10 +211,15 @@ export interface SyntaxRepair {
  * **The biggest cause of absence is not an accident: every `syntax_error`
  * run.** The worker returns from the branch that handles Error-severity issues
  * before this search is reached, so the largest failure bucket in the app
- * sends nothing here. A search that gave up part way and a source too large to
- * search are the other two; a run that ended before the parse (`stalled`, or a
- * Stop pressed before transpiling) is the fourth. Do not read `(not set)` as
- * "the run stalled".
+ * sends nothing here. The rest, none of them negligible: a search that gave
+ * up part way; a source over MAX_SOURCE_CHARS, 16 kB since #75 and 64 kB
+ * before it; a search the shared 3 s deadline cut short (searchDeadline.ts);
+ * a run that ended before the parse (`stalled`, or a Stop pressed before
+ * transpiling); a Stop pressed in the first seconds of execution, because
+ * since #75 this search runs alongside the running program rather than ahead
+ * of it and an abandoned run does not wait for its answer; and an answer that
+ * reached App after its 20 s backstop had already sent the event. Do not read
+ * `(not set)` as "the run stalled".
  */
 export const SILENT_LOSSES = ["double_quote", "none"] as const;
 
