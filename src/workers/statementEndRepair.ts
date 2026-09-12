@@ -151,6 +151,11 @@ export function errorRowCounter(
   };
 }
 
+/**
+ * Precondition: `spans` must be EVERY Error-severity span of the original
+ * parse — the baseline count a candidate is judged against is `spans.length`,
+ * so a subset lowers the bar and makes the search accept a worse candidate.
+ */
 export async function findStatementEndRepair(
   source: string,
   spans: readonly ErrorSpan[],
