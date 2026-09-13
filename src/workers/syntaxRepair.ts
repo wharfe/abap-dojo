@@ -65,6 +65,7 @@ import {
   type Issue,
 } from "@abaplint/core";
 import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
+import { MAX_CANDIDATES, MAX_SOURCE_CHARS } from "./searchLimits";
 
 /**
  * How many candidate edits are worth a re-parse.
@@ -74,28 +75,48 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  *
  * "On the Run path after a failure" was true when only `findSyntaxRepair` used
  * these candidates. `findSilentLoss` searches the same set on the *success*
- * path, before transpiling, on every run whose parse was clean — the majority
- * of runs, where the user is not already waiting on an error. That is what the
- * cap now bounds, and it is why the size cap below matters more than it did.
- * The cap bounds the worst case (a program with a quote on every line) at
- * eleven parses of a Playground-sized program. A file whose only misused
+ * path, on every run whose parse was clean — the majority of runs, where the
+ * user is not already waiting on an error. Since #75 it runs after the reply
+ * that carries the transpiled JS, so the program is already executing while
+ * it looks; what the cap bounds is how long this worker is then unavailable,
+ * and it is why the size cap below matters more than it did.
+ * The cap bounds each search at eleven parses: ten candidates plus the one
+ * that rewrites everything. On the failure path the statement-end search
+ * (statementEndRepair.ts, #67) reuses it for two more kinds, so a failing Run
+ * re-parses at most 33 times after the original. A file whose only misused
  * quote is below the tenth quoted line gets no hint, which is the right way
  * to fail: silence, not a wrong guess.
  */
-const MAX_CANDIDATES = 10;
+export { MAX_CANDIDATES };
 
 /**
  * Above this many characters, do not search at all.
  *
- * The candidate cap bounds the number of parses but not the work: each parse
- * is over the whole source, so the cost is the cap times the input. Measured
- * at ~138 ms for ten parses of a 302-line program, which is nothing against
- * the 20s watchdog — but that watchdog only ends the *display*, it does not
- * interrupt this worker, so a large enough paste would occupy it after the
- * user has already been told the run stalled. 64 kB is far above any program
- * anyone types and far below the size where that matters.
+ * What this bounds is how long this worker is unavailable to `lint`, which
+ * fires on every keystroke. It cannot interleave with a search: abaplint's
+ * `parseAsync` does not yield to the event loop (0 macrotasks during a
+ * 1,220 ms parse, Node, 2026-09-12), so every re-parse blocks the thread
+ * outright.
+ *
+ * It no longer bounds anything about correctness. The worker posts the
+ * verdict BEFORE searching (abaplintWorker.ts, #67/#75), so a slow search
+ * delays a hint and never turns a real `syntax_error` into `stalled`.
+ *
+ * The candidate cap bounds the number of parses but not the work, and the
+ * work of one parse does not grow in proportion to the source. A paste whose
+ * quotes or semicolons swallow every period is one statement the length of
+ * the file: measured 2026-09-12 (Node), one parse of `WRITE 'value#';` on
+ * every row took 120 ms at 16 kB and 1,249 ms at 64 kB — four times the text,
+ * about ten times the work, and worse for other shapes. At the old 64 kB
+ * cap the double-quote search alone took 12.8 s in Firefox. 16 kB is roughly
+ * 400 lines; a longer paste gets no hint and no `silent_loss`.
+ *
+ * The cap does not bound the time on its own — at 16 kB one parse still
+ * ranges from about 30 ms to well over a second by shape (32 ms to 1.4 s
+ * across seven shapes, Node, 2026-09-12) — which is why searchDeadline.ts
+ * adds a shared 3 s budget on top.
  */
-const MAX_SOURCE_CHARS = 64 * 1024;
+export { MAX_SOURCE_CHARS };
 
 /**
  * The first `"..."` pair on a line, if it has one.
@@ -130,8 +151,10 @@ export interface RepairCandidate {
   /**
    * 1-based row the edit was made on, or `undefined` for the candidate that
    * rewrites everything — always undefined there, even when it happened to
-   * touch one row, because that row can hold several pairs and the score
-   * attributes the improvement to none of them in particular.
+   * touch one row, because the score attributes the improvement to none of
+   * its edits in particular: for the double quote a row can hold several
+   * pairs, and for the statement-end kinds (statementEndRepair.ts) the
+   * candidate can end several statements at once.
    */
   line?: number;
   /** The whole source with the edit applied. */
@@ -248,8 +271,17 @@ export async function findSyntaxRepair(
  * taken is indistinguishable from a difference the repair made.
  */
 export function countErrors(issues: readonly Issue[]): number {
-  return issues.filter((issue) => issue.getSeverity().toString() === "Error")
-    .length;
+  return errorIssues(issues).length;
+}
+
+/**
+ * The Error-severity issues themselves — the one definition of "an error"
+ * every search uses. statementEndRepair.ts needs their rows as well as their
+ * number, and a second filter written there would be two definitions that
+ * can drift (#63).
+ */
+export function errorIssues(issues: readonly Issue[]): Issue[] {
+  return issues.filter((issue) => issue.getSeverity().toString() === "Error");
 }
 
 /**
@@ -339,8 +371,9 @@ export function errorCounter(
  * Three states, not two, and the third is the reason this is not just
  * `SilentLoss | undefined`. The search can give up part way (a candidate this
  * module mangled on purpose can make the parser throw), and a search that gave
- * up is not a search that found nothing. The worker marks the search as having
- * run *before* calling this, so without `completed` an abandoned search would
+ * up is not a search that found nothing. The worker forwards `completed` as-is
+ * on the `silent-loss` message (starting from `false` in case the call itself
+ * throws), so without it an abandoned search would
  * be reported as `silent_loss: "none"` — "we looked and found nothing" — and
  * the denominator that parameter exists to provide would be quietly wrong for
  * exactly the runs where the machinery misbehaved. Found by external review.

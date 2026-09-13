@@ -138,8 +138,14 @@ export interface SyntaxDiagnostics {
  * The value is produced by re-parsing, never by reading the line: see
  * src/workers/syntaxRepair.ts for why a regex over the source cannot tell a
  * misused quote from `* he said "hello"` or from `WRITE |He said "hi"|.`
+ *
+ * `semicolon` and `missing_period` (#67) are the other two shapes the `WRITE`
+ * bucket turned out to hold. They are found by src/workers/statementEndRepair.ts
+ * under a stricter rule than `double_quote`, because appending a period makes
+ * almost any line look like a finished statement: a rewrite is kept only if it
+ * clears every error it targeted, not merely if the count went down.
  */
-export const SYNTAX_REPAIRS = ["double_quote"] as const;
+export const SYNTAX_REPAIRS = ["double_quote", "semicolon", "missing_period"] as const;
 
 export type SyntaxRepairKind = (typeof SYNTAX_REPAIRS)[number];
 
@@ -160,6 +166,10 @@ export interface SyntaxRepair {
    * improvement to any one edit. Naming the first is worse than naming none:
    * put a correct comment above two misused quotes and the first row is the
    * comment. The hint drops the row rather than point somewhere never wrong.
+   *
+   * The same holds for `semicolon` and `missing_period`: their
+   * rewrite-everything candidate can end several statements at once, and the
+   * score does not say which of those edits mattered.
    */
   line?: number;
 }
@@ -201,10 +211,15 @@ export interface SyntaxRepair {
  * **The biggest cause of absence is not an accident: every `syntax_error`
  * run.** The worker returns from the branch that handles Error-severity issues
  * before this search is reached, so the largest failure bucket in the app
- * sends nothing here. A search that gave up part way and a source too large to
- * search are the other two; a run that ended before the parse (`stalled`, or a
- * Stop pressed before transpiling) is the fourth. Do not read `(not set)` as
- * "the run stalled".
+ * sends nothing here. The rest, none of them negligible: a search that gave
+ * up part way; a source over MAX_SOURCE_CHARS, 16 kB since #75 and 64 kB
+ * before it; a search the shared 3 s deadline cut short (searchDeadline.ts);
+ * a run that ended before the parse (`stalled`, or a Stop pressed before
+ * transpiling); a Stop pressed in the first seconds of execution, because
+ * since #75 this search runs alongside the running program rather than ahead
+ * of it and an abandoned run does not wait for its answer; and an answer that
+ * reached App after its 20 s backstop had already sent the event. Do not read
+ * `(not set)` as "the run stalled".
  */
 export const SILENT_LOSSES = ["double_quote", "none"] as const;
 

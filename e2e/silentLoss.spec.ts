@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { typeProgram, clickRun, waitForRunToEnd } from "./helpers";
+import {
+  typeProgram,
+  clickRun,
+  waitForRunToEnd,
+  waitForSearchDone,
+} from "./helpers";
 
 /**
  * The #68 hint, end to end.
@@ -8,7 +13,8 @@ import { typeProgram, clickRun, waitForRunToEnd } from "./helpers";
  * no output, so it is also the one where every layer below the screen can be
  * green while the user sees nothing. `syntaxRepair.test.ts` proves the search;
  * it stops at the module. The hint then has to survive a different worker
- * message from the #69 one (`transpile-result`, not `transpile-error`), a
+ * message from the #69 one (`silent-loss` after `transpile-result`, not
+ * `syntax-hint` after `transpile-error`), a
  * `success` outcome, and an OutputPanel branch that renders a placeholder for
  * exactly the state this program produces — output empty, no error, no status.
  * Nothing but a real run exercises that combination.
@@ -37,9 +43,10 @@ test("a chained WRITE whose only operand was eaten is explained", async ({
   // And the placeholder must have got out of the way: output is empty and
   // there is no error, which is precisely when it used to render — directly
   // under the hint, telling the user to press the button they just pressed.
-  // The hint is not the end of the run — it arrives with the transpile result,
-  // and the placeholder is hidden while running regardless — so wait for the
-  // run to end first, or this passes without the fix (#70: 5 of 12 runs).
+  // The hint is not the end of the run — it arrives on its own message, which
+  // since #67/#75 can be after the run ended — and the placeholder is hidden
+  // while running regardless. The wait for the hint above is what orders this;
+  // without it this passes with no fix at all (#70: 5 of 12 runs).
   await waitForRunToEnd(page);
   await expect(page.getByText(PLACEHOLDER)).toHaveCount(0);
 });
@@ -54,7 +61,9 @@ test("a partly eaten chain still prints what survived, and says so", async ({
   // `a` is written and `b` is not — the shape that makes "the run produced no
   // output" useless as a trigger.
   await expect(page.getByText(/^a$/m)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(HINT)).toBeVisible();
+  // The hint follows on its own message now, so it can land after the output
+  // it annotates. Give it the same budget as the run.
+  await expect(page.getByText(HINT)).toBeVisible({ timeout: 30_000 });
 
   // Below the output, not above it. Asserted rather than left to the JSX
   // because it is a deliberate choice about how the panel reads, and the kind
@@ -76,6 +85,11 @@ test("a correct program that prints nothing gets no hint", async ({ page }) => {
   await clickRun(page);
 
   await expect(page.getByText(PLACEHOLDER)).toBeVisible({ timeout: 30_000 });
+  // The placeholder appears when the run ends, and since #67/#75 the
+  // silent-loss search answers on a later message than the transpile result —
+  // so the run can be over before the hint could have appeared. This is the
+  // same gap as #70, one message further along.
+  await waitForSearchDone(page);
   await expect(page.getByText(HINT)).toHaveCount(0);
 });
 
@@ -83,8 +97,9 @@ test("the hint does not outlive the program it describes", async ({ page }) => {
   // The panel clears output and error when a sample is loaded, so a hint left
   // behind would describe code the user can no longer see — and because the
   // placeholder is suppressed while a hint is showing, they would get a stale
-  // warning instead of an invitation to run. Found by review; there was no
-  // test for it because App.tsx's wiring has none at all (#17).
+  // warning instead of an invitation to run. Found by review; it belongs here
+  // rather than in App.test.tsx because the sample dropdown, the placeholder
+  // and the hint are three real components' rendering, not App's wiring.
   await page.goto("/");
   await typeProgram(page, `REPORT ztest.\nWRITE: "hello".`);
   await clickRun(page);

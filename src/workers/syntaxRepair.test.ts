@@ -543,7 +543,7 @@ describe("findSilentLoss", () => {
   });
 
   it("reports an abandoned search as incomplete, not as a clean result", async () => {
-    // The worker sets `silentLossChecked` before calling this, so a search
+    // The worker reports this search's `completed` flag verbatim, so a search
     // that gave up has to say so: otherwise App reports `silent_loss: "none"`
     // — "we looked and found nothing" — for a search that never finished, and
     // the denominator the parameter exists for is quietly wrong.

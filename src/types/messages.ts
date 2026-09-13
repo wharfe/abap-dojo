@@ -33,13 +33,7 @@ export type WorkerRequest =
 
 export type WorkerResponse =
   | { type: "lint-result"; issues: LintIssue[] }
-  | {
-      type: "transpile-result";
-      js: string;
-      requestId: string;
-      silentLoss?: SilentLoss;
-      silentLossChecked?: boolean;
-    }
+  | { type: "transpile-result"; js: string; requestId: string }
   /**
    * `kind` distinguishes the two very different things that stop a run before
    * any JavaScript exists: `syntax` is the user's own ABAP failing to parse
@@ -71,28 +65,45 @@ export type WorkerResponse =
       line?: number;
       diagnostics?: TranspileDiagnostics;
       syntaxDiagnostics?: SyntaxDiagnostics;
-      /**
-       * Accompanies `kind: "syntax"` only, and only when a one-line edit made
-       * abaplint stop complaining — see src/workers/syntaxRepair.ts. Unlike
-       * the two fields above it is not purely a measurement: `kind` is the
-       * half that may be counted, `line` is there so the browser can say which
-       * row to look at. Neither carries source.
-       */
-      repair?: SyntaxRepair;
-      /**
-       * Accompanies `kind: "transpile"` only — a statement the user wrote that
-       * abaplint parsed away without complaint (#68). It rides on this message
-       * as well as on `transpile-result` because the search runs BEFORE
-       * transpilation, so a run whose transpiler threw has an answer too.
-       *
-       * `silentLossChecked` is separate from `silentLoss` and is not
-       * redundant: absent means the search never ran (the parse itself threw,
-       * or the syntax branch above returned first), while `true` with no
-       * `silentLoss` means it ran and found nothing. Analytics needs those
-       * apart or `silent_loss` has no denominator.
-       */
-      silentLoss?: SilentLoss;
-      silentLossChecked?: boolean;
+    }
+  /**
+   * The searches, which run AFTER the verdict above has been posted (#67/#75).
+   *
+   * Splitting them off is what keeps a slow search from corrupting an
+   * outcome. The silent-loss search re-parses the whole source up to 11
+   * times; the syntax-hint search reuses that same 11-parse cap for three
+   * kinds (`double_quote`, `semicolon`, `missing_period`, #67), so it costs up
+   * to 33. One parse of a 16 kB paste ranges from about 30 ms to well over a second
+   * by shape (32 ms to 1.4 s across seven shapes, Node, 2026-09-12) — so
+   * while they shared a message with the verdict, a heavy paste pushed the
+   * verdict past App.tsx's 20s watchdog and a real `syntax_error` was shown
+   * and counted as `stalled` (#75). Now the verdict leaves the worker first:
+   * measured against the production build (Chromium, 16 kB of `foo(1, "x");`
+   * on every row, 2026-09-12) the error was on screen about 250 ms after the
+   * Run while the worker searched for another 3.3 s. One run, so it is the
+   * gap between the two that the number is for.
+   *
+   * **Exactly one of these is sent for every `transpile` request**, whichever
+   * branch the verdict took, and it is sent even when the search found
+   * nothing or never ran. App.tsx holds `run_result` until it arrives, so a
+   * missing one costs a 20s delay before the event is sent without its
+   * `syntax_repair` / `silent_loss`.
+   *
+   * `syntax-hint` follows `transpile-error` with `kind: "syntax"`.
+   * `silent-loss` follows every other exit — `transpile-result`, a transpiler
+   * throw, and a parse that threw before any search could run.
+   *
+   * `completed` carries what `silentLossChecked` used to: `false` means the
+   * search never finished, so App must omit `silent_loss` rather than report
+   * `none`. Without it, "we looked and found nothing" and "we never looked"
+   * would both arrive as an absent `loss` and the denominator would be wrong.
+   */
+  | { type: "syntax-hint"; requestId: string; repair?: SyntaxRepair }
+  | {
+      type: "silent-loss";
+      requestId: string;
+      completed: boolean;
+      loss?: SilentLoss;
     }
   | { type: "validate-progress"; stage: ValidationStage; status: "running" | "skipped" }
   | { type: "validate-stage-result"; stage: ValidationStage; result: StageResult };
