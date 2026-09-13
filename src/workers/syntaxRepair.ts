@@ -371,8 +371,9 @@ export function errorCounter(
  * Three states, not two, and the third is the reason this is not just
  * `SilentLoss | undefined`. The search can give up part way (a candidate this
  * module mangled on purpose can make the parser throw), and a search that gave
- * up is not a search that found nothing. The worker marks the search as having
- * run *before* calling this, so without `completed` an abandoned search would
+ * up is not a search that found nothing. The worker forwards `completed` as-is
+ * on the `silent-loss` message (starting from `false` in case the call itself
+ * throws), so without it an abandoned search would
  * be reported as `silent_loss: "none"` — "we looked and found nothing" — and
  * the denominator that parameter exists to provide would be quietly wrong for
  * exactly the runs where the machinery misbehaved. Found by external review.

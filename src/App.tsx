@@ -170,11 +170,15 @@ function App() {
    * It and `followUpRef` do NOT have the same lifetime, and that is the
    * point: `followUpRef` says "a follow-up may still arrive and still
    * belongs to the run on screen", while this one says "a result is waiting
-   * to be sent". `endRun` can clear the first and arm the second (a run that
-   * ended before its follow-up), and `flushPendingResult` clears the second
-   * without touching the first (a follow-up that arrived on time). Tying
-   * them together would mean either dropping a hint that is still relevant,
-   * or sending the same `run_result` twice. Gate2 1 周目 L2.
+   * to be sent". `endRun` KEEPS the first and arms the second when it parks a
+   * result (the run ended before its follow-up) — the follow-up handler
+   * matches on `followUpRef`, so clearing it there would discard every hint.
+   * Only an abandoned run clears `followUpRef`, and it sends at once instead
+   * of arming anything. `flushPendingResult` clears the second without
+   * touching the first, which is why a follow-up that arrives after the
+   * backstop still appends its hint. Tying them together would mean either
+   * dropping a hint that is still relevant, or sending the same `run_result`
+   * twice. Gate2 1 周目 L2.
    */
   const followUpTimerRef = useRef<number | undefined>(undefined);
   /**
