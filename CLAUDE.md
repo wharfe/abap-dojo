@@ -545,7 +545,8 @@ almost any line look like a finished statement: `console.log('a')` is two
 errors on one row and a period turns it into one, so "the count went down"
 would tell someone who pasted JavaScript that they forgot a period. They are
 kept only if the count went down **and** no error is left covering a row of
-an error they rewrote (`src/workers/statementEndRepair.ts`). The rule has a
+an error they rewrote (`src/workers/strictAcceptance.ts`, shared with the
+declaration search below). The rule has a
 price, and it is measured: over 58 probe inputs it stopped two wrong hints
 (both pasted `console.log`), and a later probe found a real repair it gives
 up — consecutive semicolons that abaplint merges into a single error with a
