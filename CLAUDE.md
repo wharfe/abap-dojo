@@ -708,11 +708,20 @@ pasting, not on its own.
 
 ### `data_value_assign` is the first repair that is not about punctuation
 
-The three kinds above all answer "how does this statement end". `DATA` ends
-its statements correctly and fails anyway: measured 2026-09-08..21, it was the
+The three kinds above all answer "how does this statement end", and on the
+`DATA` bucket they answer nothing: measured 2026-09-08..21, it was the
 second-largest `parser_error` keyword at 66 events, and **65 of them carried
-no `syntax_repair` at all** — against `WRITE`, where 48 of 201 got a hint. The
-searches could not reach it because nothing was wrong with the punctuation.
+no `syntax_repair` at all** — against `WRITE`, where 48 of 201 got a hint.
+
+That pair of numbers is all GA4 can say. It does **not** say what those 65
+programs looked like: the parameter records which repair worked, so a missing
+value means only that none of the three was accepted. What the shapes are is a
+separate, weaker piece of evidence — a by-hand probe of 33 ways to write a
+declaration (2026-09-22), which found `=`-as-initialiser alongside `INITIAL`,
+a comma chain missing its `:`, and `varchar(10)` / `ARRAY OF`. The probe says
+those shapes fail; it does not say how often users write them. Read a fall in
+this bucket against `syntax_statement = DATA`, not as proof that `=` was the
+whole of it.
 
 What is wrong is the initialiser. Most languages declare with `=`; ABAP spells
 that `VALUE`, and `=` there is a parse error rather than a style choice. So
@@ -731,10 +740,11 @@ because a flat claim about declarations would be false on the `FORM` shape and
 false again on ABAP's own inline `DATA(lv) = 5.`, which does initialise with
 `=`.
 
-Measured 2026-09-22 against the real config, the rewrite took every
-declaration shape to zero errors and fired on none of `lv = 5.`, `IF 1 = 1`,
-`let x = 1`, `const o = { a: 1 }`, `f(a = 1)` or `SELECT ... WHERE x = 1`,
-whether those parsed or not.
+Measured 2026-09-22 against the real config, over the shapes probed by hand:
+the rewrite took each `=`-initialised declaration to zero errors and fired on
+none of `lv = 5.`, `IF 1 = 1`, `let x = 1`, `const o = { a: 1 }`, `f(a = 1)`
+or `SELECT ... WHERE x = 1`, whether those parsed or not. That is a list of
+inputs, not a survey of what users write.
 
 Two things to know before reading it:
 

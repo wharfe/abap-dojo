@@ -142,11 +142,11 @@ test("pasted JavaScript is not told it forgot a period", async ({ page }) => {
   await waitForSearchDone(page);
   await expect(page.getByText(PERIOD_HINT)).toHaveCount(0);
   await expect(page.getByText(SEMICOLON_HINT)).toHaveCount(0);
-  // `console.log('a')` holds no equals sign, but `let x = 1` does and reaches
-  // the same verdict, so the declaration search is checked against a paste too.
-  await expect(page.getByText(VALUE_HINT)).toHaveCount(0);
 });
 
+// The negative for the declaration search needs an input that HOLDS an equals
+// sign. Asserting its absence on `console.log('a')` above would have passed
+// with valueAssignRepair.ts deleted, which is a test looking at nothing.
 test("pasted JavaScript with an equals sign is not told to use VALUE", async ({ page }) => {
   await page.goto("/");
   await typeProgram(page, `REPORT ztest.\nlet x = 1`);

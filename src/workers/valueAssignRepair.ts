@@ -32,14 +32,18 @@
  * `ENDFORM.` the count cannot drop and nothing is accepted — so the shape
  * needs the whole subroutine, which is exactly how someone would write it. So the search fires on a subroutine definition, and any hint that
  * says "a declaration" would be a false statement about the program on
- * screen. That is why `repairHint` states what the rewrite *did* — replacing
- * this `=` with `VALUE` makes it parse — and offers `DATA ... VALUE` as the
- * example rather than as the diagnosis. Narrowing the search to declarations
+ * screen. That is why `repairHint` states only what was observed — after the
+ * rewrite no error covers that row — and offers `DATA ... VALUE` as the
+ * example rather than as the diagnosis. It does not say the program now
+ * parses (an unrelated error elsewhere survives any of these rewrites) and it
+ * does not say the `=` caused the error (the search tracks neither identity
+ * nor cause). Narrowing the search to declarations
  * instead would mean reading the leading keyword, which is the design this
  * module exists to avoid.
  *
- * Measured 2026-09-22, the rewrite moved every declaration shape to zero
- * errors and fired on none of `lv = 5.`, `IF 1 = 1`, `let x = 1`,
+ * Measured 2026-09-22 over the shapes probed by hand — which is a list, not a
+ * survey — the rewrite took each `=`-initialised declaration to zero errors
+ * and fired on none of `lv = 5.`, `IF 1 = 1`, `let x = 1`,
  * `const o = { a: 1 }`, `f(a = 1)`, `SELECT ... WHERE x = 1`,
  * `DATA(lv) = 5.` (the inline declaration, which is correct ABAP and does
  * initialise with `=`), `METHODS m IMPORTING iv TYPE i = 1.` or

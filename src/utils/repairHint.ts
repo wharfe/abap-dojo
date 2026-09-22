@@ -49,9 +49,16 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  * unrelated error elsewhere survives any of these rewrites, so "makes this
  * parse" was a second over-claim (round 2 of the same review, same day). The
  * hint therefore speaks about the error on that row, with `DATA ... VALUE`
- * offered as the example rather than as the diagnosis. Do not "tighten" this
- * back into a claim about what declarations do, and do not widen it back
- * into a claim about the whole program.
+ * offered as the example rather than as the diagnosis.
+ *
+ * It says the error *goes away*, never that the `=` *caused* it: round 3 of
+ * the same review caught "clears the error it caused", and the search tracks
+ * neither error identity nor cause. What it observed is that after the
+ * rewrite nothing covers that row and the count fell. Three rounds found
+ * three different widths of the same over-claim, which is why the wording is
+ * pinned in tests and annotated here: do not "tighten" it back into a claim
+ * about what declarations do, do not widen it into a claim about the whole
+ * program, and do not add a cause.
  *
  * Kept apart from App.tsx so the wording can be asserted in a test rather than
  * rendered to check it, and so there is one place to look when a second repair
@@ -104,11 +111,11 @@ export function repairHint(repair: SyntaxRepair): string {
             `on line ${repair.line} has none.`;
     case "data_value_assign":
       return repair.line === undefined
-        ? `Hint: writing VALUE in place of those equals signs clears the ` +
-            `errors they caused. ABAP puts a starting value after VALUE: ` +
+        ? `Hint: write VALUE in place of those equals signs and the errors ` +
+            `on their lines go away. ABAP puts a starting value after VALUE: ` +
             `DATA lv TYPE i VALUE 5.`
-        : `Hint: writing VALUE in place of the equals sign on line ` +
-            `${repair.line} clears the error it caused. ABAP puts a ` +
+        : `Hint: write VALUE in place of the equals sign on line ` +
+            `${repair.line} and the error there goes away. ABAP puts a ` +
             `starting value after VALUE: DATA lv TYPE i VALUE 5.`;
   }
 }

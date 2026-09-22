@@ -44,7 +44,10 @@ describe("repairHint for a statement end", () => {
 
   it("drops the row when the chained declaration needed every row rewritten", () => {
     const hint = repairHint({ kind: "data_value_assign" });
-    expect(hint).not.toContain("line");
+    // No ROW is named. The wording may still say "lines" — what it must not
+    // do is point at one, because the all-at-once candidate cannot say which
+    // of its edits mattered.
+    expect(hint).not.toMatch(/line \d/);
     expect(hint).toContain("VALUE");
   });
 });
