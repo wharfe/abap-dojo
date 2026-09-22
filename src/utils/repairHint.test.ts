@@ -33,11 +33,27 @@ describe("repairHint for a statement end", () => {
     // and nobody writes a semicolon or omits a period on purpose.
     expect(repairHint({ kind: "semicolon", line: 1 })).not.toContain("If you");
     expect(repairHint({ kind: "missing_period", line: 1 })).not.toContain("If you");
+    expect(repairHint({ kind: "data_value_assign", line: 1 })).not.toContain("If you");
+  });
+
+  it("names the row for a declaration written with an equals sign", () => {
+    const hint = repairHint({ kind: "data_value_assign", line: 4 });
+    expect(hint).toContain("line 4");
+    expect(hint).toContain("VALUE");
+  });
+
+  it("drops the row when the chained declaration needed every row rewritten", () => {
+    const hint = repairHint({ kind: "data_value_assign" });
+    // No ROW is named. The wording may still say "lines" — what it must not
+    // do is point at one, because the all-at-once candidate cannot say which
+    // of its edits mattered.
+    expect(hint).not.toMatch(/line \d/);
+    expect(hint).toContain("VALUE");
   });
 });
 
 describe("syntax_repair carries the new kinds", () => {
-  it.each(["semicolon", "missing_period"])("keeps %s on a syntax_error", (kind) => {
+  it.each(["semicolon", "missing_period", "data_value_assign"])("keeps %s on a syntax_error", (kind) => {
     expect(
       sanitizeParams("run_result", {
         outcome: "syntax_error",

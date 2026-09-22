@@ -27,10 +27,38 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  * ignored — always true) and offers the fix conditionally. Someone who did
  * mean a comment reads "if you meant that as literal data" and moves on.
  *
- * That argument is about the double quote. `semicolon` and `missing_period`
- * are stated flatly: their search keeps a rewrite only when it clears every
- * error it targeted, and neither mistake is something anyone does on purpose,
- * so a conditional would only make a near-certain fix harder to read.
+ * That argument is about the double quote. `semicolon`, `missing_period` and
+ * `data_value_assign` are stated flatly: their search keeps a rewrite only
+ * when it clears every error it targeted, and none of the three mistakes is
+ * something anyone does on purpose, so a conditional would only make a
+ * near-certain fix harder to read.
+ *
+ * **`data_value_assign` is flat about the EDIT, not about the grammar, and
+ * the difference is the whole of its wording.** Two reviewers independently
+ * found the same over-claim in an earlier draft that said "an ABAP
+ * declaration gives its starting value with VALUE, not an equals sign"
+ * (2026-09-22). It is false twice over: ABAP's inline declaration
+ * `DATA(lv) = 5.` does initialise with `=`, and the search is keyword-blind,
+ * so it also fires on `FORM f USING p = 1.`, which is not a declaration at
+ * all.
+ *
+ * What the search actually proved is narrower and still flat, and narrower
+ * again than that first correction said. `firstAccepted` requires the error
+ * count to fall AND nothing to still cover the rewritten row — which means
+ * the rewrite cleared *that* error, **not** that the program now parses. An
+ * unrelated error elsewhere survives any of these rewrites, so "makes this
+ * parse" was a second over-claim (round 2 of the same review, same day). The
+ * hint therefore speaks about the error on that row, with `DATA ... VALUE`
+ * offered as the example rather than as the diagnosis.
+ *
+ * It says the error *goes away*, never that the `=` *caused* it: round 3 of
+ * the same review caught "clears the error it caused", and the search tracks
+ * neither error identity nor cause. What it observed is that after the
+ * rewrite nothing covers that row and the count fell. Three rounds found
+ * three different widths of the same over-claim, which is why the wording is
+ * pinned in tests and annotated here: do not "tighten" it back into a claim
+ * about what declarations do, do not widen it into a claim about the whole
+ * program, and do not add a cause.
  *
  * Kept apart from App.tsx so the wording can be asserted in a test rather than
  * rendered to check it, and so there is one place to look when a second repair
@@ -81,6 +109,14 @@ export function repairHint(repair: SyntaxRepair): string {
         ? `Hint: every ABAP statement ends with a period, and some here have none.`
         : `Hint: every ABAP statement ends with a period, and the one ending ` +
             `on line ${repair.line} has none.`;
+    case "data_value_assign":
+      return repair.line === undefined
+        ? `Hint: write VALUE in place of those equals signs and the errors ` +
+            `on their lines go away. ABAP puts a starting value after VALUE: ` +
+            `DATA lv TYPE i VALUE 5.`
+        : `Hint: write VALUE in place of the equals sign on line ` +
+            `${repair.line} and the error there goes away. ABAP puts a ` +
+            `starting value after VALUE: DATA lv TYPE i VALUE 5.`;
   }
 }
 

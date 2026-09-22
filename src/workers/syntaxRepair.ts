@@ -82,8 +82,9 @@ import { MAX_CANDIDATES, MAX_SOURCE_CHARS } from "./searchLimits";
  * and it is why the size cap below matters more than it did.
  * The cap bounds each search at eleven parses: ten candidates plus the one
  * that rewrites everything. On the failure path the statement-end search
- * (statementEndRepair.ts, #67) reuses it for two more kinds, so a failing Run
- * re-parses at most 33 times after the original. A file whose only misused
+ * (statementEndRepair.ts, #67) reuses it for two more kinds and the
+ * declaration search (valueAssignRepair.ts, #85) for a fourth, so a failing
+ * Run re-parses at most 44 times after the original. A file whose only misused
  * quote is below the tenth quoted line gets no hint, which is the right way
  * to fail: silence, not a wrong guess.
  */

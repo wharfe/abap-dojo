@@ -10,6 +10,7 @@ import {
 } from "./searchDeadline";
 import { findSilentLoss, findSyntaxRepair } from "./syntaxRepair";
 import { findStatementEndRepair } from "./statementEndRepair";
+import { findValueAssignRepair } from "./valueAssignRepair";
 
 /** A clock the test moves by hand. */
 function fakeClock() {
@@ -103,6 +104,15 @@ describe("a search that runs out of time", () => {
     await expect(
       findSilentLoss(source, { errors: 0, real: 1 }, reparse),
     ).resolves.toEqual({ completed: false });
+    expect(calls()).toBe(2);
+  });
+
+  it("leaves the declaration search with no hint", async () => {
+    const source = Array.from({ length: 5 }, (_, i) => `DATA lv${i} TYPE i = ${i}.`).join("\n");
+    const spans = Array.from({ length: 5 }, (_, i) => ({ start: i + 1, end: i + 1 }));
+    // Every re-parse still reports an error on every row, so nothing is accepted.
+    const { reparse, calls } = slow(spans);
+    await expect(findValueAssignRepair(source, spans, reparse)).resolves.toBeUndefined();
     expect(calls()).toBe(2);
   });
 

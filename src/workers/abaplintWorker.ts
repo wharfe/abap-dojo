@@ -21,11 +21,9 @@ import {
   findSyntaxRepair,
   findSilentLoss,
 } from "./syntaxRepair";
-import {
-  errorSpanFinder,
-  errorSpanOf,
-  findStatementEndRepair,
-} from "./statementEndRepair";
+import { findStatementEndRepair } from "./statementEndRepair";
+import { findValueAssignRepair } from "./valueAssignRepair";
+import { errorSpanFinder, errorSpanOf } from "./strictAcceptance";
 import { bounded, SEARCH_BUDGET_MS } from "./searchDeadline";
 import type { SyntaxRepair, TranspileDiagnostics } from "../types/diagnostics";
 import type { SilentLossSearch } from "./syntaxRepair";
@@ -190,26 +188,27 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
       });
 
       // The verdict is out. Everything below only decides whether a hint
-      // follows it, and costs at most 33 re-parses — 11 per kind, none above
+      // follows it, and costs at most 44 re-parses — 11 per kind, none above
       // MAX_SOURCE_CHARS, none started once SEARCH_BUDGET_MS has passed. Never
       // on `lint`, which fires on every keystroke. Not scoped to the
       // parse-failure keys: any Error-severity outcome gets the search, which is
       // a superset of what can ever match and one fewer rule to keep in step
       // with abaplint.
       //
-      // The double quote is tried first and unchanged; the statement-end search
-      // (#67) only runs when it found nothing, so what `double_quote` reports
-      // cannot move except where the deadline cuts a search short.
+      // Each search runs only when the ones before it found nothing, and new
+      // ones are appended rather than inserted: that is what keeps the
+      // existing values comparable across their own release dates. The
+      // declaration search (#85) is last and does not contend anyway — a
+      // declaration written with `=` ends in a period, so it is not a
+      // candidate of either statement-end kind.
       let repair: SyntaxRepair | undefined;
       try {
         const deadline = performance.now() + SEARCH_BUDGET_MS;
+        const spans = errors.map(errorSpanOf);
         repair =
           (await findSyntaxRepair(source, countErrors(issues), errorsIn(deadline))) ??
-          (await findStatementEndRepair(
-            source,
-            errors.map(errorSpanOf),
-            errorSpansIn(deadline),
-          ));
+          (await findStatementEndRepair(source, spans, errorSpansIn(deadline))) ??
+          (await findValueAssignRepair(source, spans, errorSpansIn(deadline)));
       } catch {
         repair = undefined;
       }

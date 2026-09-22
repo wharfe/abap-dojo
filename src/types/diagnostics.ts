@@ -144,8 +144,21 @@ export interface SyntaxDiagnostics {
  * under a stricter rule than `double_quote`, because appending a period makes
  * almost any line look like a finished statement: a rewrite is kept only if it
  * clears every error it targeted, not merely if the count went down.
+ *
+ * `data_value_assign` (#85) is the first value that is not about punctuation.
+ * `DATA` was the second-largest `parser_error` keyword over 2026-09-08..21 —
+ * 66 events, 65 of them with no `syntax_repair` at all, because a declaration
+ * ends in a period and the searches above only look at how a statement ends.
+ * What is wrong with it is the initialiser: `DATA lv TYPE i = 5.` is how most
+ * languages spell what ABAP spells `VALUE 5`. Found by
+ * src/workers/valueAssignRepair.ts under the same stricter rule.
  */
-export const SYNTAX_REPAIRS = ["double_quote", "semicolon", "missing_period"] as const;
+export const SYNTAX_REPAIRS = [
+  "double_quote",
+  "semicolon",
+  "missing_period",
+  "data_value_assign",
+] as const;
 
 export type SyntaxRepairKind = (typeof SYNTAX_REPAIRS)[number];
 

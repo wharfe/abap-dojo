@@ -535,9 +535,9 @@ punctuation borrowed from another language.
 
 So `run_result` also carries `syntax_repair` on `syntax_error` **only**: which
 one-line edit would have made the parse succeed. It is an enum —
-`double_quote`, `semicolon`, `missing_period` — so unlike the three parameters
-above it needs no membership test: nothing the user writes can reach the wire
-through it.
+`double_quote`, `semicolon`, `missing_period`, `data_value_assign` — so unlike
+the three parameters above it needs no membership test: nothing the user
+writes can reach the wire through it.
 
 **The two statement-end kinds (#67) use a stricter acceptance rule than
 `double_quote`, and the difference is load-bearing.** Appending a period makes
@@ -659,8 +659,8 @@ error on screen while `syntax_repair` is already gone with the event. Both
 only happen where a search ran long, so `syntax_repair` under-reports heavy
 pastes specifically — not at random.
 
-The search costs a bounded number of extra parses — at most 33 across the
-three kinds — and only on the Run path, never on `lint`, which fires on every
+The search costs a bounded number of extra parses — at most 44 across the
+four kinds — and only on the Run path, never on `lint`, which fires on every
 keystroke. It is skipped entirely above 16 kB of source (`MAX_SOURCE_CHARS`;
 64 kB until #75). What the caps now protect is `lint`, not the outcome:
 abaplint's `parseAsync` does not yield to the event loop (0 macrotasks during
@@ -705,6 +705,62 @@ documented meaning is "the edit that made the parse succeed", and a `none`
 would have to stand for several unlike things at once — but it means a fall
 has to be read against the sum above and against the size of what people are
 pasting, not on its own.
+
+### `data_value_assign` is the first repair that is not about punctuation
+
+The three kinds above all answer "how does this statement end", and on the
+`DATA` bucket they answer nothing: measured 2026-09-08..21, it was the
+second-largest `parser_error` keyword at 66 events, and **65 of them carried
+no `syntax_repair` at all** — against `WRITE`, where 48 of 201 got a hint.
+
+That pair of numbers is all GA4 can say. It does **not** say what those 65
+programs looked like: the parameter records which repair worked, so a missing
+value means only that none of the three was accepted. What the shapes are is a
+separate, weaker piece of evidence — a by-hand probe of 33 ways to write a
+declaration (2026-09-22), which found `=`-as-initialiser alongside `INITIAL`,
+a comma chain missing its `:`, and `varchar(10)` / `ARRAY OF`. The probe says
+those shapes fail; it does not say how often users write them. Read a fall in
+this bucket against `syntax_statement = DATA`, not as proof that `=` was the
+whole of it.
+
+What is wrong is the initialiser. Most languages declare with `=`; ABAP spells
+that `VALUE`, and `=` there is a parse error rather than a style choice. So
+`run_result` carries a fourth value, produced by `src/workers/valueAssignRepair.ts`
+under the same stricter acceptance as the statement ends.
+
+**It does not look for `DATA`.** The rule is "an error row holds an `=`", and
+abaplint decides — the same refusal to read the line that syntaxRepair.ts is
+built on. `CONSTANTS` and `CLASS-DATA` take `VALUE` in the same position and
+are therefore repaired too, and `FORM f USING p = 1.` — **not a declaration at
+all** — is repaired as well: consequences of the rule, not further rules. So
+do not read the value as a count of `DATA` statements, and note that the hint
+is worded to survive this. It states what the rewrite did (writing `VALUE` in
+place of this `=` makes it parse) rather than diagnosing a declaration,
+because a flat claim about declarations would be false on the `FORM` shape and
+false again on ABAP's own inline `DATA(lv) = 5.`, which does initialise with
+`=`.
+
+Measured 2026-09-22 against the real config, over the shapes probed by hand:
+the rewrite took each `=`-initialised declaration to zero errors and fired on
+none of `lv = 5.`, `IF 1 = 1`, `let x = 1`, `const o = { a: 1 }`, `f(a = 1)`
+or `SELECT ... WHERE x = 1`, whether those parsed or not. That is a list of
+inputs, not a survey of what users write.
+
+Two things to know before reading it:
+
+1. **It was appended to the search order, not inserted, and that is what keeps
+   the other three comparable.** It runs only when they all found nothing, so
+   it cannot take the deadline away from them, and it does not contend with
+   them anyway: a declaration written with `=` ends in a period, so it is a
+   candidate of neither statement-end kind. What the shared 3 s deadline now
+   has to cover is one search more, so the kind that can run out of budget is
+   this one — the existing three are unaffected.
+2. **Only the first `=` on a row is rewritten.** That is what keeps
+   `DATA lv TYPE string = 'a = b'.` repairable, and it is also the limit: a
+   row whose own literal holds the first `=` is out of reach, for the same
+   reason the double quote leaves `WRITE: 'he said "hi"', "b".` alone. Finding
+   the `=` that is outside a literal means writing ABAP's lexer, which is the
+   thing these searches exist not to write.
 
 ### `silent_loss` sees the failure that leaves no trace at all
 

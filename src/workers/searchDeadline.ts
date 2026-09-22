@@ -32,8 +32,8 @@
  *
  * The deadline is enforced by throwing from the wrapped re-parse, because
  * every search already treats a throwing re-parse as "no answer" —
- * `findSyntaxRepair` and `findStatementEndRepair` return undefined,
- * `findSilentLoss` reports `completed: false`. None of them needs to know the
+ * `findSyntaxRepair`, `findStatementEndRepair` and `findValueAssignRepair`
+ * return undefined, `findSilentLoss` reports `completed: false`. None of them needs to know the
  * deadline exists; searchDeadline.test.ts pins that for each.
  *
  * The price: for a paste heavy enough to reach it, whether a hint appears
