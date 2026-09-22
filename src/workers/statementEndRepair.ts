@@ -21,7 +21,7 @@
  * `console.log('a')` is two errors on one row and a period turns it into one,
  * so "the count went down" would tell someone who pasted JavaScript that they
  * forgot a period. A candidate is kept only if the count went down AND no
- * error is left starting on a row it targeted. The double quote keeps its own
+ * error is left covering a row it targeted. The double quote keeps its own
  * rule: its data has been flowing since 2026-09-08, and changing what it
  * reports would break the comparison across that date.
  */
@@ -134,20 +134,22 @@ export function statementEndCandidates(
 }
 
 /**
- * The start rows of a candidate's Error-severity issues — one entry per
- * issue, so its length is the same count `countErrors` takes.
+ * The spans of a candidate's Error-severity issues — one entry per issue, so
+ * its length is the same count `countErrors` takes.
+ *
+ * Spans, not start rows, so the acceptance test below compares like with
+ * like. See the note there for why the two cannot currently differ, and why
+ * that is not a reason to keep the cheaper one.
  */
-export function errorRowCounter(
+export function errorSpanFinder(
   config: Config,
   filename: string,
-): (candidate: string) => Promise<number[]> {
+): (candidate: string) => Promise<ErrorSpan[]> {
   return async (candidate) => {
     const registry = new Registry(config);
     registry.addFile(new MemoryFile(filename, candidate));
     await registry.parseAsync();
-    return errorIssues(registry.findIssues()).map((issue) =>
-      issue.getStart().getRow(),
-    );
+    return errorIssues(registry.findIssues()).map(errorSpanOf);
   };
 }
 
@@ -159,7 +161,7 @@ export function errorRowCounter(
 export async function findStatementEndRepair(
   source: string,
   spans: readonly ErrorSpan[],
-  errorRowsIn: (candidate: string) => Promise<number[]>,
+  errorSpansIn: (candidate: string) => Promise<ErrorSpan[]>,
 ): Promise<SyntaxRepair | undefined> {
   if (spans.length === 0) return undefined;
 
@@ -169,13 +171,26 @@ export async function findStatementEndRepair(
       // the parser in shapes the user's own text never would. A throw here
       // means "no hint" — and since searchDeadline.ts enforces its budget by
       // throwing, this is also how a search that ran out of time ends.
-      let after: number[];
+      let after: ErrorSpan[];
       try {
-        after = await errorRowsIn(candidate.source);
+        after = await errorSpansIn(candidate.source);
       } catch {
         return undefined;
       }
-      const cleared = !after.some((row) => candidate.targets.includes(row));
+      // An error still COVERING a target row means the rewrite did not clear
+      // what it aimed at, whichever row that error starts on. Comparing start
+      // rows instead answers the same on every input we could build (17 tried
+      // on 2026-09-22: pasted JS, Python, JSON and SQL, and unclosed IF /
+      // FORM / METHOD / CASE / TRY), and the reason is structural: an edit at
+      // the end of a targeted row changes how statements are read from that
+      // row onward, and cannot break an earlier statement that parsed. So any
+      // surviving error over a target row starts inside a targeted span too.
+      // That argument is about how abaplint draws its spans, though, and a
+      // dependency bump can move it without failing a test. Overlap costs
+      // nothing and does not rest on it.
+      const cleared = !after.some((error) =>
+        candidate.targets.some((row) => error.start <= row && row <= error.end),
+      );
       if (after.length < spans.length && cleared) {
         return candidate.line === undefined
           ? { kind }

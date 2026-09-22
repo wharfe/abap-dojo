@@ -5,16 +5,17 @@ import { Buffer } from "buffer";
 import { Config, Registry, MemoryFile } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
 import {
-  errorRowCounter,
+  errorSpanFinder,
   errorSpanOf,
   findStatementEndRepair,
   statementEndCandidates,
+  type ErrorSpan,
 } from "./statementEndRepair";
 import { errorIssues } from "./syntaxRepair";
 
 /** The worker's own configuration — see the note in syntaxRepair.test.ts. */
 const config = new Config(JSON.stringify(transpilerConfig));
-const errorRowsIn = errorRowCounter(config, "ztest.prog.abap");
+const errorSpansIn = errorSpanFinder(config, "ztest.prog.abap");
 
 /** Search the way the worker does: take the spans from one parse, then look. */
 async function repairOf(source: string) {
@@ -22,7 +23,7 @@ async function repairOf(source: string) {
   registry.addFile(new MemoryFile("ztest.prog.abap", source));
   await registry.parseAsync();
   const spans = errorIssues(registry.findIssues()).map(errorSpanOf);
-  return findStatementEndRepair(source, spans, errorRowsIn);
+  return findStatementEndRepair(source, spans, errorSpansIn);
 }
 
 describe("statementEndCandidates", () => {
@@ -109,7 +110,7 @@ describe("findStatementEndRepair search", () => {
   it("rejects a rewrite that lowers the count but leaves an error where it aimed", async () => {
     // Pasted JavaScript: `console.log('a')` is two errors on one row, and a
     // period turns it into one. A plain count would call that a repair.
-    const onePerRow = () => Promise.resolve([1]);
+    const onePerRow = () => Promise.resolve([{ start: 1, end: 1 }]);
     expect(
       await findStatementEndRepair(
         `console.log('a')`,
@@ -217,5 +218,26 @@ describe("findStatementEndRepair against the real parser", () => {
     // of every rewrite and its surviving error rejects each of them. Pinned:
     // this is the real repair the stricter rule costs.
     expect(await repairOf(`REPORT z.\nWRITE 'a';\nWRITE 'b';\nWRTE 'd'.`)).toBeUndefined();
+  });
+
+  it("rejects a candidate whose target is still covered by an error starting above it", async () => {
+    // No abaplint input reaches this (#78): an edit at the end of a row cannot
+    // break an earlier statement that parsed, so a surviving error over a
+    // target row starts inside a targeted span. The rule is pinned against a
+    // stub rather than a program, because what it guards is a future abaplint
+    // that draws its spans differently — comparing start rows would accept
+    // this and tell someone who forgot nothing that they forgot a period.
+    const before: ErrorSpan[] = [
+      { start: 2, end: 2 },
+      { start: 3, end: 3 },
+    ];
+    const swallowedFromAbove = async () => [{ start: 1, end: 3 }];
+    expect(
+      await findStatementEndRepair(
+        `REPORT z.\nWRITE 'a'\nWRITE 'b'`,
+        before,
+        swallowedFromAbove,
+      ),
+    ).toBeUndefined();
   });
 });
