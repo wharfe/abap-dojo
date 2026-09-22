@@ -114,13 +114,29 @@ export function valueAssignCandidates(
   // and abaplint does not stop reporting until the last is gone. It names no
   // row, for the reason the other two searches name none: the score says the
   // rewrite worked, never which of its edits mattered.
+  //
+  // **It is the one candidate that can outgrow the size cap, so it is
+  // measured against it after the edit.** `MAX_SOURCE_CHARS` is checked on
+  // the source, and this rewrite turns one character into seven on every
+  // eligible row: 16,384 bytes of `=` on 8,192 rows becomes 65,536, exactly
+  // 4.0x (measured 2026-09-22). The cap exists to bound how long one parse
+  // freezes `lint`, and a parse of 64 kB is a different order of cost from a
+  // parse of 16 kB (1,249 ms against 120 ms on one shape — see CLAUDE.md), so
+  // letting this through would spend the budget the cap was protecting. The
+  // per-row candidates rewrite one `=` and so run six bytes over their
+  // source, which is noise against a parse rather than a change of order;
+  // the sibling searches append at most one character per row. Only this
+  // candidate can multiply.
   if (rows.length > 1) {
     const edited = [...lines];
     for (const row of rows) edited[row - 1] = edit(lines[row - 1]);
-    const touched = spans.filter((span) =>
-      rows.some((row) => span.start <= row && row <= span.end),
-    );
-    candidates.push({ source: edited.join("\n"), targets: rowsOf(touched) });
+    const source = edited.join("\n");
+    if (source.length <= MAX_SOURCE_CHARS) {
+      const touched = spans.filter((span) =>
+        rows.some((row) => span.start <= row && row <= span.end),
+      );
+      candidates.push({ source, targets: rowsOf(touched) });
+    }
   }
 
   return candidates;

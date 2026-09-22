@@ -40,11 +40,18 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  * (2026-09-22). It is false twice over: ABAP's inline declaration
  * `DATA(lv) = 5.` does initialise with `=`, and the search is keyword-blind,
  * so it also fires on `FORM f USING p = 1.`, which is not a declaration at
- * all. What the search actually proved is narrower and still flat — that
- * writing `VALUE` in place of this `=` makes the program parse — so that is
- * what the hint says, with `DATA ... VALUE` offered as the example rather
- * than as the diagnosis. Do not "tighten" this back into a claim about what
- * declarations do.
+ * all.
+ *
+ * What the search actually proved is narrower and still flat, and narrower
+ * again than that first correction said. `firstAccepted` requires the error
+ * count to fall AND nothing to still cover the rewritten row — which means
+ * the rewrite cleared *that* error, **not** that the program now parses. An
+ * unrelated error elsewhere survives any of these rewrites, so "makes this
+ * parse" was a second over-claim (round 2 of the same review, same day). The
+ * hint therefore speaks about the error on that row, with `DATA ... VALUE`
+ * offered as the example rather than as the diagnosis. Do not "tighten" this
+ * back into a claim about what declarations do, and do not widen it back
+ * into a claim about the whole program.
  *
  * Kept apart from App.tsx so the wording can be asserted in a test rather than
  * rendered to check it, and so there is one place to look when a second repair
@@ -97,11 +104,12 @@ export function repairHint(repair: SyntaxRepair): string {
             `on line ${repair.line} has none.`;
     case "data_value_assign":
       return repair.line === undefined
-        ? `Hint: writing VALUE in place of an equals sign makes this parse. ` +
-            `ABAP puts a starting value after VALUE: DATA lv TYPE i VALUE 5.`
+        ? `Hint: writing VALUE in place of those equals signs clears the ` +
+            `errors they caused. ABAP puts a starting value after VALUE: ` +
+            `DATA lv TYPE i VALUE 5.`
         : `Hint: writing VALUE in place of the equals sign on line ` +
-            `${repair.line} makes this parse. ABAP puts a starting value ` +
-            `after VALUE: DATA lv TYPE i VALUE 5.`;
+            `${repair.line} clears the error it caused. ABAP puts a ` +
+            `starting value after VALUE: DATA lv TYPE i VALUE 5.`;
   }
 }
 

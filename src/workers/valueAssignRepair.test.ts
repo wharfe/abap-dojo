@@ -34,7 +34,7 @@ describe("valueAssignCandidates", () => {
     });
   });
 
-  it("rewrites only the first equals sign on a row", () => {
+  it("rewrites the first equals sign only, leaving a later one inside a literal", () => {
     // What keeps `'a = b'` repairable: the one inside the literal is not ours
     // to find, and looking for it is the lexer this module refuses to write.
     expect(
@@ -42,6 +42,36 @@ describe("valueAssignCandidates", () => {
         { start: 2, end: 2 },
       ])[0].source,
     ).toBe(`REPORT z.\nDATA lv TYPE string VALUE 'a = b'.\n`);
+  });
+
+  it("edits the literal, and so reaches nothing, when the FIRST equals sign is inside one", () => {
+    // The other side of the same rule, and the real limit it buys. Here the
+    // mistake is `= 5` at the end, but the first `=` on the row is inside
+    // `'a = b'`, so that is what gets rewritten. Pinned so the limit stays a
+    // decision: finding the `=` outside a literal is ABAP's lexer.
+    const source = `REPORT z.\nDATA: lv TYPE string VALUE 'a = b', lw TYPE i = 5.\n`;
+    expect(valueAssignCandidates(source, [{ start: 2, end: 2 }])[0].source).toBe(
+      `REPORT z.\nDATA: lv TYPE string VALUE 'a VALUE b', lw TYPE i = 5.\n`,
+    );
+  });
+
+  it("drops the all-at-once candidate when the rewrite outgrows the size cap", () => {
+    // `=` becomes ` VALUE `, so this candidate is 4.0x its source at worst
+    // (measured 2026-09-22). The cap bounds how long one parse freezes lint,
+    // and 64 kB is a different order of cost from 16 kB.
+    const rows = 8192;
+    const source = "=\n".repeat(rows);
+    expect(source.length).toBe(16 * 1024);
+    const spans = Array.from({ length: rows }, (_, i) => ({ start: i + 1, end: i + 1 }));
+    const candidates = valueAssignCandidates(source, spans);
+    // Ten per-row candidates and no eleventh: the all-at-once one would have
+    // been 65,536 bytes.
+    expect(candidates).toHaveLength(10);
+    // A per-row candidate rewrites one `=`, so it is six bytes over the
+    // source at most — noise against a parse, unlike a 4x candidate.
+    for (const candidate of candidates) {
+      expect(candidate.source.length).toBeLessThanOrEqual(source.length + 6);
+    }
   });
 
   it("keeps the carriage return when the equals sign ends the row", () => {
