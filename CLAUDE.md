@@ -722,8 +722,14 @@ under the same stricter acceptance as the statement ends.
 **It does not look for `DATA`.** The rule is "an error row holds an `=`", and
 abaplint decides — the same refusal to read the line that syntaxRepair.ts is
 built on. `CONSTANTS` and `CLASS-DATA` take `VALUE` in the same position and
-are therefore repaired too: a consequence of the rule, not a second rule. So
-do not read the value as a count of `DATA` statements.
+are therefore repaired too, and `FORM f USING p = 1.` — **not a declaration at
+all** — is repaired as well: consequences of the rule, not further rules. So
+do not read the value as a count of `DATA` statements, and note that the hint
+is worded to survive this. It states what the rewrite did (writing `VALUE` in
+place of this `=` makes it parse) rather than diagnosing a declaration,
+because a flat claim about declarations would be false on the `FORM` shape and
+false again on ABAP's own inline `DATA(lv) = 5.`, which does initialise with
+`=`.
 
 Measured 2026-09-22 against the real config, the rewrite took every
 declaration shape to zero errors and fired on none of `lv = 5.`, `IF 1 = 1`,
@@ -733,12 +739,12 @@ whether those parsed or not.
 Two things to know before reading it:
 
 1. **It was appended to the search order, not inserted, and that is what keeps
-   the other three comparable.** It runs only when they all found nothing, and
-   it does not contend with them anyway: a declaration written with `=` ends
-   in a period, so it is a candidate of neither statement-end kind. The one
-   number that moves at this release is the shared 3 s deadline, now spread
-   over four searches instead of three — a heavy paste that used to reach the
-   statement ends can now run out before the declaration search starts.
+   the other three comparable.** It runs only when they all found nothing, so
+   it cannot take the deadline away from them, and it does not contend with
+   them anyway: a declaration written with `=` ends in a period, so it is a
+   candidate of neither statement-end kind. What the shared 3 s deadline now
+   has to cover is one search more, so the kind that can run out of budget is
+   this one — the existing three are unaffected.
 2. **Only the first `=` on a row is rewritten.** That is what keeps
    `DATA lv TYPE string = 'a = b'.` repairable, and it is also the limit: a
    row whose own literal holds the first `=` is out of reach, for the same

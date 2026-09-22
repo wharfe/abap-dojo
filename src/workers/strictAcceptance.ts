@@ -89,12 +89,20 @@ function accepts(
 /**
  * The first candidate abaplint accepts, or undefined.
  *
+ * `candidates` is an Iterable rather than an array so a caller with several
+ * kinds can generate each kind's candidates only once the kind before it has
+ * been exhausted — building them all up front would put that work in front of
+ * the first re-parse, and the deadline is already running by then. It is
+ * small (1.0-1.6 ms per kind at the 16 kB cap, Node, 2026-09-22) against a
+ * 3 s budget, but "behaviour-preserving" should not need a measurement to be
+ * true.
+ *
  * Precondition: `before` must be the count of EVERY Error-severity issue of
  * the original parse — it is the bar a candidate is judged against, so a
  * subset lowers it and makes the search accept a worse candidate.
  */
 export async function firstAccepted<T extends TargetedCandidate>(
-  candidates: readonly T[],
+  candidates: Iterable<T>,
   before: number,
   errorSpansIn: (candidate: string) => Promise<ErrorSpan[]>,
 ): Promise<T | undefined> {

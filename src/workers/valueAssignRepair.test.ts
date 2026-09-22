@@ -44,6 +44,18 @@ describe("valueAssignCandidates", () => {
     ).toBe(`REPORT z.\nDATA lv TYPE string VALUE 'a = b'.\n`);
   });
 
+  it("keeps the carriage return when the equals sign ends the row", () => {
+    // The source is split on `\n`, so under CRLF every row ends in `\r`. A
+    // plain `\s` in the regex would eat it and rejoin that one row with a
+    // bare `\n`. A dropped `\r` is the class of bug that once silenced a
+    // whole search for anyone pasting from a CRLF editor.
+    expect(
+      valueAssignCandidates(`REPORT z.\r\nDATA lv TYPE i =\r\n  5.\r\n`, [
+        { start: 2, end: 3 },
+      ])[0].source,
+    ).toBe(`REPORT z.\r\nDATA lv TYPE i VALUE \r\n  5.\r\n`);
+  });
+
   it("proposes no candidate for a row with no equals sign", () => {
     expect(valueAssignCandidates(`REPORT z.\nWRITE 'a'\n`, [{ start: 2, end: 2 }])).toEqual([]);
   });
@@ -89,8 +101,25 @@ describe("findValueAssignRepair against the real parser", () => {
     });
   });
 
+  it("fires on FORM ... USING p = 1., which is not a declaration at all", async () => {
+    // Found by external review (2026-09-22). The search is keyword-blind by
+    // design, so it reaches a subroutine definition; this is pinned rather
+    // than fixed, because narrowing it would mean reading the leading
+    // keyword. It is also why repairHint states what the rewrite did instead
+    // of diagnosing a declaration — see the note there.
+    // The ENDFORM matters: without it the original has one error and the
+    // rewrite still has one, so nothing is accepted. With it, the original
+    // is parser_error@2 + structure@3 and the rewrite parses clean.
+    expect(
+      (await repairOf(`REPORT z.\nFORM f USING p = 1.\nENDFORM.`))?.kind,
+    ).toBe("data_value_assign");
+  });
+
   it.each([
     ["an assignment that is correct ABAP", `REPORT z.\nDATA lv TYPE i.\nlv = 5.`],
+    // Correct ABAP that DOES initialise with `=`: the inline declaration.
+    ["an inline declaration", `REPORT z.\nDATA(lv) = 5.`],
+    ["a method default", `CLASS c DEFINITION.\nPUBLIC SECTION.\nMETHODS m IMPORTING iv TYPE i = 1.\nENDCLASS.`],
     ["a declaration that already uses VALUE", `REPORT z.\nDATA lv TYPE string VALUE 'a'.`],
     ["a comparison in a broken IF", `REPORT z.\nIF 1 = 1\nWRITE 'a'.\nENDIF.`],
     ["pasted JavaScript", `REPORT z.\nlet x = 1`],

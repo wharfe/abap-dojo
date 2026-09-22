@@ -120,8 +120,9 @@ export interface EventMap {
     /**
      * Only on `outcome: "syntax_error"` — which one-line edit would have made
      * the parse succeed, when one did. An enum (`double_quote`, `semicolon`,
-     * `missing_period`), so unlike the three parameters above it needs no
-     * membership test: nothing the user writes can reach the wire through it.
+     * `missing_period`, `data_value_assign`), so unlike the three parameters
+     * above it needs no membership test: nothing the user writes can reach the
+     * wire through it.
      *
      * It exists because `syntax_key` and `syntax_statement` stop one step
      * short. They said `parser_error` and `WRITE`, and `WRITE` turned out to

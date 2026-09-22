@@ -113,7 +113,7 @@ test("a semicolon used to end a statement is explained", async ({ page }) => {
   });
 });
 
-const VALUE_HINT = /gives its starting value with VALUE/i;
+const VALUE_HINT = /puts a starting value after VALUE/i;
 
 test("a declaration initialised with an equals sign is explained", async ({ page }) => {
   await page.goto("/");

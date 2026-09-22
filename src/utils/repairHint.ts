@@ -31,10 +31,20 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  * `data_value_assign` are stated flatly: their search keeps a rewrite only
  * when it clears every error it targeted, and none of the three mistakes is
  * something anyone does on purpose, so a conditional would only make a
- * near-certain fix harder to read. `data_value_assign` has one more reason
- * than the others — `=` never initialises a declaration in ABAP under any
- * reading, so unlike the double quote there is no correct program the hint
- * could be wrong about.
+ * near-certain fix harder to read.
+ *
+ * **`data_value_assign` is flat about the EDIT, not about the grammar, and
+ * the difference is the whole of its wording.** Two reviewers independently
+ * found the same over-claim in an earlier draft that said "an ABAP
+ * declaration gives its starting value with VALUE, not an equals sign"
+ * (2026-09-22). It is false twice over: ABAP's inline declaration
+ * `DATA(lv) = 5.` does initialise with `=`, and the search is keyword-blind,
+ * so it also fires on `FORM f USING p = 1.`, which is not a declaration at
+ * all. What the search actually proved is narrower and still flat — that
+ * writing `VALUE` in place of this `=` makes the program parse — so that is
+ * what the hint says, with `DATA ... VALUE` offered as the example rather
+ * than as the diagnosis. Do not "tighten" this back into a claim about what
+ * declarations do.
  *
  * Kept apart from App.tsx so the wording can be asserted in a test rather than
  * rendered to check it, and so there is one place to look when a second repair
@@ -87,11 +97,11 @@ export function repairHint(repair: SyntaxRepair): string {
             `on line ${repair.line} has none.`;
     case "data_value_assign":
       return repair.line === undefined
-        ? `Hint: an ABAP declaration gives its starting value with VALUE, ` +
-            `not an equals sign: DATA lv TYPE i VALUE 5.`
-        : `Hint: an ABAP declaration gives its starting value with VALUE, ` +
-            `not the equals sign on line ${repair.line}: ` +
-            `DATA lv TYPE i VALUE 5.`;
+        ? `Hint: writing VALUE in place of an equals sign makes this parse. ` +
+            `ABAP puts a starting value after VALUE: DATA lv TYPE i VALUE 5.`
+        : `Hint: writing VALUE in place of the equals sign on line ` +
+            `${repair.line} makes this parse. ABAP puts a starting value ` +
+            `after VALUE: DATA lv TYPE i VALUE 5.`;
   }
 }
 

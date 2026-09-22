@@ -124,18 +124,22 @@ export async function findStatementEndRepair(
 ): Promise<SyntaxRepair | undefined> {
   if (spans.length === 0) return undefined;
 
-  // Both kinds go to the acceptance pass as one list, in KINDS order, so a
-  // deadline that throws ends the whole search rather than being met again by
-  // the next kind. The candidates are string edits, not parses, so building
-  // both sets up front costs nothing a parse would notice.
-  const candidates = KINDS.flatMap((kind) =>
-    statementEndCandidates(kind, source, spans).map((candidate) => ({
-      ...candidate,
-      kind,
-    })),
-  );
+  // Both kinds go to ONE acceptance pass, so a deadline that throws ends the
+  // whole search rather than being met again by the next kind. A generator,
+  // not an array: the second kind's candidates are built only once the first
+  // kind's are exhausted, which is when the old nested loop built them. The
+  // work is small either way (1.0-1.6 ms per kind at the 16 kB cap, Node,
+  // 2026-09-22, against a 3 s budget) but it would otherwise sit in front of
+  // the first re-parse, and that is a behaviour change however small.
+  function* inKindOrder() {
+    for (const kind of KINDS) {
+      for (const candidate of statementEndCandidates(kind, source, spans)) {
+        yield { ...candidate, kind };
+      }
+    }
+  }
 
-  const accepted = await firstAccepted(candidates, spans.length, errorSpansIn);
+  const accepted = await firstAccepted(inKindOrder(), spans.length, errorSpansIn);
   if (accepted === undefined) return undefined;
   return accepted.line === undefined
     ? { kind: accepted.kind }

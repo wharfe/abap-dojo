@@ -9,23 +9,41 @@
  * statement ends cannot reach them: a declaration written by an LLM ends in a
  * period, so nothing about its punctuation is what failed.
  *
- * What failed is the initialiser. In most languages a declaration initialises
- * with `=`; ABAP spells that `VALUE`, and `=` is a syntax error there rather
- * than a style choice:
+ * What failed is the initialiser. In most languages a typed declaration
+ * initialises with `=`; ABAP spells that `VALUE`. (ABAP's own inline form,
+ * `DATA(lv) = 5.`, does use `=` — which is why the hint below is careful not
+ * to claim that `=` never initialises anything.)
  *
  *   DATA lv TYPE string = 'a'.     <- parser_error
  *   DATA lv TYPE string VALUE 'a'. <- parses
  *
- * ## It does not look for `DATA`
+ * ## It does not look for `DATA`, and the hint must not pretend it does
  *
  * Nothing here reads the leading keyword, on the same reasoning that keeps
  * syntaxRepair.ts from reading the line: the rewrite is proposed wherever an
  * error row holds an `=`, and abaplint decides. `CONSTANTS` and `CLASS-DATA`
  * take `VALUE` in the same position and are therefore repaired too — a
- * consequence of the rule, not a second rule. Measured 2026-09-22, the
- * rewrite moved every declaration shape to zero errors and fired on none of
- * `lv = 5.`, `IF 1 = 1`, `let x = 1`, `const o = { a: 1 }`, `f(a = 1)` or
- * `SELECT ... WHERE x = 1`, whether those parsed or not.
+ * consequence of the rule, not a second rule.
+ *
+ * **A `FORM ... USING p = 1.` with its `ENDFORM.` is a third, and it is not a
+ * declaration at all.** External review found it (2026-09-22): the original
+ * reports `parser_error` on the FORM row plus `structure` on the ENDFORM, the
+ * rewrite parses to zero errors, and strict acceptance passes. Without the
+ * `ENDFORM.` the count cannot drop and nothing is accepted — so the shape
+ * needs the whole subroutine, which is exactly how someone would write it. So the search fires on a subroutine definition, and any hint that
+ * says "a declaration" would be a false statement about the program on
+ * screen. That is why `repairHint` states what the rewrite *did* — replacing
+ * this `=` with `VALUE` makes it parse — and offers `DATA ... VALUE` as the
+ * example rather than as the diagnosis. Narrowing the search to declarations
+ * instead would mean reading the leading keyword, which is the design this
+ * module exists to avoid.
+ *
+ * Measured 2026-09-22, the rewrite moved every declaration shape to zero
+ * errors and fired on none of `lv = 5.`, `IF 1 = 1`, `let x = 1`,
+ * `const o = { a: 1 }`, `f(a = 1)`, `SELECT ... WHERE x = 1`,
+ * `DATA(lv) = 5.` (the inline declaration, which is correct ABAP and does
+ * initialise with `=`), `METHODS m IMPORTING iv TYPE i = 1.` or
+ * `PARAMETERS p TYPE i = 1.`, whether those parsed or not.
  *
  * ## Whitespace is normalised, not preserved
  *
@@ -51,8 +69,20 @@ import {
   type TargetedCandidate,
 } from "./strictAcceptance";
 
-/** The first `=` on the row, with whatever spacing around it. */
-const FIRST_ASSIGN = /\s*=\s*/;
+/**
+ * The first `=` on the row, with whatever spacing around it — **except a
+ * carriage return.**
+ *
+ * The source is split on `\n` alone, so under CRLF every row ends in `\r`.
+ * A plain `\s` would match it, so a row whose `=` is its last non-blank
+ * character (`DATA lv TYPE i =` / `  5.`) would have its `\r` eaten by the
+ * rewrite and be rejoined with a bare `\n`. abaplint tolerates the mixed
+ * ending today, so nothing is broken by it — but a dropped `\r` is the class
+ * of bug that once silenced this whole feature for anyone pasting from a CRLF
+ * editor (see the note in CLAUDE.md), and the sibling searches are written to
+ * preserve it. `[^\S\r]` is "whitespace, but not a carriage return".
+ */
+const FIRST_ASSIGN = /[^\S\r]*=[^\S\r]*/;
 
 export function valueAssignCandidates(
   source: string,
