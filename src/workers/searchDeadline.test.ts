@@ -110,7 +110,7 @@ describe("a search that runs out of time", () => {
     const source = Array.from({ length: 5 }, (_, i) => `WRITE ${i};`).join("\n");
     const spans = Array.from({ length: 5 }, (_, i) => ({ start: i + 1, end: i + 1 }));
     // Every re-parse still reports an error on every row, so nothing is accepted.
-    const { reparse, calls } = slow([1, 2, 3, 4, 5]);
+    const { reparse, calls } = slow(spans);
     await expect(findStatementEndRepair(source, spans, reparse)).resolves.toBeUndefined();
     expect(calls()).toBe(2);
   });

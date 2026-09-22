@@ -22,7 +22,7 @@ import {
   findSilentLoss,
 } from "./syntaxRepair";
 import {
-  errorRowCounter,
+  errorSpanFinder,
   errorSpanOf,
   findStatementEndRepair,
 } from "./statementEndRepair";
@@ -44,7 +44,7 @@ const SOURCE_FILENAME = "ztest.prog.abap";
 // Each is now `(deadline) => reparse`, not a re-parse.
 const errorsIn = bounded(errorCounter(abaplintConfig, SOURCE_FILENAME));
 const scoreIn = bounded(statementScorer(abaplintConfig, SOURCE_FILENAME));
-const errorRowsIn = bounded(errorRowCounter(abaplintConfig, SOURCE_FILENAME));
+const errorSpansIn = bounded(errorSpanFinder(abaplintConfig, SOURCE_FILENAME));
 
 function mapSeverity(s: string): LintIssue["severity"] {
   if (s === "Error") return "error";
@@ -208,7 +208,7 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
           (await findStatementEndRepair(
             source,
             errors.map(errorSpanOf),
-            errorRowsIn(deadline),
+            errorSpansIn(deadline),
           ));
       } catch {
         repair = undefined;
