@@ -27,10 +27,14 @@ import type { SilentLoss, SyntaxRepair } from "../types/diagnostics";
  * ignored — always true) and offers the fix conditionally. Someone who did
  * mean a comment reads "if you meant that as literal data" and moves on.
  *
- * That argument is about the double quote. `semicolon` and `missing_period`
- * are stated flatly: their search keeps a rewrite only when it clears every
- * error it targeted, and neither mistake is something anyone does on purpose,
- * so a conditional would only make a near-certain fix harder to read.
+ * That argument is about the double quote. `semicolon`, `missing_period` and
+ * `data_value_assign` are stated flatly: their search keeps a rewrite only
+ * when it clears every error it targeted, and none of the three mistakes is
+ * something anyone does on purpose, so a conditional would only make a
+ * near-certain fix harder to read. `data_value_assign` has one more reason
+ * than the others — `=` never initialises a declaration in ABAP under any
+ * reading, so unlike the double quote there is no correct program the hint
+ * could be wrong about.
  *
  * Kept apart from App.tsx so the wording can be asserted in a test rather than
  * rendered to check it, and so there is one place to look when a second repair
@@ -81,6 +85,13 @@ export function repairHint(repair: SyntaxRepair): string {
         ? `Hint: every ABAP statement ends with a period, and some here have none.`
         : `Hint: every ABAP statement ends with a period, and the one ending ` +
             `on line ${repair.line} has none.`;
+    case "data_value_assign":
+      return repair.line === undefined
+        ? `Hint: an ABAP declaration gives its starting value with VALUE, ` +
+            `not an equals sign: DATA lv TYPE i VALUE 5.`
+        : `Hint: an ABAP declaration gives its starting value with VALUE, ` +
+            `not the equals sign on line ${repair.line}: ` +
+            `DATA lv TYPE i VALUE 5.`;
   }
 }
 

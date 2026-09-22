@@ -4,13 +4,8 @@ import { Buffer } from "buffer";
 
 import { Config, Registry, MemoryFile } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
-import {
-  errorSpanFinder,
-  errorSpanOf,
-  findStatementEndRepair,
-  statementEndCandidates,
-  type ErrorSpan,
-} from "./statementEndRepair";
+import { findStatementEndRepair, statementEndCandidates } from "./statementEndRepair";
+import { errorSpanFinder, errorSpanOf, type ErrorSpan } from "./strictAcceptance";
 import { errorIssues } from "./syntaxRepair";
 
 /** The worker's own configuration — see the note in syntaxRepair.test.ts. */

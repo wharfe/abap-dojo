@@ -535,9 +535,9 @@ punctuation borrowed from another language.
 
 So `run_result` also carries `syntax_repair` on `syntax_error` **only**: which
 one-line edit would have made the parse succeed. It is an enum —
-`double_quote`, `semicolon`, `missing_period` — so unlike the three parameters
-above it needs no membership test: nothing the user writes can reach the wire
-through it.
+`double_quote`, `semicolon`, `missing_period`, `data_value_assign` — so unlike
+the three parameters above it needs no membership test: nothing the user
+writes can reach the wire through it.
 
 **The two statement-end kinds (#67) use a stricter acceptance rule than
 `double_quote`, and the difference is load-bearing.** Appending a period makes
@@ -659,8 +659,8 @@ error on screen while `syntax_repair` is already gone with the event. Both
 only happen where a search ran long, so `syntax_repair` under-reports heavy
 pastes specifically — not at random.
 
-The search costs a bounded number of extra parses — at most 33 across the
-three kinds — and only on the Run path, never on `lint`, which fires on every
+The search costs a bounded number of extra parses — at most 44 across the
+four kinds — and only on the Run path, never on `lint`, which fires on every
 keystroke. It is skipped entirely above 16 kB of source (`MAX_SOURCE_CHARS`;
 64 kB until #75). What the caps now protect is `lint`, not the outcome:
 abaplint's `parseAsync` does not yield to the event loop (0 macrotasks during
@@ -705,6 +705,46 @@ documented meaning is "the edit that made the parse succeed", and a `none`
 would have to stand for several unlike things at once — but it means a fall
 has to be read against the sum above and against the size of what people are
 pasting, not on its own.
+
+### `data_value_assign` is the first repair that is not about punctuation
+
+The three kinds above all answer "how does this statement end". `DATA` ends
+its statements correctly and fails anyway: measured 2026-09-08..21, it was the
+second-largest `parser_error` keyword at 66 events, and **65 of them carried
+no `syntax_repair` at all** — against `WRITE`, where 48 of 201 got a hint. The
+searches could not reach it because nothing was wrong with the punctuation.
+
+What is wrong is the initialiser. Most languages declare with `=`; ABAP spells
+that `VALUE`, and `=` there is a parse error rather than a style choice. So
+`run_result` carries a fourth value, produced by `src/workers/valueAssignRepair.ts`
+under the same stricter acceptance as the statement ends.
+
+**It does not look for `DATA`.** The rule is "an error row holds an `=`", and
+abaplint decides — the same refusal to read the line that syntaxRepair.ts is
+built on. `CONSTANTS` and `CLASS-DATA` take `VALUE` in the same position and
+are therefore repaired too: a consequence of the rule, not a second rule. So
+do not read the value as a count of `DATA` statements.
+
+Measured 2026-09-22 against the real config, the rewrite took every
+declaration shape to zero errors and fired on none of `lv = 5.`, `IF 1 = 1`,
+`let x = 1`, `const o = { a: 1 }`, `f(a = 1)` or `SELECT ... WHERE x = 1`,
+whether those parsed or not.
+
+Two things to know before reading it:
+
+1. **It was appended to the search order, not inserted, and that is what keeps
+   the other three comparable.** It runs only when they all found nothing, and
+   it does not contend with them anyway: a declaration written with `=` ends
+   in a period, so it is a candidate of neither statement-end kind. The one
+   number that moves at this release is the shared 3 s deadline, now spread
+   over four searches instead of three — a heavy paste that used to reach the
+   statement ends can now run out before the declaration search starts.
+2. **Only the first `=` on a row is rewritten.** That is what keeps
+   `DATA lv TYPE string = 'a = b'.` repairable, and it is also the limit: a
+   row whose own literal holds the first `=` is out of reach, for the same
+   reason the double quote leaves `WRITE: 'he said "hi"', "b".` alone. Finding
+   the `=` that is outside a literal means writing ABAP's lexer, which is the
+   thing these searches exist not to write.
 
 ### `silent_loss` sees the failure that leaves no trace at all
 

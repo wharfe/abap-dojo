@@ -113,6 +113,18 @@ test("a semicolon used to end a statement is explained", async ({ page }) => {
   });
 });
 
+const VALUE_HINT = /gives its starting value with VALUE/i;
+
+test("a declaration initialised with an equals sign is explained", async ({ page }) => {
+  await page.goto("/");
+  await typeProgram(page, `REPORT ztest.\nDATA lv_x TYPE i = 5.`);
+  await clickRun(page);
+
+  await expect(page.getByText(VALUE_HINT)).toContainText("line 2", {
+    timeout: 30_000,
+  });
+});
+
 test("pasted JavaScript is not told it forgot a period", async ({ page }) => {
   await page.goto("/");
   await typeProgram(page, `REPORT ztest.\nconsole.log('a')`);
@@ -130,6 +142,20 @@ test("pasted JavaScript is not told it forgot a period", async ({ page }) => {
   await waitForSearchDone(page);
   await expect(page.getByText(PERIOD_HINT)).toHaveCount(0);
   await expect(page.getByText(SEMICOLON_HINT)).toHaveCount(0);
+  // `console.log('a')` holds no equals sign, but `let x = 1` does and reaches
+  // the same verdict, so the declaration search is checked against a paste too.
+  await expect(page.getByText(VALUE_HINT)).toHaveCount(0);
+});
+
+test("pasted JavaScript with an equals sign is not told to use VALUE", async ({ page }) => {
+  await page.goto("/");
+  await typeProgram(page, `REPORT ztest.\nlet x = 1`);
+  await clickRun(page);
+
+  await expect(page.getByText(/Syntax error/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/stopped responding/i)).toHaveCount(0);
+  await waitForSearchDone(page);
+  await expect(page.getByText(VALUE_HINT)).toHaveCount(0);
 });
 
 test("the verdict does not wait for the search on a heavy paste", async ({

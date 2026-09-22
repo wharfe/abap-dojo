@@ -25,24 +25,14 @@
  * rule: its data has been flowing since 2026-09-08, and changing what it
  * reports would break the comparison across that date.
  */
-import { Registry, MemoryFile, type Config, type Issue } from "@abaplint/core";
 import type { SyntaxRepair } from "../types/diagnostics";
+import { MAX_CANDIDATES, MAX_SOURCE_CHARS } from "./syntaxRepair";
 import {
-  MAX_CANDIDATES,
-  MAX_SOURCE_CHARS,
-  errorIssues,
-  type RepairCandidate,
-} from "./syntaxRepair";
-
-/** The 1-based rows an Error-severity issue covers. */
-export interface ErrorSpan {
-  start: number;
-  end: number;
-}
-
-export function errorSpanOf(issue: Issue): ErrorSpan {
-  return { start: issue.getStart().getRow(), end: issue.getEnd().getRow() };
-}
+  firstAccepted,
+  rowsOf,
+  type ErrorSpan,
+  type TargetedCandidate,
+} from "./strictAcceptance";
 
 type StatementEndKind = "semicolon" | "missing_period";
 
@@ -60,18 +50,7 @@ const TRAILING_WHITESPACE = /(\s*)$/;
 const TERMINATED = /[.,:]\s*$/;
 const BLANK = /^\s*$/;
 
-export interface StatementEndCandidate extends RepairCandidate {
-  /** Rows of the original errors this candidate is meant to clear. */
-  targets: number[];
-}
-
-function rowsOf(spans: readonly ErrorSpan[]): number[] {
-  const rows = new Set<number>();
-  for (const span of spans) {
-    for (let row = span.start; row <= span.end; row++) rows.add(row);
-  }
-  return [...rows].sort((a, b) => a - b);
-}
+export type StatementEndCandidate = TargetedCandidate;
 
 export function statementEndCandidates(
   kind: StatementEndKind,
@@ -134,26 +113,6 @@ export function statementEndCandidates(
 }
 
 /**
- * The spans of a candidate's Error-severity issues — one entry per issue, so
- * its length is the same count `countErrors` takes.
- *
- * Spans, not start rows, so the acceptance test below compares like with
- * like. See the note there for why the two cannot currently differ, and why
- * that is not a reason to keep the cheaper one.
- */
-export function errorSpanFinder(
-  config: Config,
-  filename: string,
-): (candidate: string) => Promise<ErrorSpan[]> {
-  return async (candidate) => {
-    const registry = new Registry(config);
-    registry.addFile(new MemoryFile(filename, candidate));
-    await registry.parseAsync();
-    return errorIssues(registry.findIssues()).map(errorSpanOf);
-  };
-}
-
-/**
  * Precondition: `spans` must be EVERY Error-severity span of the original
  * parse — the baseline count a candidate is judged against is `spans.length`,
  * so a subset lowers the bar and makes the search accept a worse candidate.
@@ -165,39 +124,20 @@ export async function findStatementEndRepair(
 ): Promise<SyntaxRepair | undefined> {
   if (spans.length === 0) return undefined;
 
-  for (const kind of KINDS) {
-    for (const candidate of statementEndCandidates(kind, source, spans)) {
-      // A candidate is source this module mangled on purpose, so it reaches
-      // the parser in shapes the user's own text never would. A throw here
-      // means "no hint" — and since searchDeadline.ts enforces its budget by
-      // throwing, this is also how a search that ran out of time ends.
-      let after: ErrorSpan[];
-      try {
-        after = await errorSpansIn(candidate.source);
-      } catch {
-        return undefined;
-      }
-      // An error still COVERING a target row means the rewrite did not clear
-      // what it aimed at, whichever row that error starts on. Comparing start
-      // rows instead answers the same on every input we could build (17 tried
-      // on 2026-09-22: pasted JS, Python, JSON and SQL, and unclosed IF /
-      // FORM / METHOD / CASE / TRY), and the reason is structural: an edit at
-      // the end of a targeted row changes how statements are read from that
-      // row onward, and cannot break an earlier statement that parsed. So any
-      // surviving error over a target row starts inside a targeted span too.
-      // That argument is about how abaplint draws its spans, though, and a
-      // dependency bump can move it without failing a test. Overlap costs
-      // nothing and does not rest on it.
-      const cleared = !after.some((error) =>
-        candidate.targets.some((row) => error.start <= row && row <= error.end),
-      );
-      if (after.length < spans.length && cleared) {
-        return candidate.line === undefined
-          ? { kind }
-          : { kind, line: candidate.line };
-      }
-    }
-  }
+  // Both kinds go to the acceptance pass as one list, in KINDS order, so a
+  // deadline that throws ends the whole search rather than being met again by
+  // the next kind. The candidates are string edits, not parses, so building
+  // both sets up front costs nothing a parse would notice.
+  const candidates = KINDS.flatMap((kind) =>
+    statementEndCandidates(kind, source, spans).map((candidate) => ({
+      ...candidate,
+      kind,
+    })),
+  );
 
-  return undefined;
+  const accepted = await firstAccepted(candidates, spans.length, errorSpansIn);
+  if (accepted === undefined) return undefined;
+  return accepted.line === undefined
+    ? { kind: accepted.kind }
+    : { kind: accepted.kind, line: accepted.line };
 }
