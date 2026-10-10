@@ -182,16 +182,19 @@ test("the verdict does not wait for the search on a heavy paste", async ({
   // of the suite alongside it the whole test lands around 17 s, and a smaller
   // CI runner has less to spare.
   //
-  // This does not soften anything. What the test is about is whether App.tsx
-  // paints "stopped responding", and that is decided by App's OWN 20s
-  // watchdog, not by Playwright's patience: a build that put the search back
-  // in front of the verdict would trip the watchdog and fail the assertion
-  // below however long this budget is.
+  // This does not soften anything. Whether App.tsx paints "stopped
+  // responding" is decided by App's OWN 20s watchdog, not by Playwright's
+  // patience — but that only catches a search that delays the verdict past
+  // 20s. A search put back in front of the verdict delays it by the search's
+  // own time (about 0.9 s with this fixture, measured once on 2026-10-09),
+  // which is left to the ordering assertions below and to
+  // abaplintWorker.test.ts.
   test.slow();
-  // #75: a 16 kB paste whose whole file is one statement takes abaplint
-  // seconds per parse, and the search re-parses it up to 33 times. While that
-  // sat in front of the reply, App.tsx's 20s watchdog fired first and this
-  // real syntax error was shown as "The ABAP engine stopped responding".
+  // #75: a heavy paste can take abaplint seconds per parse, and the search
+  // re-parses up to 33 times. While that sat in front of the reply, App.tsx's
+  // 20s watchdog fired first and a real syntax error was shown as "The ABAP
+  // engine stopped responding". This fixture is lighter than that: measured
+  // once (2026-10-09), its search re-parsed it twice, in 0.7 s.
   //
   // The size is the point of the test and it sits ON the boundary: one more
   // character and the search is skipped, so the run gets fast for a reason
@@ -203,6 +206,23 @@ test("the verdict does not wait for the search on a heavy paste", async ({
   const source = `x\n`.repeat(MAX_SOURCE_CHARS / 2);
   expect(source.length).toBe(MAX_SOURCE_CHARS);
 
+  // Record every program actually posted to the worker for a Run: its length
+  // and whether it is exactly this fixture. The boundary above is only the
+  // test's own string; what decides whether the search runs is what the
+  // worker receives, and the two came apart once without anything going red
+  // (see the paste below).
+  await page.addInitScript((expected) => {
+    const sent: { length: number; exact: boolean }[] = [];
+    (window as unknown as { transpiled: typeof sent }).transpiled = sent;
+    const post = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (this: Worker, ...args: unknown[]) {
+      const message = args[0] as { type?: unknown; source?: unknown } | null;
+      if (message?.type === "transpile" && typeof message.source === "string") {
+        sent.push({ length: message.source.length, exact: message.source === expected });
+      }
+      return (post as (...a: unknown[]) => void).apply(this, args);
+    } as typeof Worker.prototype.postMessage;
+  }, source);
   await page.goto("/");
   // Wait for the real editor before pasting, and only in this test. Until
   // Monaco loads, EditorPanel shows a plain textarea, and Chromium's CDP
@@ -214,7 +234,18 @@ test("the verdict does not wait for the search on a heavy paste", async ({
   // couple of rows, where the difference does not register.
   await page.waitForSelector(".monaco-editor", { timeout: 30_000 });
   const lintBefore = await lintCount(page);
-  await typeProgram(page, source);
+  // Not typeProgram: its ControlOrMeta+A follows the HOST OS (Meta on a Mac),
+  // while Monaco picks its selection key from the user agent, and this
+  // project emulates Desktop Chrome — a Windows UA. On a Mac host nothing was
+  // selected and the paste landed after the default program: the worker got
+  // 16,424 characters, over MAX_SOURCE_CHARS, and the search re-parsed
+  // nothing (measured 2026-10-09). Use the key Monaco is listening for.
+  const selectAll = (await page.evaluate(() => navigator.userAgent.includes("Macintosh")))
+    ? "Meta+A"
+    : "Control+A";
+  await page.click(".monaco-editor");
+  await page.keyboard.press(selectAll);
+  await page.keyboard.insertText(source);
   // Let the keystroke-driven lint finish before pressing Run. The worker is
   // one thread: if the boot-time lint of this same 16 kB source is still
   // parsing, the Run queues behind it and the verdict costs two heavy parses
@@ -222,21 +253,76 @@ test("the verdict does not wait for the search on a heavy paste", async ({
   // a reason the change cannot fix (Gate2 2 周目 H1). Task 7's measurement
   // script waits for the same reason.
   await waitForLintToSettle(page, lintBefore);
+
+  // The ordering itself. The `stopped responding` check at the end only
+  // catches a search that got in front of the verdict by MORE than the 20s
+  // watchdog, so also assert what #75 claims: when the verdict first reaches
+  // the screen, the search has not answered yet.
+  //
+  // That moment is recorded in the page, from before Run, rather than read
+  // afterwards: a read in a separate round trip once the error is visible
+  // misses `pending` whenever the search answers inside that round trip.
+  // (The red this test showed on a Mac host on 2026-10-08 had another cause:
+  // the paste above left the default program in, and the search had nothing
+  // under its size cap to re-parse.) A MutationObserver callback runs at the
+  // next microtask checkpoint after the DOM changes, so it sees the state
+  // left at that point, however briefly it lasts; two commits with no
+  // checkpoint between them can be seen as one.
+  //
+  // What this cannot be relied on to see: a worker that finishes the search
+  // before posting the verdict, then posts verdict and hint back to back
+  // (PR #83 Gate2 M4). React may commit those as two states, leaving a real
+  // `pending` frame with the error in it. abaplintWorker.test.ts asserts that
+  // order directly.
+  await page.evaluate(() => {
+    type State = { t: number; search: string | null; error: boolean };
+    const read = (): State => {
+      const panel = document.querySelector("[data-search]");
+      return {
+        t: Math.round(performance.now()),
+        search: panel?.getAttribute("data-search") ?? null,
+        error: /Syntax error/i.test(panel?.textContent ?? ""),
+      };
+    };
+    const log = [read()];
+    (window as unknown as { searchLog: State[] }).searchLog = log;
+    new MutationObserver(() => {
+      const now = read();
+      const last = log[log.length - 1];
+      if (now.search !== last.search || now.error !== last.error) log.push(now);
+    }).observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributeFilter: ["data-search"],
+    });
+  });
   await clickRun(page);
 
   await expect(page.getByText(/Syntax error/i)).toBeVisible({ timeout: 30_000 });
-  // The ordering itself, while it is still observable. The line below only
-  // catches a search that got in front of the verdict by MORE than the 20s
-  // watchdog; put the search back in front and keep the whole thing under 20s
-  // and that assertion stays green while the claim of #75 is false. So assert
-  // what the claim actually says: at the moment the verdict is on screen, the
-  // search has not answered yet.
-  //
-  // The window is the search's own budget — up to 3s of re-parsing at 16 kB
-  // (SEARCH_BUDGET_MS), against a verdict that arrives one parse after Run —
-  // so this is not a photo finish. `pending` can only ever become `done`, so a
-  // retry cannot turn a late read into a pass: the worst this can do is fail
-  // when it should not, never pass when it should not.
-  await expect(page.locator('[data-search="pending"]')).toHaveCount(1);
+  // A hint that never comes leaves `pending` in place, so this also fails
+  // when the follow-up is lost.
+  await waitForSearchDone(page);
+  // This Run sent exactly one program, and it was this fixture: at the
+  // boundary, so the searches' size cap (`> MAX_SOURCE_CHARS`) does not skip
+  // them. That candidates exist and get re-parsed is not shown here.
+  type Sent = { length: number; exact: boolean };
+  expect(
+    await page.evaluate(() => (window as unknown as { transpiled: Sent[] }).transpiled),
+  ).toEqual([{ length: MAX_SOURCE_CHARS, exact: true }]);
+  const log = await page.evaluate(
+    () =>
+      (window as unknown as { searchLog: { search: string | null; error: boolean }[] })
+        .searchLog,
+  );
+  const states = JSON.stringify(log);
+  // Recorded from a page that has not run anything yet: no earlier answer.
+  expect([log[0].search, log[0].error], states).toEqual(["idle", false]);
+  // The first frame with the verdict in it still had the search pending.
+  expect(log.find((s) => s.error)?.search, states).toBe("pending");
+  expect([log[log.length - 1].search, log[log.length - 1].error], states).toEqual([
+    "done",
+    true,
+  ]);
   await expect(page.getByText(/stopped responding/i)).toHaveCount(0);
 });

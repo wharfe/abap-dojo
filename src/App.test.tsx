@@ -653,12 +653,7 @@ describe("App — the worker's follow-up message (#67/#75)", () => {
     vi.useRealTimers();
   });
 
-  /**
-   * The OutputPanel's `data-search`. Read with getAttribute, not jest-dom's
-   * `toHaveAttribute`: `@testing-library/jest-dom` is a dependency but is
-   * imported nowhere and `vite.config.ts` declares no `setupFiles`, so its
-   * matchers are not registered in this suite.
-   */
+  /** The OutputPanel's `data-search`, or undefined when nothing carries it. */
   function searchStateOf(view: ReturnType<typeof render>): string | null | undefined {
     return view.container.querySelector("[data-search]")?.getAttribute("data-search");
   }

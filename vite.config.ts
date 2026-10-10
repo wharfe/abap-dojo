@@ -33,6 +33,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Registers the DOM matchers; the dependency alone does not (#77).
+    setupFiles: ["./src/test/setup.ts"],
     // e2e/ holds Playwright specs, which use their own `test()`/`expect()` and
     // must never be picked up by Vitest's default include glob. Spreading
     // configDefaults.exclude (not replacing it) keeps Vitest's own defaults —
