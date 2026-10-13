@@ -139,6 +139,89 @@ describe("abaplintWorker — one transpile request, exactly two replies", () => 
   });
 });
 
+// abaplint pins `Expected ENDIF` to (1,1) wherever the IF is (#72). The user
+// is shown the explanation and no line; analytics still see the raw issue.
+describe("abaplintWorker — a structure error that abaplint pins to line 1", () => {
+  const MISSING_ENDIF = "REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n";
+
+  beforeEach(() => {
+    failClassify.on = false;
+    postSpy = vi
+      .spyOn(self, "postMessage")
+      .mockImplementation(((m: WorkerResponse) => {
+        posted.push(m);
+      }) as unknown as typeof self.postMessage);
+  });
+
+  afterEach(() => {
+    postSpy.mockRestore();
+  });
+
+  it("explains it on Run without claiming a line", async () => {
+    const [verdict] = await request(MISSING_ENDIF);
+    expect(verdict).toMatchObject({ type: "transpile-error", kind: "syntax" });
+    const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
+    expect(v.message.startsWith("Expected ENDIF. ")).toBe(true);
+    expect(v.message).toContain("no line is given");
+    expect(v).not.toHaveProperty("line");
+    expect(v.syntaxDiagnostics?.key).toBe("structure");
+  });
+
+  it("marks it on lint as having no position, shrunk to one character", async () => {
+    posted.length = 0;
+    await (self.onmessage as (e: MessageEvent) => Promise<void>)({
+      data: { type: "lint", source: MISSING_ENDIF },
+    } as MessageEvent);
+    const result = posted.find((m) => m.type === "lint-result") as Extract<
+      WorkerResponse,
+      { type: "lint-result" }
+    >;
+    const issue = result.issues.find((i) => i.key === "structure")!;
+    expect(issue.message.startsWith("Expected ENDIF. ")).toBe(true);
+    expect(issue.positionUnknown).toBe(true);
+    expect([issue.startLine, issue.startCol, issue.endLine, issue.endCol]).toEqual([1, 1, 1, 2]);
+  });
+
+  // A missing period on ENDIF puts `structure` first and the parser error that
+  // caused it second. The explanation has no line, so without this the one
+  // error that can point at line 4 never reached the Output panel.
+  // The Validator's syntax row keeps the raw message (it is a narrow status
+  // label, Gate2 M-c); its Lint list is where the explanation goes.
+  it("explains it in the Validator's lint stage and keeps the syntax label raw", async () => {
+    posted.length = 0;
+    await (self.onmessage as (e: MessageEvent) => Promise<void>)({
+      data: { type: "validate", source: MISSING_ENDIF },
+    } as MessageEvent);
+    const stage = (name: string) =>
+      (
+        posted.find(
+          (m) => m.type === "validate-stage-result" && m.stage === name,
+        ) as Extract<WorkerResponse, { type: "validate-stage-result" }>
+      ).result;
+    expect(stage("syntax").error).toBe("Expected ENDIF");
+    const issue = stage("lint").issues!.find((i) => i.key === "structure")!;
+    expect(issue.message.startsWith("Expected ENDIF. ")).toBe(true);
+    expect(issue.positionUnknown).toBe(true);
+    expect([issue.endLine, issue.endCol]).toEqual([1, 2]);
+  });
+
+  it("names the next error that does have a line", async () => {
+    const [verdict] = await request("REPORT z.\nIF 1 = 1.\n WRITE 'a'.\nENDIF");
+    const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
+    expect(v.message.startsWith("Expected ENDIF. ")).toBe(true);
+    expect(v.message).toMatch(/The next error abaplint reports is on line 4: Statement does not exist/);
+    expect(v).not.toHaveProperty("line");
+    expect(v.syntaxDiagnostics?.key).toBe("structure");
+  });
+
+  it("leaves a structure error with a real line exactly as it was", async () => {
+    const [verdict] = await request("REPORT z.\nWRITE 'a'.\nENDIF.\n");
+    const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
+    expect(v.message).toBe("Unexpected ENDIF");
+    expect(v.line).toBe(3);
+  });
+});
+
 // The order of the two replies above does not prove the verdict went out
 // first: a worker that ran the searches BEFORE posting the verdict, then
 // posted verdict and hint back to back, sends the same two messages in the
