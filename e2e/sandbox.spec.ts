@@ -73,8 +73,19 @@ test("an endless loop still produces a terminal result", async ({ page, browserN
 
 test("an ordinary program still runs and prints", async ({ page }) => {
   await openProgram(page, "REPORT ztest.\nWRITE 'hello from e2e'.");
+  // Not straight after load on WebKit: a Run pressed while the page is still
+  // booting stalls the transpile worker there (#47). Measured 2026-10-14 in
+  // the CI image, full suite x5: pressing at once failed this test 7 of 10
+  // times with "The ABAP engine stopped responding"; after a wait, 0 of 10.
+  // Monaco loads at the same first idle moment the worker boots at, so its
+  // arrival is the nearest signal on the page that booting is over.
+  await page.waitForSelector(".monaco-editor", { timeout: 30_000 });
   await page.getByRole("button", { name: /Run/i }).click();
-  await expect(page.getByText("hello from e2e")).toBeVisible({
+  // Scoped to the output for the reason given in the next test: the editor
+  // shows the source, and "hello from e2e" is in it.
+  await expect(
+    page.getByTestId("output-line").filter({ hasText: "hello from e2e" }),
+  ).toBeVisible({
     timeout: 30_000,
   });
 });

@@ -65,7 +65,7 @@ test("a correct program with comments gets no hint", async ({ page }) => {
   );
   await clickRun(page);
 
-  await expect(page.getByText(/^a$/m)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("output-line").filter({ hasText: /^a$/ })).toBeVisible({ timeout: 30_000 });
   // Output appears when execution starts; the silent-loss search answers on a
   // later message and can land after that. Without this wait the negative is
   // decided before the hint could have appeared (#70).
