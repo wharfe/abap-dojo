@@ -9,13 +9,6 @@ import { openProgram, clickRun } from "./helpers";
  */
 const EXPLANATION = /does not say where the problem is/i;
 
-// Same reason as syntaxHint.spec.ts: WebKit's transpile worker intermittently
-// never answers (#47), which says nothing about this change.
-test.skip(
-  ({ browserName }) => browserName === "webkit",
-  "pre-existing intermittent WebKit transpile stall, see #47",
-);
-
 test("a missing ENDIF is explained without pointing at line 1", async ({ page }) => {
   await openProgram(page, `REPORT ztest.\nIF 1 = 1.\n  WRITE 'a'.`);
   await clickRun(page);
