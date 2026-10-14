@@ -8,6 +8,7 @@ import type {
   ValidationStage,
 } from "../types/validation";
 import { computeSummary } from "../utils/validationSummary";
+import { issuePosition } from "../utils/issuePosition";
 
 interface ValidationReportProps {
   stages: Record<ValidationStage, StageResult>;
@@ -116,7 +117,7 @@ function LintIssueList({ issues }: { issues: LintIssue[] }) {
               : "\u24D8";
         return (
           <li key={i} className={color}>
-            {icon} L{issue.startLine}:{issue.startCol} [{issue.key}]{" "}
+            {icon} {issuePosition(issue)}[{issue.key}]{" "}
             {issue.message}
           </li>
         );

@@ -501,6 +501,17 @@ broke" from "the whole program did".
 | `check_syntax` | parsed, then the semantic pass rejected it — **anything** from a missing DB table to a type mismatch | **not decidable from this key alone** |
 | `unknown_types` | a type we do not have. **`STRING_TABLE` is one** | carry more standard artifacts |
 | `implement_methods` | structural, e.g. a `CLASS` with no implementation | genuinely the user's bug |
+| `structure` | the block structure did not match: `Expected <statement>` (a block never closed, a statement its block does not allow, or a `"` that commented out the closer) or `Unexpected <statement>` (a stray `ENDIF`, a `WHEN` outside `CASE`) | **not decidable yet** — the split is unmeasured (#72 option B) |
+
+`structure` was 25.7% of `syntax_error` over 2026-09-23..10-12, second only to
+`check_syntax`. Its `Expected <statement>` form is reported at (1,1) whatever
+line the mistake is on, and the statement it names is the **outer** block's
+closer, not the open one's (a missing `ENDIF` inside a `METHOD` reports
+`Expected ENDMETHOD`). Since #72 the worker shows an explanation and no line for
+that form (`src/workers/structureExplanation.ts`); analytics still read the raw
+issue, so the bucket's meaning did not change across that release. It is also
+often a *consequence*: a missing period on `ENDIF` produces `structure` as
+`errors[0]` ahead of the `parser_error` that caused it.
 
 `parser_error` and `unknown_types` point at opposite investments, and before
 this parameter existed the metric could not tell them apart. Do not assume the
