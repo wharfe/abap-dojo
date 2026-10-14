@@ -561,9 +561,11 @@ if that list stops being exactly what is missing. `STRUCTURE_NODE` in
    that is itself broken reads as a missing one — `ENDIF` with no period,
    `ENDFI.`, `ENDDO;` all report `Expected ENDIF`/`ENDDO`, and at line 1 they
    sort first. Two of those three also carry `syntax_repair`
-   (`missing_period`, `semicolon`), which is how to separate them; a misspelt
-   closing statement cannot be separated. `syntax_error_count > 1` is a weaker
-   sign of the same thing.
+   (`missing_period`, `semicolon`) and a misspelt closing statement carries
+   nothing. But the pair is a hint, not a separation: a genuinely unclosed
+   block with a semicolon on some other row reports `structure` and
+   `semicolon` too, because the repair is accepted on whichever row it fixed.
+   `syntax_error_count > 1` is a weaker sign still.
 3. **A kind of `expected`/`unexpected` with no node means abaplint renamed a
    statement class** (the coverage test should have caught it on the bump),
    not a residue to be emptied.

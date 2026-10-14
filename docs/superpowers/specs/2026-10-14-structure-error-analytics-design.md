@@ -78,7 +78,7 @@ GA4 側の既存機能（イベントパラメータ）以外に流用できる�
 ## Gate2 2 周目で足したこと（critical/high 0、medium/low を反映）
 
 - e2e は `e2e/syntaxHint.spec.ts` に置き、既存の WebKit skip（#47）を引き継ぐ。gtag の記録は `[data-search="done"]`（`e2e/helpers.ts`）を待ってから読む — syntax_error の run_result は follow-up 到着まで保留されるため。
-- 読み方: `structure` かつ `syntax_repair ∈ {missing_period, semicolon}` なら閉じ文の句読点の誤り。綴り誤り（`ENDFI.`）は切り分けられない。
+- 読み方: `structure` かつ `syntax_repair ∈ {missing_period, semicolon}` には閉じ文の句読点の誤りが含まれるが、閉じ忘れと別の行の句読点誤りの同居も同じ組になる（最終再レビューの指摘で訂正。`statementEndRepair.test.ts` で固定）。綴り誤り（`ENDFI.`）は何も付かない。
 - `refine` の順序: key 規則（`syntax_key ≠ structure` なら kind を消す）→ kind 規則（kind が expected/unexpected 以外なら node を消す。key 規則で kind が消えた node もここで消える）→ outcome 規則。key 規則が node を直接消さないのは、各規則を単独で外したときにどれが効いていたかをテストで区別するため（Gate3 で実装に合わせて訂正）。
 - 入口表に追加: `src/workers/abaplintWorker.ts:96-113`（classifier が throw すると syntax_error が transpile_error に化ける → 任意の文字列で throw しないテスト）、`src/App.tsx:482-493`（`isSyntax` での振り分け）。
 - 不変条件 5 は「kind が expected/unexpected で node が無い場合」に限定し、原因は「abaplint 更新による名前のずれ」とする（keepNames 喪失は worker 起動失敗として現れるので node 欠落にはならない）。e2e の価値は「本番 worker バンドルで分類と運搬が通ること」。
