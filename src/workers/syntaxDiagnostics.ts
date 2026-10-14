@@ -27,7 +27,7 @@
  * reporting. We lose detail; we never leak source.
  */
 import { ArtifactsRules, Statements } from "@abaplint/core";
-import type { SyntaxDiagnostics } from "../types/diagnostics";
+import type { StructureKind, SyntaxDiagnostics } from "../types/diagnostics";
 
 /**
  * Keys abaplint attaches to issues it builds outside its rule classes. There
@@ -117,6 +117,64 @@ function unparsedToken(message: string): string | undefined {
   return UNKNOWN_STATEMENT.exec(message)?.[1];
 }
 
+/**
+ * The third closed set in this file: the statement class names `Statements`
+ * exports, upper-cased the way a `structure` message prints them.
+ *
+ * abaplint's structure check builds exactly three sentences —
+ * `Expected <X>`, `Unexpected <X>` and `Unexpected code structure` — and `<X>`
+ * is `constructor.name.toUpperCase()` of a statement class. Nothing of the
+ * user's source is interpolated, but that is an observation about today's
+ * abaplint, not a guarantee, so the name travels only after a membership test
+ * against this set, which is built from the export names and cannot be
+ * extended by the user. Same shape of argument as `transpile_node`, and the
+ * same failure direction: a name outside the set is not reported while the
+ * kind keeps reporting. No two of the 317 export names collide once
+ * upper-cased, so the fold loses nothing.
+ *
+ * It is `Statements` and nothing else, on purpose. A structure can also name
+ * four classes `Statements` does not export — `MacroCall`, `MacroContent`,
+ * `MacroRecursion`, `NativeSQL` — and those travel as a kind with no node,
+ * like any other name outside the set; syntaxDiagnostics.test.ts pins that
+ * list, so a core bump that adds to it fails there. Otherwise a kind with no
+ * node means a core bump renamed a class — losing `keepNames` would not show
+ * up here, because the worker then dies on boot (see CLAUDE.md).
+ */
+export const STRUCTURE_NODES: ReadonlySet<string> = new Set(
+  Object.keys(Statements).map((name) => name.toUpperCase()),
+);
+
+/** True if `name` is an upper-cased class name `Statements` exports. */
+export function isKnownStructureNode(name: string): boolean {
+  return STRUCTURE_NODES.has(name);
+}
+
+/**
+ * Anchored at both ends and upper-case only, because that is exactly what
+ * abaplint emits — anything else is not one of its sentences and reports
+ * nothing. `Unexpected code structure` cannot match: it contains spaces.
+ */
+const NAMED_STRUCTURE = /^(Expected|Unexpected) ([A-Z][A-Z0-9]*)$/;
+const UNEXPECTED_CODE_STRUCTURE = "Unexpected code structure";
+
+function classifyStructure(
+  message: string,
+): { structureKind?: StructureKind; structureNode?: string } {
+  if (message === UNEXPECTED_CODE_STRUCTURE) {
+    return { structureKind: "unexpected_code_structure" };
+  }
+  const named = NAMED_STRUCTURE.exec(message);
+  if (named === null) return {};
+  const name = named[2];
+  return {
+    structureKind: named[1] === "Expected" ? "expected" : "unexpected",
+    // An unknown name drops the node and keeps the kind: one of the four
+    // macro / native-SQL classes outside `Statements`, or — with the coverage
+    // test green — a class abaplint renamed.
+    structureNode: isKnownStructureNode(name) ? name : undefined,
+  };
+}
+
 /** True if `key` is one abaplint can attach to an issue. */
 export function isKnownRuleKey(key: string): boolean {
   return RULE_KEYS.has(key);
@@ -149,6 +207,12 @@ export function classifySyntaxError(
     // abaplint enumerates. Widening this to them is #56's problem, not a
     // one-line change here.
     statement: key === "parser_error" ? knownKeyword(firstMessage) : undefined,
+    // `structure` only, the issue the user is shown. The node is the closing
+    // statement abaplint expected next or the statement it did not expect —
+    // not the block the user left open (an IF left open inside a METHOD
+    // reports ENDMETHOD), and a broken closing statement such as `ENDFI.` is
+    // dropped as a parser_error first and reads the same as a missing one.
+    ...(key === "structure" ? classifyStructure(firstMessage) : {}),
   };
 }
 

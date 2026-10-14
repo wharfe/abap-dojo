@@ -236,3 +236,29 @@ describe("findStatementEndRepair against the real parser", () => {
     ).toBeUndefined();
   });
 });
+
+/**
+ * A closing statement that is itself broken is dropped as a parser_error
+ * before abaplint's structure check runs, so the user is shown
+ * `Expected ENDIF` and `run_result` reports `syntax_key = structure`. CLAUDE.md
+ * tells readers which of these shapes also carry a `syntax_repair`, and that
+ * the pair alone does not prove the closing statement was the broken one;
+ * these pin both.
+ */
+describe("findStatementEndRepair on a broken closing statement", () => {
+  it.each([
+    ["ENDIF with no period", "IF 1 = 1.\n  WRITE 'a'.\nENDIF\n", "missing_period"],
+    ["ENDDO ended with a semicolon", "DO 3 TIMES.\n  WRITE 'a';\nENDDO;\n", "semicolon"],
+    ["a misspelt ENDIF", "IF 1 = 1.\n  WRITE 'a'.\nENDFI.\n", undefined],
+    // The pair does not prove the closing statement was the broken one: a
+    // genuinely unclosed IF with a semicolon on another row reports the same
+    // key and the same repair.
+    ["an unclosed IF beside a semicolon elsewhere", "IF 1 = 1.\n  WRITE 'a';\n", "semicolon"],
+  ])("%s", async (_name, source, kind) => {
+    const registry = new Registry(config);
+    registry.addFile(new MemoryFile("ztest.prog.abap", source));
+    await registry.parseAsync();
+    expect(errorIssues(registry.findIssues())[0].getKey()).toBe("structure");
+    expect((await repairOf(source))?.kind).toBe(kind);
+  });
+});

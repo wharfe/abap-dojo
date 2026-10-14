@@ -154,12 +154,14 @@ Product-usage events live in `src/utils/analytics.ts`. Two rules:
    A string parameter is allowed only when every value it can hold is checked
    for membership in a **closed set the user cannot extend** — and the check has
    to live where that set does, which is generally not here. `transpile_node` is
-   the one such parameter today: the worker matches it against the class names
+   the first such parameter: the worker matches it against the class names
    `@abaplint/core` exports and drops anything else, and `AST_NODE` in
    `analytics.ts` is a shape backstop, not the guarantee (`ZSECRET` satisfies
    it). "It comes from a fixed list" is not the bar; a runtime membership test
    against an enumerable set is. If you cannot point at the set and the line
-   that tests against it, use a `count` or an `enum` instead.
+   that tests against it, use a `count` or an `enum` instead. `syntax_key`,
+   `syntax_statement` and `structure_node` meet the same bar, each against its
+   own set in `src/workers/syntaxDiagnostics.ts` (see their sections below).
 2. **gtag loads on `abapdojo.com` only** — the host gate is duplicated in
    `index.html` and in all 7 `public/docs/*.html` pages. Local dev, `vite preview`
    and Pages previews leave `window.gtag` undefined so `track()` no-ops there.
@@ -221,7 +223,7 @@ renaming a parameter:
 
 | Register as custom **dimension** (text) | Register as custom **metric** (number) |
 |---|---|
-| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key`, `syntax_statement`, `syntax_error_count`, `syntax_repair`, `silent_loss` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
+| `outcome`, `sample_id`, `mode`, `to_mode`, `transpile_reason`, `transpile_node`, `syntax_key`, `syntax_statement`, `syntax_error_count`, `syntax_repair`, `silent_loss`, `structure_kind`, `structure_node` | `line_count`, `duration_ms`, `output_lines`, `lint_issues`, `pitfalls`, `url_length` |
 
 `syntax_error_count` is registered as a **dimension**, not a metric, and that is
 deliberate rather than a mistake to fix: its values top out around 19, so the
@@ -533,6 +535,56 @@ Two traps, both the same shape as the `transpile_*` ones: filter by
 `outcome = syntax_error` and not just `event_name`, or `(not set)` dominates
 the report; and a *new value* of `syntax_key` needs no GA4 change, while a new
 *parameter* does.
+
+### `structure_kind` / `structure_node`: which block sentence, and which statement it named
+
+`structure` was the second-largest `syntax_key` (25.7% of `syntax_error` over
+2026-09-23..10-12, #72) and said nothing past "the blocks did not match". So
+`run_result` also carries, on `syntax_error` with `syntax_key = structure`
+**only**, both produced by `src/workers/syntaxDiagnostics.ts` from `errors[0]`:
+
+- `structure_kind` — which of the three sentences abaplint's structure check
+  builds: `expected` (`Expected ENDIF`, always reported at line 1),
+  `unexpected` (`Unexpected WHEN`, at that statement) or
+  `unexpected_code_structure`. A message matching none of them sends no kind.
+- `structure_node` — the statement class an `expected`/`unexpected` sentence
+  names, upper-cased as abaplint prints it (`ENDIF`, `ENDMETHOD`,
+  `METHODIMPLEMENTATION`). A class name, not a keyword, so it is **not** the
+  vocabulary of `syntax_statement` and must not share its dimension.
+
+Privacy is the `transpile_node` argument again. abaplint builds the name from
+`constructor.name`, not from the source, but that is an observation, not the
+guarantee: the name travels only if it is a member of `Statements`' export
+names upper-cased, and nothing else. A structure can also name four classes
+`Statements` does not export (`MACROCALL`, `MACROCONTENT`, `MACRORECURSION`,
+`NATIVESQL`); those send the kind with no node, like any other unknown name.
+A test walks every exported structure and fails if that outside list changes.
+`STRUCTURE_NODE` in `analytics.ts` is a shape backstop — `ZSECRET` satisfies
+it.
+
+**Three things the node does not tell you:**
+
+1. **It is not the block the user left open.** Forgetting an `ENDIF` inside a
+   `METHOD` reports `Expected ENDMETHOD`: abaplint names the closing statement
+   it expected next, which is the *outer* one. Do not read a high `ENDMETHOD`
+   as "people forget ENDMETHOD".
+2. **Part of it is a `parser_error` in disguise.** abaplint drops a statement
+   it could not parse before the structure check runs, so a closing statement
+   that is itself broken reads as a missing one — `ENDIF` with no period,
+   `ENDFI.`, `ENDDO;` all report `Expected ENDIF`/`ENDDO`, and at line 1 they
+   sort first. Two of those three also carry `syntax_repair`
+   (`missing_period`, `semicolon`) and a misspelt closing statement carries
+   nothing. But the pair is a hint, not a separation: a genuinely unclosed
+   block with a semicolon on some other row reports `structure` and
+   `semicolon` too, because the repair is accepted on whichever row it fixed.
+   `syntax_error_count > 1` is a weaker sign still.
+3. **A kind of `expected`/`unexpected` with no node is one of two things**: a
+   macro or native-SQL statement (the four classes above), or a statement
+   class abaplint renamed (the coverage test should have caught it on the
+   bump). Neither is a residue to be emptied.
+
+The usual traps apply: filter by `outcome = syntax_error` **and**
+`syntax_key = structure`, or `(not set)` dominates.
 
 ### `syntax_repair` says what to change, and it is the only one that does
 

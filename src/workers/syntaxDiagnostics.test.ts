@@ -2,13 +2,28 @@ import { describe, it, expect } from "vitest";
 import { Buffer } from "buffer";
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
-import { Registry, MemoryFile, Config, ArtifactsRules } from "@abaplint/core";
+import {
+  Registry,
+  MemoryFile,
+  Config,
+  ArtifactsRules,
+  Statements,
+  Structures,
+  MacroCall,
+  MacroContent,
+  NativeSQL,
+  Unknown,
+  Comment,
+  Empty,
+} from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
 import {
   classifySyntaxError,
   isKnownStatementKeyword,
   isKnownRuleKey,
   STATEMENT_KEYWORDS,
+  STRUCTURE_NODES,
+  isKnownStructureNode,
 } from "./syntaxDiagnostics";
 import { sanitizeParams } from "../utils/analytics";
 
@@ -422,5 +437,226 @@ describe("syntax_statement", () => {
     expect(isKnownStatementKeyword("DATA")).toBe(true);
     expect(isKnownStatementKeyword("ZSECRET")).toBe(false);
     expect(isKnownStatementKeyword("")).toBe(false);
+  });
+});
+
+/** Parse `source` the way the worker does and return what it would report. */
+async function diagnoseFirstError(source: string) {
+  const reg = new Registry(new Config(JSON.stringify(transpilerConfig)));
+  reg.addFile(new MemoryFile("ztest.prog.abap", source));
+  await reg.parseAsync();
+  const errors = reg
+    .findIssues()
+    .filter((i) => i.getSeverity().toString() === "Error");
+  return {
+    key: errors[0].getKey(),
+    message: errors[0].getMessage(),
+    diagnostics: classifySyntaxError(
+      errors[0].getKey(),
+      errors.length,
+      errors[0].getMessage(),
+    ),
+  };
+}
+
+describe("structure_kind / structure_node", () => {
+  // Every case is run through the real Registry with the transpiler's config,
+  // so the expectation is abaplint's actual sentence, not one we typed.
+  it.each([
+    ["IF without ENDIF", "DATA x TYPE i.\nIF x = 1.\n  WRITE 'a'.\n", "expected", "ENDIF"],
+    ["LOOP without ENDLOOP", "DATA t TYPE STANDARD TABLE OF i WITH EMPTY KEY.\nLOOP AT t INTO DATA(r).\n  WRITE r.\n", "expected", "ENDLOOP"],
+    ["CASE without ENDCASE", "CASE 1.\n  WHEN 1.\n    WRITE 'a'.\n", "expected", "ENDCASE"],
+    ["a FORM inside an IF", "IF 1 = 1.\nFORM f.\nENDFORM.\nENDIF.\n", "expected", "ENDIF"],
+    // The nested case the measurement must not be read as diagnosing: the
+    // block left open is the inner IF, and the name abaplint gives is the
+    // outer block's closing statement.
+    [
+      "an IF left open inside a METHOD",
+      "CLASS c DEFINITION.\n  PUBLIC SECTION.\n    METHODS m.\nENDCLASS.\nCLASS c IMPLEMENTATION.\n  METHOD m.\n    IF 1 = 1.\n      WRITE 'a'.\n  ENDMETHOD.\nENDCLASS.\n",
+      "expected",
+      "ENDMETHOD",
+    ],
+    ["a stray ENDIF", "WRITE 'a'.\nENDIF.\n", "unexpected", "ENDIF"],
+    ["WHEN outside a CASE", "WRITE 'a'.\nWHEN 1.\n", "unexpected", "WHEN"],
+    // A class name, not a keyword — which is why this is not syntax_statement.
+    ["a METHOD outside a class", "METHOD m.\nENDMETHOD.\n", "unexpected", "METHODIMPLEMENTATION"],
+  ])("reports %s", async (_name, source, kind, node) => {
+    const { key, diagnostics } = await diagnoseFirstError(source);
+    expect(key).toBe("structure");
+    expect(diagnostics.structureKind).toBe(kind);
+    expect(diagnostics.structureNode).toBe(node);
+    // The existing parameters are untouched by the new ones.
+    expect(diagnostics.key).toBe("structure");
+    expect(diagnostics.statement).toBeUndefined();
+  });
+
+  /**
+   * abaplint drops a statement it could not parse before the structure check
+   * runs, so a broken closing statement reads as an unclosed block — and at
+   * (1,1) it sorts first. These pin that `structure_node = ENDIF` mixes "the
+   * blocks do not match" with "the ENDIF itself is misspelt or mispunctuated",
+   * which the reading notes in CLAUDE.md depend on.
+   */
+  it.each([
+    ["ENDIF with no period", "IF 1 = 1.\n  WRITE 'a'.\nENDIF\n", "ENDIF"],
+    ["a misspelt ENDIF", "IF 1 = 1.\n  WRITE 'a'.\nENDFI.\n", "ENDIF"],
+    ["ENDDO ended with a semicolon", "DO 3 TIMES.\n  WRITE 'a';\nENDDO;\n", "ENDDO"],
+  ])("reports %s as an expected closing statement", async (_name, source, node) => {
+    const { key, diagnostics } = await diagnoseFirstError(source);
+    expect(key).toBe("structure");
+    expect(diagnostics.structureKind).toBe("expected");
+    expect(diagnostics.structureNode).toBe(node);
+    expect(diagnostics.errorCount).toBeGreaterThan(1);
+  });
+
+  it("names nothing for the code-structure sentence", () => {
+    const d = classifySyntaxError("structure", 1, "Unexpected code structure");
+    expect(d.structureKind).toBe("unexpected_code_structure");
+    expect(d.structureNode).toBeUndefined();
+  });
+
+  it("reports the kind but drops a name outside abaplint's statement classes", () => {
+    for (const name of ["ZSECRET", "MARA", "FOO1"]) {
+      for (const kind of ["Expected", "Unexpected"] as const) {
+        const d = classifySyntaxError("structure", 1, `${kind} ${name}`);
+        expect(d.structureKind).toBe(kind.toLowerCase());
+        expect(d.structureNode).toBeUndefined();
+      }
+    }
+  });
+
+  it("reports nothing for a message that is not one of the three sentences", () => {
+    for (const message of [
+      "",
+      "Expected",
+      "Expected ",
+      "Expected endif",
+      "Expected EndIf",
+      "Expected ENDIF ",
+      " Expected ENDIF",
+      "Expected ENDIF\n",
+      "Expected ENDIF, WRITE 'secret'",
+      "Expected END-IF",
+      "Expected LV_PASSWORD",
+      "Expected ENDIF.",
+      "Unexpected code structure.",
+      "unexpected code structure",
+      'Statement does not exist in ABAPopen-abap(or a parser error), "ENDIF"',
+    ]) {
+      const d = classifySyntaxError("structure", 1, message);
+      expect(d.structureKind, JSON.stringify(message)).toBeUndefined();
+      expect(d.structureNode, JSON.stringify(message)).toBeUndefined();
+    }
+  });
+
+  it("reports nothing for any key other than structure", () => {
+    for (const key of ["parser_error", "check_syntax", "unknown_types", "zstructure", ""]) {
+      const d = classifySyntaxError(key, 1, "Expected ENDIF");
+      expect(d.structureKind).toBeUndefined();
+      expect(d.structureNode).toBeUndefined();
+    }
+  });
+
+  /**
+   * The worker classifies inside the same try as the transpile, so a throw
+   * here would turn a syntax_error into a transpile_error. Whatever the
+   * message holds, the classifier must return.
+   */
+  it("never throws, whatever the message", () => {
+    for (const message of [
+      "Expected " + "A".repeat(10_000),
+      "Unexpected \u0000",
+      "Expected __proto__",
+      "Expected CONSTRUCTOR",
+      "Unexpected HASOWNPROPERTY",
+    ]) {
+      expect(() => classifySyntaxError("structure", 1, message)).not.toThrow();
+    }
+    expect(classifySyntaxError("structure", 1, "Expected CONSTRUCTOR").structureNode).toBeUndefined();
+  });
+
+  /**
+   * The runtime set is exactly `Statements`' export names, upper-cased. This
+   * walks every structure abaplint exports and checks that every statement
+   * class an `Expected` message can name from `Statements` is in it, and that
+   * the names a structure can reference from OUTSIDE `Statements` are exactly
+   * the four macro / native-SQL classes — so a core bump that adds one more
+   * fails here, where someone decides whether it may travel, instead of
+   * silently turning into a kind with no node.
+   */
+  it("covers every Statements class a structure can expect, and names the rest", () => {
+    const referenced = new Set(
+      Object.values(Structures).flatMap((Structure) =>
+        new Structure()
+          .getMatcher()
+          .getUsing()
+          .filter((using) => using.startsWith("statement/"))
+          .map((using) => using.slice("statement/".length)),
+      ),
+    );
+    expect(referenced.size).toBeGreaterThan(300);
+    const outsideStatements: string[] = [];
+    for (const name of referenced) {
+      if (name in Statements) {
+        expect(isKnownStructureNode(name.toUpperCase()), name).toBe(true);
+      } else {
+        outsideStatements.push(name);
+      }
+    }
+    expect(outsideStatements.sort()).toEqual(OUTSIDE_STATEMENTS);
+  });
+
+  /**
+   * The four classes a structure message can name that `Statements` does not
+   * export. The set is `Statements`' export names and nothing else, so these
+   * travel as a kind with no node — the same as any other unknown name.
+   * `Unknown`, `Comment` and `Empty` are the other `_statement.ts` classes;
+   * the structure parser drops them before matching, so they never appear in
+   * a message, and they are not in the set either.
+   */
+  const OUTSIDE_STATEMENTS = ["MacroCall", "MacroContent", "MacroRecursion", "NativeSQL"];
+
+  it("sends a kind but no node for a class Statements does not export", () => {
+    for (const name of OUTSIDE_STATEMENTS) {
+      const upper = name.toUpperCase();
+      expect(isKnownStructureNode(upper), upper).toBe(false);
+      for (const kind of ["Expected", "Unexpected"] as const) {
+        const d = classifySyntaxError("structure", 1, `${kind} ${upper}`);
+        expect(d.structureKind, `${kind} ${upper}`).toBe(kind.toLowerCase());
+        expect(d.structureNode, `${kind} ${upper}`).toBeUndefined();
+      }
+    }
+    // Three of the four are exported at @abaplint/core's top level; being
+    // exported somewhere is not the test, membership in `Statements` is.
+    for (const Statement of [MacroCall, MacroContent, NativeSQL]) {
+      expect(isKnownStructureNode(Statement.name.toUpperCase()), Statement.name).toBe(false);
+    }
+    for (const Statement of [Unknown, Comment, Empty]) {
+      expect(isKnownStructureNode(Statement.name.toUpperCase()), Statement.name).toBe(false);
+    }
+  });
+
+  it("only admits upper-cased Statements class names", () => {
+    expect(isKnownStructureNode("ENDIF")).toBe(true);
+    expect(isKnownStructureNode("METHODIMPLEMENTATION")).toBe(true);
+    expect(isKnownStructureNode("MACRORECURSION")).toBe(false);
+    expect(isKnownStructureNode("EndIf")).toBe(false);
+    expect(isKnownStructureNode("ZSECRET")).toBe(false);
+    expect(isKnownStructureNode("")).toBe(false);
+  });
+
+  // The analytics shape backstop must admit every value the worker can pass,
+  // or a real bucket goes permanently `(not set)`.
+  it("produces only values the analytics shape accepts", () => {
+    const rejected = [...STRUCTURE_NODES].filter(
+      (node) =>
+        sanitizeParams("run_result", {
+          outcome: "syntax_error",
+          syntax_key: "structure",
+          structure_kind: "expected",
+          structure_node: node,
+        }).structure_node !== node,
+    );
+    expect(rejected).toEqual([]);
   });
 });

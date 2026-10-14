@@ -339,6 +339,8 @@ function App() {
         syntax_key: syntaxDiagnostics?.key,
         syntax_error_count: syntaxDiagnostics?.errorCount,
         syntax_statement: syntaxDiagnostics?.statement,
+        structure_kind: syntaxDiagnostics?.structureKind,
+        structure_node: syntaxDiagnostics?.structureNode,
       };
       // Wait for the follow-up so the run is measured once, with whatever the
       // searches found on it — but only for a run whose verdict the user is

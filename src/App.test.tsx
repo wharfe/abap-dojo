@@ -843,6 +843,58 @@ describe("App — the worker's follow-up message (#67/#75)", () => {
       trackMock.mock.calls.filter(([name]) => name === "run_result"),
     ).toHaveLength(0);
   });
+
+  /**
+   * App → the real `track` → `window.gtag`, end to end inside jsdom. The rest
+   * of this file mocks `track` so it can count events; here the mock calls
+   * through to the real one, so what reaches the stub is what the runtime
+   * allowlist actually lets out. The worker's classifier is tested on its
+   * own (syntaxDiagnostics.test.ts); this pins that App carries its output.
+   */
+  it("hands the structure diagnostics to gtag on a structure syntax error", async () => {
+    const actual = await vi.importActual<typeof import("./utils/analytics")>(
+      "./utils/analytics",
+    );
+    trackMock.mockImplementation(actual.track);
+    const gtag = vi.fn();
+    window.gtag = gtag;
+    try {
+      const { worker, requestId } = startRun();
+      act(() => {
+        worker.onmessage?.({
+          data: {
+            type: "transpile-error",
+            kind: "syntax",
+            message: "Expected ENDMETHOD",
+            line: 1,
+            syntaxDiagnostics: {
+              key: "structure",
+              errorCount: 1,
+              structureKind: "expected",
+              structureNode: "ENDMETHOD",
+            },
+            requestId,
+          },
+        } as MessageEvent);
+      });
+      deliverFollowUp(worker, { type: "syntax-hint", requestId });
+
+      const sent = gtag.mock.calls.filter(([, name]) => name === "run_result");
+      expect(sent).toHaveLength(1);
+      expect(sent[0][2]).toMatchObject({
+        outcome: "syntax_error",
+        syntax_key: "structure",
+        syntax_error_count: 1,
+        structure_kind: "expected",
+        structure_node: "ENDMETHOD",
+      });
+      // The message the user reads never travels.
+      expect(JSON.stringify(sent[0][2])).not.toContain("Expected");
+    } finally {
+      delete window.gtag;
+      trackMock.mockReset();
+    }
+  });
 });
 
 // The worker boots at the first idle moment. A Run or Validate pressed before

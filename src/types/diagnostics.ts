@@ -59,6 +59,26 @@ export interface TranspileDiagnostics {
 }
 
 /**
+ * Which of the three sentences abaplint's `structure` check produced. They
+ * are the only ones `structure_parser.ts` and `_combi.ts` build:
+ *
+ *   - `expected`                  `Expected <STATEMENT CLASS>`, always at (1,1)
+ *   - `unexpected`                `Unexpected <STATEMENT CLASS>`, at that statement
+ *   - `unexpected_code_structure` `Unexpected code structure`, at (1,1)
+ *
+ * The first two name a statement class (`SyntaxDiagnostics.structureNode`);
+ * the third names nothing. A message matching none of them — including the
+ * empty string `_combi.ts` can leave behind — reports no kind at all.
+ */
+export const STRUCTURE_KINDS = [
+  "expected",
+  "unexpected",
+  "unexpected_code_structure",
+] as const;
+
+export type StructureKind = (typeof STRUCTURE_KINDS)[number];
+
+/**
  * Why a *syntax* failure happened, at the only granularity abaplint itself
  * offers for free: the rule key of the issue the user is looking at.
  *
@@ -117,6 +137,27 @@ export interface SyntaxDiagnostics {
    * Read it as "which keyword", never as "whose fault".
    */
   statement?: string;
+  /**
+   * Which `structure` sentence the user was shown. Present only on
+   * `key === "structure"` and only when the message is one of the three
+   * sentences in `STRUCTURE_KINDS`.
+   */
+  structureKind?: StructureKind;
+  /**
+   * The statement class named by an `expected` or `unexpected` message,
+   * upper-cased as abaplint prints it (`ENDIF`, `ENDMETHOD`,
+   * `METHODIMPLEMENTATION`). A class name, not a keyword, so it is not the
+   * vocabulary of `statement`. Present only when it is a member of the class
+   * names `Statements` exports — that test is the privacy guarantee. The four
+   * macro / native-SQL classes outside `Statements` report the kind alone.
+   *
+   * It is the statement abaplint expected or did not expect, not the block
+   * the user left open: forgetting an ENDIF inside a METHOD reports
+   * `Expected ENDMETHOD`. And a closing statement that is itself broken (a
+   * missing period, `ENDFI.`) is dropped as a `parser_error` before the
+   * structure check runs, so that too reads as `Expected ENDIF`.
+   */
+  structureNode?: string;
 }
 
 /**

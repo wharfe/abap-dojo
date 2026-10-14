@@ -304,3 +304,66 @@ test("the verdict does not wait for the search on a heavy paste", async ({
   ]);
   await expect(page.getByText(/stopped responding/i)).toHaveCount(0);
 });
+
+/**
+ * The structure diagnostics, measured against the production worker bundle:
+ * Vitest never runs the minified worker, so this is the one place that sees
+ * the real worker classify a structure error and App carry the result to
+ * `gtag`.
+ *
+ * `window.gtag` is stubbed before the page loads. index.html only defines the
+ * real one on the production host, so on localhost the stub stays in place
+ * and records what `track()` hands it — nothing is transmitted. The tag
+ * script is aborted as well, and the count of collection requests asserted,
+ * so a change to that gate cannot turn this test into a real send.
+ */
+test("a block left open reaches gtag as a structure kind and node", async ({ page }) => {
+  let collected = 0;
+  page.on("request", (request) => {
+    if (/\/g\/collect/.test(request.url())) collected++;
+  });
+  await page.route(/googletagmanager\.com/, (route) => route.abort());
+  await page.addInitScript(() => {
+    const calls: unknown[][] = [];
+    (window as unknown as { gtagCalls: unknown[][] }).gtagCalls = calls;
+    (window as unknown as { gtag: (...args: unknown[]) => void }).gtag = (
+      ...args: unknown[]
+    ) => {
+      calls.push(args);
+    };
+  });
+  // An IF left open inside a METHOD: abaplint names the METHOD's closing
+  // statement, not the IF's, and that is what must arrive.
+  await openProgram(
+    page,
+    [
+      "CLASS lcl DEFINITION.",
+      "  PUBLIC SECTION.",
+      "    METHODS m.",
+      "ENDCLASS.",
+      "CLASS lcl IMPLEMENTATION.",
+      "  METHOD m.",
+      "    IF 1 = 1.",
+      "      WRITE 'a'.",
+      "  ENDMETHOD.",
+      "ENDCLASS.",
+    ].join("\n"),
+  );
+  await clickRun(page);
+  // run_result for a syntax_error is held until the worker's follow-up.
+  await waitForSearchDone(page);
+
+  const runResults = await page.evaluate(() =>
+    (window as unknown as { gtagCalls: unknown[][] }).gtagCalls.filter(
+      (call) => call[0] === "event" && call[1] === "run_result",
+    ),
+  );
+  expect(runResults).toHaveLength(1);
+  expect(runResults[0][2]).toMatchObject({
+    outcome: "syntax_error",
+    syntax_key: "structure",
+    structure_kind: "expected",
+    structure_node: "ENDMETHOD",
+  });
+  expect(collected).toBe(0);
+});
