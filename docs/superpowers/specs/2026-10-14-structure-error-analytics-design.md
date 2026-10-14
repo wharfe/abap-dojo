@@ -51,7 +51,7 @@ GA4 側の既存機能（イベントパラメータ）以外に流用できる�
 2. `structure_*` は `syntax_key = structure` かつ `outcome = syntax_error` 以外の run_result から必ず落ちる。
 3. 既存の `syntax_key` / `syntax_error_count` / `syntax_statement` / `syntax_repair` / `silent_loss`、エラー表示、ヒント探索の挙動は変えない。
 4. `Expected ENDMETHOD` を「内側の ENDIF 忘れ」とも「METHOD の閉じ忘れ」とも断定しない — 文書でもコードコメントでも「abaplint が次に期待した閉じ文」とだけ言う。閉じ文の綴り・句読点の誤り（parser_error 由来）も同じ値になることを併記する。
-5. kind あり・node なし = abaplint の更新か `keepNames` の喪失による語彙のずれ（網羅テストが通る限り）。残り物として読まない。
+5. kind が `expected`/`unexpected` で node なし = `Statements` 外の 4 クラス（マクロ・ネイティブ SQL。正常な動作）か、abaplint の更新による名前のずれ（網羅テストが通る限り）。残り物として読まない。
 
 ## 入口表（不変条件が破れうる場所）
 
@@ -81,6 +81,6 @@ GA4 側の既存機能（イベントパラメータ）以外に流用できる�
 - 読み方: `structure` かつ `syntax_repair ∈ {missing_period, semicolon}` には閉じ文の句読点の誤りが含まれるが、閉じ忘れと別の行の句読点誤りの同居も同じ組になる（最終再レビューの指摘で訂正。`statementEndRepair.test.ts` で固定）。綴り誤り（`ENDFI.`）は何も付かない。
 - `refine` の順序: key 規則（`syntax_key ≠ structure` なら kind を消す）→ kind 規則（kind が expected/unexpected 以外なら node を消す。key 規則で kind が消えた node もここで消える）→ outcome 規則。key 規則が node を直接消さないのは、各規則を単独で外したときにどれが効いていたかをテストで区別するため（Gate3 で実装に合わせて訂正）。
 - 入口表に追加: `src/workers/abaplintWorker.ts:96-113`（classifier が throw すると syntax_error が transpile_error に化ける → 任意の文字列で throw しないテスト）、`src/App.tsx:482-493`（`isSyntax` での振り分け）。
-- 不変条件 5 は「kind が expected/unexpected で node が無い場合」に限定し、原因は「abaplint 更新による名前のずれ」とする（keepNames 喪失は worker 起動失敗として現れるので node 欠落にはならない）。e2e の価値は「本番 worker バンドルで分類と運搬が通ること」。
+- 不変条件 5 は「kind が expected/unexpected で node が無い場合」に限定し、原因は「`Statements` 外の 4 クラス（正常）」か「abaplint 更新による名前のずれ」とする（keepNames 喪失は worker 起動失敗として現れるので node 欠落にはならない）。e2e の価値は「本番 worker バンドルで分類と運搬が通ること」。
 - 網羅テストは `getUsing()` で集めた名前のうち `Statements` に無いものが固定 4 個と**一致**することを確かめる。この 4 個は集合外として扱う（kind のみ、node なし）。
 - GA4 登録は本番管理画面での人手の操作。ユーザーの明示許可の下で、マージ前に行う手順として PR に書く。
