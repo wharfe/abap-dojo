@@ -23,12 +23,6 @@ import {
 const HINT = /double quote begins a comment/i;
 const PLACEHOLDER = /Click Run to execute your ABAP code/i;
 
-/** Same reason as syntaxHint.spec.ts: the WebKit transpile stall, #47. */
-test.skip(
-  ({ browserName }) => browserName === "webkit",
-  "pre-existing intermittent WebKit transpile stall, see #47",
-);
-
 test("a chained WRITE whose only operand was eaten is explained", async ({
   page,
 }) => {

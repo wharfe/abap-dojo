@@ -21,21 +21,6 @@ import { MAX_SOURCE_CHARS } from "../src/workers/searchLimits";
  */
 const HINT = /double quote begins a comment/i;
 
-/**
- * Every test here needs a run to actually finish, and on WebKit that is not
- * reliable: the transpile worker intermittently never answers and the 20s
- * watchdog reports "The ABAP engine stopped responding" instead of a result
- * (#47). Measured while writing this file — two runs of the same four tests
- * failed on two *different* pairs, and the same failures reproduce against the
- * tree without the repair search, so it is neither program-dependent nor
- * caused by the extra parses. Chromium and Firefox cover the wiring; leaving
- * WebKit in would buy a flaky suite and no signal.
- */
-test.skip(
-  ({ browserName }) => browserName === "webkit",
-  "pre-existing intermittent WebKit transpile stall, see #47",
-);
-
 test("a double quote used as a string quote is explained", async ({ page }) => {
   await openProgram(page, `REPORT ztest.\nWRITE "hello".`);
   await clickRun(page);

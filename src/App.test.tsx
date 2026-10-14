@@ -844,3 +844,58 @@ describe("App — the worker's follow-up message (#67/#75)", () => {
     ).toHaveLength(0);
   });
 });
+
+// The worker boots at the first idle moment. A Run or Validate pressed before
+// that used to post to a null worker: nothing was sent, and 20s later the
+// watchdog told the user the engine had stopped responding (#47). Measured
+// on WebKit, whose idle fallback is a 200ms timer: under load the click
+// landed ~130ms after load and the worker was created ~290ms.
+describe("App — a Run or Validate pressed before the worker has booted (#47)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    workerInstances.length = 0;
+    executeMock.mockClear();
+    stopMock.mockReset();
+    trackMock.mockClear();
+    sandboxProps = null;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("boots the worker on the spot and sends the transpile", () => {
+    render(<App />);
+    expect(workerInstances).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Run/i }));
+
+    expect(workerInstances).toHaveLength(1);
+    expect(workerInstances[0].postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "transpile" }),
+    );
+
+    // The idle boot that was still scheduled must not start a second worker.
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(workerInstances).toHaveLength(1);
+  });
+
+  it("boots the worker on the spot and sends the validation", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /AI Validator/i }));
+    expect(workerInstances).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Validate/i }));
+
+    expect(workerInstances).toHaveLength(1);
+    expect(workerInstances[0].postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "validate" }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(workerInstances).toHaveLength(1);
+  });
+});
