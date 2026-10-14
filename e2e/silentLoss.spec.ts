@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
+  openProgram,
   typeProgram,
   clickRun,
   waitForRunToEnd,
@@ -31,8 +32,7 @@ test.skip(
 test("a chained WRITE whose only operand was eaten is explained", async ({
   page,
 }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nWRITE: "hello".`);
+  await openProgram(page, `REPORT ztest.\nWRITE: "hello".`);
   await clickRun(page);
 
   const hint = page.getByText(HINT);
@@ -54,8 +54,7 @@ test("a chained WRITE whose only operand was eaten is explained", async ({
 test("a partly eaten chain still prints what survived, and says so", async ({
   page,
 }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nWRITE: 'a', "b".`);
+  await openProgram(page, `REPORT ztest.\nWRITE: 'a', "b".`);
   await clickRun(page);
 
   // `a` is written and `b` is not — the shape that makes "the run produced no
@@ -77,8 +76,7 @@ test("a partly eaten chain still prints what survived, and says so", async ({
 });
 
 test("a correct program that prints nothing gets no hint", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(
+  await openProgram(
     page,
     `REPORT ztest.\n* a note about "x" and "y"\nDATA lv TYPE i.\nlv = 1.`,
   );
@@ -100,8 +98,7 @@ test("the hint does not outlive the program it describes", async ({ page }) => {
   // warning instead of an invitation to run. Found by review; it belongs here
   // rather than in App.test.tsx because the sample dropdown, the placeholder
   // and the hint are three real components' rendering, not App's wiring.
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nWRITE: "hello".`);
+  await openProgram(page, `REPORT ztest.\nWRITE: "hello".`);
   await clickRun(page);
   await expect(page.getByText(HINT)).toBeVisible({ timeout: 30_000 });
 
@@ -117,8 +114,7 @@ test("editing the program takes the hint with it", async ({ page }) => {
   // that is no longer there. Clearing it wherever the editor changes was tried
   // and is a list that was already wrong twice, so visibility is derived from
   // whether the editor still holds the program the hint describes.
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nWRITE: "hello".`);
+  await openProgram(page, `REPORT ztest.\nWRITE: "hello".`);
   await clickRun(page);
   await expect(page.getByText(HINT)).toBeVisible({ timeout: 30_000 });
 

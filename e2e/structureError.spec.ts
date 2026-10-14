@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { typeProgram, clickRun } from "./helpers";
+import { openProgram, clickRun } from "./helpers";
 
 /**
  * abaplint reports `Expected ENDIF` at (1,1) wherever the IF is (#72). The
@@ -17,8 +17,7 @@ test.skip(
 );
 
 test("a missing ENDIF is explained without pointing at line 1", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nIF 1 = 1.\n  WRITE 'a'.`);
+  await openProgram(page, `REPORT ztest.\nIF 1 = 1.\n  WRITE 'a'.`);
   await clickRun(page);
 
   const error = page.getByText(EXPLANATION).first();
