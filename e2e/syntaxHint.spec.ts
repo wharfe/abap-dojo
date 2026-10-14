@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
-  typeProgram,
+  openProgram,
   clickRun,
   lintCount,
   waitForLintToSettle,
@@ -37,8 +37,7 @@ test.skip(
 );
 
 test("a double quote used as a string quote is explained", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nWRITE "hello".`);
+  await openProgram(page, `REPORT ztest.\nWRITE "hello".`);
   await clickRun(page);
 
   const output = page.getByText(HINT);
@@ -51,8 +50,7 @@ test("a double quote used as a string quote is explained", async ({ page }) => {
 test("the hint points at the row the quote is on, not the row abaplint blamed", async ({
   page,
 }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nWRITE "hello".\nWRITE 'ok'.`);
+  await openProgram(page, `REPORT ztest.\nWRITE "hello".\nWRITE 'ok'.`);
   await clickRun(page);
 
   await expect(page.getByText(HINT)).toContainText("line 2", {
@@ -61,8 +59,7 @@ test("the hint points at the row the quote is on, not the row abaplint blamed", 
 });
 
 test("a correct program with comments gets no hint", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(
+  await openProgram(
     page,
     `REPORT ztest.\n* he said "hello" here\nWRITE 'a'. " and this is a note`,
   );
@@ -79,8 +76,7 @@ test("a correct program with comments gets no hint", async ({ page }) => {
 test("a syntax error we cannot explain gets no invented hint", async ({
   page,
 }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nFROBNICATE lv_x.`);
+  await openProgram(page, `REPORT ztest.\nFROBNICATE lv_x.`);
   await clickRun(page);
 
   await expect(page.getByText(/Syntax error/i)).toBeVisible({ timeout: 30_000 });
@@ -94,8 +90,7 @@ const SEMICOLON_HINT = /not a semicolon/i;
 test("a missing period is explained, on the row the statement ends on", async ({
   page,
 }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nWRITE: 'a',\n       'b'`);
+  await openProgram(page, `REPORT ztest.\nWRITE: 'a',\n       'b'`);
   await clickRun(page);
 
   await expect(page.getByText(PERIOD_HINT)).toContainText("line 3", {
@@ -104,8 +99,7 @@ test("a missing period is explained, on the row the statement ends on", async ({
 });
 
 test("a semicolon used to end a statement is explained", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nWRITE 'a';`);
+  await openProgram(page, `REPORT ztest.\nWRITE 'a';`);
   await clickRun(page);
 
   await expect(page.getByText(SEMICOLON_HINT)).toContainText("line 2", {
@@ -116,8 +110,7 @@ test("a semicolon used to end a statement is explained", async ({ page }) => {
 const VALUE_HINT = /puts a starting value after VALUE/i;
 
 test("a declaration initialised with an equals sign is explained", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nDATA lv_x TYPE i = 5.`);
+  await openProgram(page, `REPORT ztest.\nDATA lv_x TYPE i = 5.`);
   await clickRun(page);
 
   await expect(page.getByText(VALUE_HINT)).toContainText("line 2", {
@@ -126,8 +119,7 @@ test("a declaration initialised with an equals sign is explained", async ({ page
 });
 
 test("pasted JavaScript is not told it forgot a period", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nconsole.log('a')`);
+  await openProgram(page, `REPORT ztest.\nconsole.log('a')`);
   await clickRun(page);
 
   // Assert the verdict we expect BEFORE waiting, and keep it asserted: since
@@ -148,8 +140,7 @@ test("pasted JavaScript is not told it forgot a period", async ({ page }) => {
 // sign. Asserting its absence on `console.log('a')` above would have passed
 // with valueAssignRepair.ts deleted, which is a test looking at nothing.
 test("pasted JavaScript with an equals sign is not told to use VALUE", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(page, `REPORT ztest.\nlet x = 1`);
+  await openProgram(page, `REPORT ztest.\nlet x = 1`);
   await clickRun(page);
 
   await expect(page.getByText(/Syntax error/i)).toBeVisible({ timeout: 30_000 });
@@ -234,7 +225,9 @@ test("the verdict does not wait for the search on a heavy paste", async ({
   // couple of rows, where the difference does not register.
   await page.waitForSelector(".monaco-editor", { timeout: 30_000 });
   const lintBefore = await lintCount(page);
-  // Not typeProgram: its ControlOrMeta+A follows the HOST OS (Meta on a Mac),
+  // Typed by hand, not opened through the share link, because a paste into
+  // the editor is part of what this measures. And with this key, not
+  // ControlOrMeta+A, which follows the HOST OS (Meta on a Mac),
   // while Monaco picks its selection key from the user agent, and this
   // project emulates Desktop Chrome — a Windows UA. On a Mac host nothing was
   // selected and the paste landed after the default program: the worker got

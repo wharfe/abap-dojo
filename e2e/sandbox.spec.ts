@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { typeProgram } from "./helpers";
+import { openProgram } from "./helpers";
 
 /**
  * Poll the page with a SHORT per-call timeout. This is the whole trick: a
@@ -40,8 +40,7 @@ test("an endless loop does not freeze the tab", async ({ page, browserName }) =>
   // which is worse than not testing it.
   test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
 
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nDO.\nENDDO.");
+  await openProgram(page, "REPORT ztest.\nDO.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
   // The watchdog is 15s; give it room and keep checking that the renderer is
@@ -57,8 +56,7 @@ test("an endless loop still produces a terminal result", async ({ page, browserN
   // separately rather than gating this task's e2e coverage.
   test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
 
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nDO.\nENDDO.");
+  await openProgram(page, "REPORT ztest.\nDO.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
   // The run must end on its own: the Run button becomes usable again. The
@@ -74,8 +72,7 @@ test("an endless loop still produces a terminal result", async ({ page, browserN
 });
 
 test("an ordinary program still runs and prints", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nWRITE 'hello from e2e'.");
+  await openProgram(page, "REPORT ztest.\nWRITE 'hello from e2e'.");
   await page.getByRole("button", { name: /Run/i }).click();
   await expect(page.getByText("hello from e2e")).toBeVisible({
     timeout: 30_000,
@@ -88,8 +85,7 @@ test("output written before a timeout is still shown", async ({ page, browserNam
   // pre-existing, unrelated bug as the other two skipped cases above.
   test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
 
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
+  await openProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
   // page.getByText("tick") alone is not safe here: the literal source the
@@ -114,8 +110,7 @@ test("the user can stop an endless loop immediately", async ({
   // cases above.
   test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
 
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
+  await openProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
   // Wait for at least one output flush before stopping, so this test proves

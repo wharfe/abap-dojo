@@ -1,20 +1,49 @@
 import { expect, type Page } from "@playwright/test";
+import { encodeSource } from "../src/utils/urlShare";
 
-const EDITOR = ".monaco-editor, textarea";
+/**
+ * Open the app with `source` already in the editor, through the share link.
+ *
+ * Use this to set a test's program, not typeProgram. Typing into Monaco does
+ * not reliably produce the text sent (measured 2026-10-14 in the CI image,
+ * Playwright 1.59.1, by reading the source the app hands its worker):
+ *
+ * - Firefox doubles the first line of any multi-line insertText into Monaco,
+ *   every time, even into an empty editor. `REPORT ztest.` twice is a syntax
+ *   error, so a correct program printed nothing and the test failed.
+ * - Chromium rewrites indented multi-line text the same way (Monaco treats it
+ *   as typing, not as a paste).
+ * - The old helper usually got away with it because Monaco loads at the first
+ *   idle moment and the typing landed in EditorPanel's plain textarea first.
+ *   When Monaco won that race, the keys either went to Monaco (above) or to a
+ *   textarea that had just been removed: 22 of 100 Firefox runs left the
+ *   editor holding something other than what the test meant to run.
+ *
+ * `#code=` is decoded straight into App's state, so the source is exact. It
+ * also shows the shared-code banner and hides the hero, which nothing here
+ * asserts on.
+ */
+export async function openProgram(page: Page, source: string): Promise<void> {
+  await page.goto(`/#code=${encodeSource(source)}`);
+}
 
-/** Replace the editor contents with `source`. */
+/**
+ * Change the program in an editor that is already open, by typing.
+ *
+ * NOT exact — see openProgram. Use it only where the test needs the program
+ * to change and does not depend on the precise text that results (editing the
+ * program after a run). Setting a test's program is openProgram's job.
+ */
 export async function typeProgram(page: Page, source: string): Promise<void> {
-  await page.waitForSelector(EDITOR, { timeout: 30_000 });
-  await page.click(EDITOR);
-  await page.keyboard.press("ControlOrMeta+A");
-  // insertText (not type): Monaco's own keydown handling (autoclosing quotes,
-  // electric characters) races with per-keystroke automation and drops or
-  // duplicates characters under CDP. insertText delivers the text as a single
-  // paste-like input event, which Monaco applies atomically to its model.
-  //
-  // For this suite that is not only about speed: several programs here are
-  // about the quote characters themselves, and Monaco's autoclosing would
-  // rewrite them into something the test did not mean to run.
+  await page.waitForSelector(".monaco-editor", { timeout: 30_000 });
+  await page.click(".monaco-editor");
+  // Monaco picks its select-all key from the user agent, not the host OS, so
+  // ControlOrMeta+A selects nothing when a Windows UA runs on a Mac (see the
+  // heavy-paste test in syntaxHint.spec.ts).
+  const selectAll = (await page.evaluate(() => navigator.userAgent.includes("Macintosh")))
+    ? "Meta+A"
+    : "Control+A";
+  await page.keyboard.press(selectAll);
   await page.keyboard.insertText(source);
 }
 
