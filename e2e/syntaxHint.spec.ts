@@ -332,10 +332,9 @@ test("a block left open reaches gtag as a structure kind and node", async ({ pag
       calls.push(args);
     };
   });
-  await page.goto("/");
   // An IF left open inside a METHOD: abaplint names the METHOD's closing
   // statement, not the IF's, and that is what must arrive.
-  await typeProgram(
+  await openProgram(
     page,
     [
       "CLASS lcl DEFINITION.",
