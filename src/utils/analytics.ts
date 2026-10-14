@@ -35,7 +35,9 @@ import {
   TRANSPILE_REASONS,
   SYNTAX_REPAIRS,
   SILENT_LOSSES,
+  STRUCTURE_KINDS,
   type TranspileReason,
+  type StructureKind,
   type SyntaxRepairKind,
   type SilentLossKind,
 } from "../types/diagnostics";
@@ -132,6 +134,17 @@ export interface EventMap {
      * is not reaching people" from "this was never the common mistake".
      */
     syntax_repair?: SyntaxRepairKind;
+    /**
+     * Only on `outcome: "syntax_error"` with `syntax_key: "structure"` — which
+     * of abaplint's three structure sentences the user was shown, and the
+     * statement class it named (`ENDIF`, `METHODIMPLEMENTATION`). The node
+     * has already been tested for membership in the statement classes
+     * abaplint exports (src/workers/syntaxDiagnostics.ts); `STRUCTURE_NODE`
+     * below is a shape backstop. The node is what abaplint expected or did
+     * not expect, never a verdict on which block the user left open.
+     */
+    structure_kind?: StructureKind;
+    structure_node?: string;
     /**
      * On EVERY outcome — whether a statement the user wrote was parsed away in
      * silence, and this is the one parameter here that is not outcome-scoped.
@@ -265,6 +278,19 @@ const STATEMENT_KEYWORD: ParamSpec = {
   pattern: /^[A-Z][A-Z0-9-]{0,29}$/,
 };
 
+/**
+ * An upper-cased abaplint statement class name, as a `structure` message
+ * prints it — `ENDIF`, `METHODIMPLEMENTATION`. No hyphen, unlike
+ * `STATEMENT_KEYWORD`, because class names have none. A shape backstop and
+ * not the guarantee: the worker has already tested the value against the
+ * statement classes abaplint exports, and `ZSECRET` satisfies this pattern.
+ * The longest real name is 21 characters.
+ */
+const STRUCTURE_NODE: ParamSpec = {
+  kind: "id",
+  pattern: /^[A-Z][A-Z0-9]{0,39}$/,
+};
+
 const COUNT: ParamSpec = { kind: "count" };
 
 /**
@@ -294,6 +320,8 @@ const EVENT_PARAMS: { readonly [K in EventName]: Readonly<SpecsFor<K>> } = {
     syntax_error_count: COUNT,
     syntax_statement: STATEMENT_KEYWORD,
     syntax_repair: { kind: "enum", values: SYNTAX_REPAIRS },
+    structure_kind: { kind: "enum", values: STRUCTURE_KINDS },
+    structure_node: STRUCTURE_NODE,
     silent_loss: { kind: "enum", values: SILENT_LOSSES },
   },
   validate_click: { line_count: COUNT },
@@ -376,7 +404,14 @@ const OUTCOME_ONLY_PARAMS: ReadonlyArray<
   ["transpile_error", ["transpile_reason", "transpile_node"]],
   [
     "syntax_error",
-    ["syntax_key", "syntax_error_count", "syntax_statement", "syntax_repair"],
+    [
+      "syntax_key",
+      "syntax_error_count",
+      "syntax_statement",
+      "syntax_repair",
+      "structure_kind",
+      "structure_node",
+    ],
   ],
 ];
 
@@ -412,6 +447,14 @@ function refine(name: EventName, clean: Record<string, string | number>): void {
   // rule enforced only in the producer is one refactor from being enforced
   // nowhere.
   if (clean.syntax_key !== "parser_error") delete clean.syntax_statement;
+  // The same key rule for the structure pair, then the kind rule, still ahead
+  // of the outcome rule and for the same reason: the key rule strips the kind
+  // only, so the node is left for the kind rule to judge, and each of the
+  // three can be removed and seen to be missed.
+  if (clean.syntax_key !== "structure") delete clean.structure_kind;
+  if (clean.structure_kind !== "expected" && clean.structure_kind !== "unexpected") {
+    delete clean.structure_node;
+  }
   for (const [outcome, params] of OUTCOME_ONLY_PARAMS) {
     if (clean.outcome === outcome) continue;
     for (const param of params) delete clean[param];

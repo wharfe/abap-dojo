@@ -266,6 +266,99 @@ describe("sanitizeParams", () => {
   });
 
   /**
+   * The structure parameters are scoped three ways, and each rule is tested on
+   * its own: every other case below sets the conditions of the other two
+   * rules so that only the one under test can strip the parameter. Remove any
+   * one rule from `refine` and exactly its test goes red.
+   */
+  const structureOk = {
+    outcome: "syntax_error",
+    duration_ms: 30,
+    syntax_key: "structure",
+    syntax_error_count: 1,
+    structure_kind: "expected",
+    structure_node: "ENDIF",
+  };
+
+  it("accepts the structure diagnostics on a structure syntax error", () => {
+    expect(sanitizeUnchecked("run_result", structureOk)).toEqual(structureOk);
+    expect(
+      sanitizeUnchecked("run_result", {
+        ...structureOk,
+        structure_kind: "unexpected",
+        structure_node: "METHODIMPLEMENTATION",
+      }),
+    ).toMatchObject({ structure_kind: "unexpected", structure_node: "METHODIMPLEMENTATION" });
+  });
+
+  // Outcome rule: syntax_key is `structure`, kind names a node.
+  it("drops the structure diagnostics on every other outcome", () => {
+    for (const outcome of [
+      "success",
+      "transpile_error",
+      "runtime_error",
+      "timeout",
+      "stalled",
+      "cancelled",
+      "stopped",
+      "load_error",
+    ] satisfies RunOutcome[]) {
+      const clean = sanitizeUnchecked("run_result", { ...structureOk, outcome });
+      expect(clean).not.toHaveProperty("structure_kind");
+      expect(clean).not.toHaveProperty("structure_node");
+    }
+  });
+
+  // Key rule: outcome is syntax_error, kind names a node.
+  it("drops the structure diagnostics unless the key is structure", () => {
+    for (const syntax_key of ["parser_error", "check_syntax", "unknown_types", undefined]) {
+      const clean = sanitizeUnchecked("run_result", { ...structureOk, syntax_key });
+      expect(clean).not.toHaveProperty("structure_kind");
+      expect(clean).not.toHaveProperty("structure_node");
+      expect(clean).toMatchObject({ outcome: "syntax_error", syntax_error_count: 1 });
+    }
+  });
+
+  // Kind rule: outcome and key both allow it; only the kind decides.
+  it("drops the node when the kind does not name one", () => {
+    for (const structure_kind of ["unexpected_code_structure", undefined, "bogus"]) {
+      const clean = sanitizeUnchecked("run_result", { ...structureOk, structure_kind });
+      expect(clean).not.toHaveProperty("structure_node");
+      expect(clean).toMatchObject({ syntax_key: "structure" });
+    }
+    expect(
+      sanitizeUnchecked("run_result", {
+        ...structureOk,
+        structure_kind: "unexpected_code_structure",
+      }),
+    ).toMatchObject({ structure_kind: "unexpected_code_structure" });
+  });
+
+  /**
+   * The worker's membership test is the guarantee; the shape here is a
+   * backstop that `ZSECRET` passes. What it must still stop is anything that
+   * is not a single upper-case identifier.
+   */
+  it("does not pretend the structure node pattern is the privacy guarantee", () => {
+    expect(
+      sanitizeUnchecked("run_result", { ...structureOk, structure_node: "ZSECRET" }),
+    ).toHaveProperty("structure_node", "ZSECRET");
+    for (const structure_node of [
+      "EndIf",
+      "lv_password",
+      "END-IF",
+      "ENDIF WRITE",
+      "Expected ENDIF",
+      "A".repeat(41),
+      "",
+    ]) {
+      expect(
+        sanitizeUnchecked("run_result", { ...structureOk, structure_node }),
+      ).not.toHaveProperty("structure_node");
+    }
+  });
+
+  /**
    * The two sets of diagnostics are mutually exclusive by construction, so a
    * caller holding both is already confused. Whichever outcome it claims, only
    * that outcome's parameters survive — the strip runs in both directions.
@@ -552,6 +645,25 @@ describe("track", () => {
     // @ts-expect-error deliberately passing source code to prove it is stripped
     track("run_click", { line_count: 4, source: "REPORT z.\nWRITE 'x'." });
     expect(gtag).toHaveBeenCalledWith("event", "run_click", { line_count: 4 });
+  });
+
+  it("hands the structure diagnostics of a run_result to gtag", () => {
+    track("run_result", {
+      outcome: "syntax_error",
+      duration_ms: 12,
+      syntax_key: "structure",
+      syntax_error_count: 1,
+      structure_kind: "expected",
+      structure_node: "ENDMETHOD",
+    });
+    expect(gtag).toHaveBeenCalledWith("event", "run_result", {
+      outcome: "syntax_error",
+      duration_ms: 12,
+      syntax_key: "structure",
+      syntax_error_count: 1,
+      structure_kind: "expected",
+      structure_node: "ENDMETHOD",
+    });
   });
 
   it("does nothing when gtag is unavailable", () => {

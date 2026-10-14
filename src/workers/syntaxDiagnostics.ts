@@ -27,7 +27,7 @@
  * reporting. We lose detail; we never leak source.
  */
 import { ArtifactsRules, Statements } from "@abaplint/core";
-import type { SyntaxDiagnostics } from "../types/diagnostics";
+import type { StructureKind, SyntaxDiagnostics } from "../types/diagnostics";
 
 /**
  * Keys abaplint attaches to issues it builds outside its rule classes. There
@@ -117,6 +117,75 @@ function unparsedToken(message: string): string | undefined {
   return UNKNOWN_STATEMENT.exec(message)?.[1];
 }
 
+/**
+ * Statement classes outside `Statements` that a structure message can name.
+ * They live in abaplint's `_statement.ts` next to `Unknown`, `Comment` and
+ * `Empty`, which the structure parser drops before matching and so never
+ * appear in a message. `MacroRecursion` is not exported from @abaplint/core at
+ * all, so these are spelled out rather than imported. The tests in
+ * syntaxDiagnostics.test.ts fail if this list stops being exactly what the
+ * structure matchers use beyond `Statements`.
+ */
+const NON_EXPORTED_STATEMENT_CLASSES: readonly string[] = [
+  "MACROCALL",
+  "MACROCONTENT",
+  "MACRORECURSION",
+  "NATIVESQL",
+];
+
+/**
+ * The third closed set in this file: every statement class name a `structure`
+ * message can carry, upper-cased the way abaplint prints it.
+ *
+ * abaplint's structure check builds exactly three sentences —
+ * `Expected <X>`, `Unexpected <X>` and `Unexpected code structure` — and `<X>`
+ * is `constructor.name.toUpperCase()` of a statement class. Nothing of the
+ * user's source is interpolated, but that is an observation about today's
+ * abaplint, not a guarantee, so the name travels only after a membership test
+ * against this set, which is built from the export names and cannot be
+ * extended by the user. Same shape of argument as `transpile_node`, and the
+ * same failure direction: a class name that drifts from the set stops being
+ * reported while the kind keeps reporting. In practice that means an
+ * @abaplint/core bump renamed a class — losing `keepNames` would not show up
+ * here, because the worker then dies on boot (see CLAUDE.md). No two of the
+ * 317 export names collide once upper-cased, so the fold loses nothing.
+ */
+export const STRUCTURE_NODES: ReadonlySet<string> = new Set([
+  ...Object.keys(Statements).map((name) => name.toUpperCase()),
+  ...NON_EXPORTED_STATEMENT_CLASSES,
+]);
+
+/** True if `name` is an upper-cased statement class a structure message can name. */
+export function isKnownStructureNode(name: string): boolean {
+  return STRUCTURE_NODES.has(name);
+}
+
+/**
+ * Anchored at both ends and upper-case only, because that is exactly what
+ * abaplint emits — anything else is not one of its sentences and reports
+ * nothing. `Unexpected code structure` cannot match: it contains spaces.
+ */
+const NAMED_STRUCTURE = /^(Expected|Unexpected) ([A-Z][A-Z0-9]*)$/;
+const UNEXPECTED_CODE_STRUCTURE = "Unexpected code structure";
+
+function classifyStructure(
+  message: string,
+): { structureKind?: StructureKind; structureNode?: string } {
+  if (message === UNEXPECTED_CODE_STRUCTURE) {
+    return { structureKind: "unexpected_code_structure" };
+  }
+  const named = NAMED_STRUCTURE.exec(message);
+  if (named === null) return {};
+  const name = named[2];
+  return {
+    structureKind: named[1] === "Expected" ? "expected" : "unexpected",
+    // An unknown name drops the node and keeps the kind: with the coverage
+    // tests green, the only way here is abaplint renaming a class, and a kind
+    // with no node is then the visible sign of it.
+    structureNode: isKnownStructureNode(name) ? name : undefined,
+  };
+}
+
 /** True if `key` is one abaplint can attach to an issue. */
 export function isKnownRuleKey(key: string): boolean {
   return RULE_KEYS.has(key);
@@ -149,6 +218,12 @@ export function classifySyntaxError(
     // abaplint enumerates. Widening this to them is #56's problem, not a
     // one-line change here.
     statement: key === "parser_error" ? knownKeyword(firstMessage) : undefined,
+    // `structure` only, the issue the user is shown. The node is the closing
+    // statement abaplint expected next or the statement it did not expect —
+    // not the block the user left open (an IF left open inside a METHOD
+    // reports ENDMETHOD), and a broken closing statement such as `ENDFI.` is
+    // dropped as a parser_error first and reads the same as a missing one.
+    ...(key === "structure" ? classifyStructure(firstMessage) : {}),
   };
 }
 
