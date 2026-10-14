@@ -147,8 +147,9 @@ export interface SyntaxDiagnostics {
    * The statement class named by an `expected` or `unexpected` message,
    * upper-cased as abaplint prints it (`ENDIF`, `ENDMETHOD`,
    * `METHODIMPLEMENTATION`). A class name, not a keyword, so it is not the
-   * vocabulary of `statement`. Present only when it is a member of the set of
-   * statement classes abaplint exports — that test is the privacy guarantee.
+   * vocabulary of `statement`. Present only when it is a member of the class
+   * names `Statements` exports — that test is the privacy guarantee. The four
+   * macro / native-SQL classes outside `Statements` report the kind alone.
    *
    * It is the statement abaplint expected or did not expect, not the block
    * the user left open: forgetting an ENDIF inside a METHOD reports

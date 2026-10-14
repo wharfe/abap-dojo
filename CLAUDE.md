@@ -544,11 +544,12 @@ the report; and a *new value* of `syntax_key` needs no GA4 change, while a new
 Privacy is the `transpile_node` argument again. abaplint builds the name from
 `constructor.name`, not from the source, but that is an observation, not the
 guarantee: the name travels only if it is a member of `Statements`' export
-names upper-cased, plus the four statement classes the structure matchers use
-without `Statements` exporting them (`MACROCALL`, `MACROCONTENT`,
-`MACRORECURSION`, `NATIVESQL`). A test walks every exported structure and fails
-if that list stops being exactly what is missing. `STRUCTURE_NODE` in
-`analytics.ts` is a shape backstop — `ZSECRET` satisfies it.
+names upper-cased, and nothing else. A structure can also name four classes
+`Statements` does not export (`MACROCALL`, `MACROCONTENT`, `MACRORECURSION`,
+`NATIVESQL`); those send the kind with no node, like any other unknown name.
+A test walks every exported structure and fails if that outside list changes.
+`STRUCTURE_NODE` in `analytics.ts` is a shape backstop — `ZSECRET` satisfies
+it.
 
 **Three things the node does not tell you:**
 
@@ -566,9 +567,10 @@ if that list stops being exactly what is missing. `STRUCTURE_NODE` in
    block with a semicolon on some other row reports `structure` and
    `semicolon` too, because the repair is accepted on whichever row it fixed.
    `syntax_error_count > 1` is a weaker sign still.
-3. **A kind of `expected`/`unexpected` with no node means abaplint renamed a
-   statement class** (the coverage test should have caught it on the bump),
-   not a residue to be emptied.
+3. **A kind of `expected`/`unexpected` with no node is one of two things**: a
+   macro or native-SQL statement (the four classes above), or a statement
+   class abaplint renamed (the coverage test should have caught it on the
+   bump). Neither is a residue to be emptied.
 
 The usual traps apply: filter by `outcome = syntax_error` **and**
 `syntax_key = structure`, or `(not set)` dominates.

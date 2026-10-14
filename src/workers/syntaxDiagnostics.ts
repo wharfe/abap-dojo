@@ -118,24 +118,8 @@ function unparsedToken(message: string): string | undefined {
 }
 
 /**
- * Statement classes outside `Statements` that a structure message can name.
- * They live in abaplint's `_statement.ts` next to `Unknown`, `Comment` and
- * `Empty`, which the structure parser drops before matching and so never
- * appear in a message. `MacroRecursion` is not exported from @abaplint/core at
- * all, so these are spelled out rather than imported. The tests in
- * syntaxDiagnostics.test.ts fail if this list stops being exactly what the
- * structure matchers use beyond `Statements`.
- */
-const NON_EXPORTED_STATEMENT_CLASSES: readonly string[] = [
-  "MACROCALL",
-  "MACROCONTENT",
-  "MACRORECURSION",
-  "NATIVESQL",
-];
-
-/**
- * The third closed set in this file: every statement class name a `structure`
- * message can carry, upper-cased the way abaplint prints it.
+ * The third closed set in this file: the statement class names `Statements`
+ * exports, upper-cased the way a `structure` message prints them.
  *
  * abaplint's structure check builds exactly three sentences —
  * `Expected <X>`, `Unexpected <X>` and `Unexpected code structure` — and `<X>`
@@ -144,18 +128,23 @@ const NON_EXPORTED_STATEMENT_CLASSES: readonly string[] = [
  * abaplint, not a guarantee, so the name travels only after a membership test
  * against this set, which is built from the export names and cannot be
  * extended by the user. Same shape of argument as `transpile_node`, and the
- * same failure direction: a class name that drifts from the set stops being
- * reported while the kind keeps reporting. In practice that means an
- * @abaplint/core bump renamed a class — losing `keepNames` would not show up
- * here, because the worker then dies on boot (see CLAUDE.md). No two of the
- * 317 export names collide once upper-cased, so the fold loses nothing.
+ * same failure direction: a name outside the set is not reported while the
+ * kind keeps reporting. No two of the 317 export names collide once
+ * upper-cased, so the fold loses nothing.
+ *
+ * It is `Statements` and nothing else, on purpose. A structure can also name
+ * four classes `Statements` does not export — `MacroCall`, `MacroContent`,
+ * `MacroRecursion`, `NativeSQL` — and those travel as a kind with no node,
+ * like any other name outside the set; syntaxDiagnostics.test.ts pins that
+ * list, so a core bump that adds to it fails there. Otherwise a kind with no
+ * node means a core bump renamed a class — losing `keepNames` would not show
+ * up here, because the worker then dies on boot (see CLAUDE.md).
  */
-export const STRUCTURE_NODES: ReadonlySet<string> = new Set([
-  ...Object.keys(Statements).map((name) => name.toUpperCase()),
-  ...NON_EXPORTED_STATEMENT_CLASSES,
-]);
+export const STRUCTURE_NODES: ReadonlySet<string> = new Set(
+  Object.keys(Statements).map((name) => name.toUpperCase()),
+);
 
-/** True if `name` is an upper-cased statement class a structure message can name. */
+/** True if `name` is an upper-cased class name `Statements` exports. */
 export function isKnownStructureNode(name: string): boolean {
   return STRUCTURE_NODES.has(name);
 }
@@ -179,9 +168,9 @@ function classifyStructure(
   const name = named[2];
   return {
     structureKind: named[1] === "Expected" ? "expected" : "unexpected",
-    // An unknown name drops the node and keeps the kind: with the coverage
-    // tests green, the only way here is abaplint renaming a class, and a kind
-    // with no node is then the visible sign of it.
+    // An unknown name drops the node and keeps the kind: one of the four
+    // macro / native-SQL classes outside `Statements`, or — with the coverage
+    // test green — a class abaplint renamed.
     structureNode: isKnownStructureNode(name) ? name : undefined,
   };
 }

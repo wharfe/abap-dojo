@@ -576,18 +576,15 @@ describe("structure_kind / structure_node", () => {
   });
 
   /**
-   * The runtime set is `Statements` plus four names the structure matchers
-   * reference without `Statements` exporting them. This walks every structure
-   * abaplint exports and checks the set covers every statement class an
-   * `Expected` message can name, and that the four extras are EXACTLY what is
-   * missing — so a core bump that adds, drops or renames one fails here
-   * instead of turning into a bucket that is permanently `(not set)`.
-   *
-   * `Unexpected` names whatever class the statement parser produced: a
-   * `Statements` class or one of abaplint's `_statement.ts` classes. The test
-   * after this one covers the latter.
+   * The runtime set is exactly `Statements`' export names, upper-cased. This
+   * walks every structure abaplint exports and checks that every statement
+   * class an `Expected` message can name from `Statements` is in it, and that
+   * the names a structure can reference from OUTSIDE `Statements` are exactly
+   * the four macro / native-SQL classes — so a core bump that adds one more
+   * fails here, where someone decides whether it may travel, instead of
+   * silently turning into a kind with no node.
    */
-  it("covers every statement class a structure can expect", () => {
+  it("covers every Statements class a structure can expect, and names the rest", () => {
     const referenced = new Set(
       Object.values(Structures).flatMap((Structure) =>
         new Structure()
@@ -598,40 +595,51 @@ describe("structure_kind / structure_node", () => {
       ),
     );
     expect(referenced.size).toBeGreaterThan(300);
+    const outsideStatements: string[] = [];
     for (const name of referenced) {
-      expect(isKnownStructureNode(name.toUpperCase()), name).toBe(true);
+      if (name in Statements) {
+        expect(isKnownStructureNode(name.toUpperCase()), name).toBe(true);
+      } else {
+        outsideStatements.push(name);
+      }
     }
-    const outsideStatements = [...referenced]
-      .filter((name) => !(name in Statements))
-      .sort();
-    expect(outsideStatements).toEqual([
-      "MacroCall",
-      "MacroContent",
-      "MacroRecursion",
-      "NativeSQL",
-    ]);
+    expect(outsideStatements.sort()).toEqual(OUTSIDE_STATEMENTS);
   });
 
   /**
-   * The `_statement.ts` classes the statement parser can produce outside
-   * `Statements`. `Unknown`, `Comment` and `Empty` never reach a message —
-   * the structure parser drops them before matching — and the rest are the
-   * four extras, three of them exported at the top level (`MacroRecursion` is
-   * not, and is covered by the walk above).
+   * The four classes a structure message can name that `Statements` does not
+   * export. The set is `Statements`' export names and nothing else, so these
+   * travel as a kind with no node — the same as any other unknown name.
+   * `Unknown`, `Comment` and `Empty` are the other `_statement.ts` classes;
+   * the structure parser drops them before matching, so they never appear in
+   * a message, and they are not in the set either.
    */
-  it("covers the statement classes the parser produces outside Statements", () => {
+  const OUTSIDE_STATEMENTS = ["MacroCall", "MacroContent", "MacroRecursion", "NativeSQL"];
+
+  it("sends a kind but no node for a class Statements does not export", () => {
+    for (const name of OUTSIDE_STATEMENTS) {
+      const upper = name.toUpperCase();
+      expect(isKnownStructureNode(upper), upper).toBe(false);
+      for (const kind of ["Expected", "Unexpected"] as const) {
+        const d = classifySyntaxError("structure", 1, `${kind} ${upper}`);
+        expect(d.structureKind, `${kind} ${upper}`).toBe(kind.toLowerCase());
+        expect(d.structureNode, `${kind} ${upper}`).toBeUndefined();
+      }
+    }
+    // Three of the four are exported at @abaplint/core's top level; being
+    // exported somewhere is not the test, membership in `Statements` is.
     for (const Statement of [MacroCall, MacroContent, NativeSQL]) {
-      expect(isKnownStructureNode(Statement.name.toUpperCase()), Statement.name).toBe(true);
+      expect(isKnownStructureNode(Statement.name.toUpperCase()), Statement.name).toBe(false);
     }
     for (const Statement of [Unknown, Comment, Empty]) {
       expect(isKnownStructureNode(Statement.name.toUpperCase()), Statement.name).toBe(false);
     }
   });
 
-  it("only admits upper-cased statement class names", () => {
+  it("only admits upper-cased Statements class names", () => {
     expect(isKnownStructureNode("ENDIF")).toBe(true);
     expect(isKnownStructureNode("METHODIMPLEMENTATION")).toBe(true);
-    expect(isKnownStructureNode("MACRORECURSION")).toBe(true);
+    expect(isKnownStructureNode("MACRORECURSION")).toBe(false);
     expect(isKnownStructureNode("EndIf")).toBe(false);
     expect(isKnownStructureNode("ZSECRET")).toBe(false);
     expect(isKnownStructureNode("")).toBe(false);

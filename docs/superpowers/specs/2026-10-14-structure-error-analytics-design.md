@@ -38,7 +38,7 @@ GA4 側の既存機能（イベントパラメータ）以外に流用できる�
 | # | 問い | 決定 |
 |---|---|---|
 | 1 | 何を送るか | `structure_kind`（enum: `expected` / `unexpected` / `unexpected_code_structure`）と `structure_node`（大文字の文クラス名） |
-| 2 | 照合する集合 | `Object.keys(Statements)` を大文字化した集合 + 文字列固定の `MACROCALL` `MACROCONTENT` `MACRORECURSION` `NATIVESQL`（Structures の matcher が参照するのに `Statements` に無い 4 個。`MacroRecursion` は top-level export も無い）。網羅はテストで Structures の matcher を辿って保証し、実行時には辿らない |
+| 2 | 照合する集合 | `Object.keys(Statements)` を大文字化した集合**だけ**。Structures の matcher が参照するのに `Statements` に無い 4 個（`MACROCALL` `MACROCONTENT` `MACRORECURSION` `NATIVESQL`）は集合に入れず、kind だけ送り node は送らない（承認済みの受入条件「export 集合との membership」を広げないため。PR #90 の独立確認で訂正）。4 個の一覧はテストで Structures の matcher を辿って固定し、実行時には辿らない |
 | 3 | 送る値の形 | 画面と同じ大文字形。`has` で集合の要素と一致を確かめた文字列だけ |
 | 4 | 未知の値 | 文面が 3 形のどれにも完全一致しなければ両方なし。`Expected`/`Unexpected` で名前が集合外なら kind だけ送り node はなし |
 | 5 | 範囲 | `errors[0].getKey() === "structure"` のときだけ（worker の classifier と analytics の `refine` の両方で強制）。outcome は `syntax_error` 限定 |
@@ -82,5 +82,5 @@ GA4 側の既存機能（イベントパラメータ）以外に流用できる�
 - `refine` の順序: key 規則（`syntax_key ≠ structure` なら kind を消す）→ kind 規則（kind が expected/unexpected 以外なら node を消す。key 規則で kind が消えた node もここで消える）→ outcome 規則。key 規則が node を直接消さないのは、各規則を単独で外したときにどれが効いていたかをテストで区別するため（Gate3 で実装に合わせて訂正）。
 - 入口表に追加: `src/workers/abaplintWorker.ts:96-113`（classifier が throw すると syntax_error が transpile_error に化ける → 任意の文字列で throw しないテスト）、`src/App.tsx:482-493`（`isSyntax` での振り分け）。
 - 不変条件 5 は「kind が expected/unexpected で node が無い場合」に限定し、原因は「abaplint 更新による名前のずれ」とする（keepNames 喪失は worker 起動失敗として現れるので node 欠落にはならない）。e2e の価値は「本番 worker バンドルで分類と運搬が通ること」。
-- 網羅テストは `getUsing()` で集めた名前のうち `Statements` に無いものが固定 4 個と**一致**することを確かめる。`Unexpected` 側の語彙は公開 API では網羅できない旨をコメントに書く。
+- 網羅テストは `getUsing()` で集めた名前のうち `Statements` に無いものが固定 4 個と**一致**することを確かめる。この 4 個は集合外として扱う（kind のみ、node なし）。
 - GA4 登録は本番管理画面での人手の操作。ユーザーの明示許可の下で、マージ前に行う手順として PR に書く。
