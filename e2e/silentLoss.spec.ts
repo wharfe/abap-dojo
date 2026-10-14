@@ -59,7 +59,7 @@ test("a partly eaten chain still prints what survived, and says so", async ({
 
   // `a` is written and `b` is not — the shape that makes "the run produced no
   // output" useless as a trigger.
-  await expect(page.getByText(/^a$/m)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("output-line").filter({ hasText: /^a$/ })).toBeVisible({ timeout: 30_000 });
   // The hint follows on its own message now, so it can land after the output
   // it annotates. Give it the same budget as the run.
   await expect(page.getByText(HINT)).toBeVisible({ timeout: 30_000 });
