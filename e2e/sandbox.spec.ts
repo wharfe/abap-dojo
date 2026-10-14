@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { typeProgram } from "./helpers";
+import { openProgram } from "./helpers";
 
 /**
  * Poll the page with a SHORT per-call timeout. This is the whole trick: a
@@ -32,16 +32,8 @@ async function stayedResponsive(page: Page, seconds: number): Promise<boolean> {
   return true;
 }
 
-test("an endless loop does not freeze the tab", async ({ page, browserName }) => {
-  // On WebKit, the *transpile* worker (a different worker from the execution
-  // sandbox this suite is about) never replies for this program, and the run
-  // never reaches the sandbox at all — see #47. Without a fix, "the tab stays
-  // responsive" would be true here for the wrong reason (nothing is running),
-  // which is worse than not testing it.
-  test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
-
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nDO.\nENDDO.");
+test("an endless loop does not freeze the tab", async ({ page }) => {
+  await openProgram(page, "REPORT ztest.\nDO.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
   // The watchdog is 15s; give it room and keep checking that the renderer is
@@ -49,16 +41,8 @@ test("an endless loop does not freeze the tab", async ({ page, browserName }) =>
   expect(await stayedResponsive(page, 18)).toBe(true);
 });
 
-test("an endless loop still produces a terminal result", async ({ page, browserName }) => {
-  // See #47: the transpile worker itself stalls on WebKit for this program,
-  // well before the execution sandbox this suite exercises is ever reached.
-  // Confirmed pre-existing (reproduces identically on the commit before the
-  // blob:-Worker-in-iframe rework this suite tests), so it's tracked
-  // separately rather than gating this task's e2e coverage.
-  test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
-
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nDO.\nENDDO.");
+test("an endless loop still produces a terminal result", async ({ page }) => {
+  await openProgram(page, "REPORT ztest.\nDO.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
   // The run must end on its own: the Run button becomes usable again. The
@@ -74,22 +58,22 @@ test("an endless loop still produces a terminal result", async ({ page, browserN
 });
 
 test("an ordinary program still runs and prints", async ({ page }) => {
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nWRITE 'hello from e2e'.");
+  await openProgram(page, "REPORT ztest.\nWRITE 'hello from e2e'.");
+  // Pressed at once, on purpose: openProgram leaves the page still booting,
+  // and a Run that beat the worker's idle boot used to post to no worker at
+  // all (#47). Before the fix this failed 7 of 10 full-suite runs on WebKit.
   await page.getByRole("button", { name: /Run/i }).click();
-  await expect(page.getByText("hello from e2e")).toBeVisible({
+  // Scoped to the output for the reason given in the next test: the editor
+  // shows the source, and "hello from e2e" is in it.
+  await expect(
+    page.getByTestId("output-line").filter({ hasText: "hello from e2e" }),
+  ).toBeVisible({
     timeout: 30_000,
   });
 });
 
-test("output written before a timeout is still shown", async ({ page, browserName }) => {
-  // See #47: the transpile worker itself stalls on WebKit for an endless-loop
-  // program, well before the execution sandbox this test exercises. Same
-  // pre-existing, unrelated bug as the other two skipped cases above.
-  test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
-
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
+test("output written before a timeout is still shown", async ({ page }) => {
+  await openProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
   // page.getByText("tick") alone is not safe here: the literal source the
@@ -104,18 +88,8 @@ test("output written before a timeout is still shown", async ({ page, browserNam
   ).toBeVisible({ timeout: 10_000 });
 });
 
-test("the user can stop an endless loop immediately", async ({
-  page,
-  browserName,
-}) => {
-  // See #47: the transpile worker itself stalls on WebKit for an endless-loop
-  // program, well before the execution sandbox (and its Stop button) this
-  // test exercises. Same pre-existing, unrelated bug as the other skipped
-  // cases above.
-  test.skip(browserName === "webkit", "pre-existing WebKit transpile stall, see #47");
-
-  await page.goto("/");
-  await typeProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
+test("the user can stop an endless loop immediately", async ({ page }) => {
+  await openProgram(page, "REPORT ztest.\nDO.\nWRITE 'tick'.\nENDDO.");
   await page.getByRole("button", { name: /Run/i }).click();
 
   // Wait for at least one output flush before stopping, so this test proves

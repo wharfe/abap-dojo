@@ -15,6 +15,12 @@ export interface LintIssue {
   endLine: number;
   endCol: number;
   severity: "error" | "warning" | "info";
+  /**
+   * The issue's position is not where the problem is: abaplint pins some
+   * structure errors to (1,1) wherever the mistake is (#72). The editor still
+   * marks (1,1), because a marker needs a line; the lists print no line.
+   */
+  positionUnknown?: true;
 }
 
 // Worker messages

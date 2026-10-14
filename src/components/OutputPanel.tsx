@@ -1,4 +1,5 @@
 import type { LintIssue } from "../types/messages";
+import { issuePosition } from "../utils/issuePosition";
 
 type Tab = "output" | "lint";
 
@@ -156,7 +157,7 @@ export function OutputPanel({
               <ul className="space-y-1">
                 {lintIssues.map((issue, i) => (
                   <li key={i} className={SEVERITY_STYLES[issue.severity]}>
-                    {SEVERITY_ICONS[issue.severity]} L{issue.startLine}:{issue.startCol}{" "}
+                    {SEVERITY_ICONS[issue.severity]} {issuePosition(issue)}
                     [{issue.key}] {issue.message}
                   </li>
                 ))}

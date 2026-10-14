@@ -223,6 +223,10 @@ function App() {
 
   const sandboxRef = useRef<ExecutionSandboxHandle>(null);
 
+  // The abaplint worker, booted now if the idle boot has not happened yet. Set
+  // by the boot effect below; see the note there for why Run cannot wait.
+  const bootWorkerRef = useRef<() => Worker | null>(() => appWorker);
+
   // Deadlock breakers for the worker round trip — one per mode. Each is armed
   // when its own run/validation is posted and disarmed the moment the worker
   // answers or the sandbox takes over (the sandbox has a watchdog of its own
@@ -578,22 +582,35 @@ function App() {
   // Boot the abaplint worker once the browser is idle. Creating it during mount
   // meant parsing 1.8 MB of JavaScript before the page could respond to input,
   // and nothing needs the worker until the first lint result appears.
+  //
+  // Run and Validate do not wait for that idle moment: they boot it on the spot
+  // through `bootWorkerRef`. Posting to a worker that did not exist yet sent
+  // nothing at all, and 20s later the watchdog told the user the engine had
+  // stopped responding (#47). Safari has no requestIdleCallback, so its boot
+  // waits on a 200ms timer; measured in Playwright's WebKit under load, a Run
+  // clicked ~130ms after load beat a worker created at ~290ms.
   useEffect(() => {
     let worker: Worker | null = null;
 
-    const cancel = scheduleIdle(() => {
+    const boot = (): Worker => {
+      if (worker) return worker;
       worker = new AbaplintWorker();
       appWorker = worker;
       attachWorkerHandlers(worker);
       // Lint whatever is on screen now: the mount-time lint had no worker to
       // post to, so without this the first result would wait for a keystroke.
       debouncedLint(sourceRef.current);
-    });
+      return worker;
+    };
+    bootWorkerRef.current = boot;
+
+    const cancel = scheduleIdle(boot);
 
     return () => {
       cancel();
       worker?.terminate();
       if (appWorker === worker) appWorker = null;
+      bootWorkerRef.current = () => appWorker;
       window.clearTimeout(followUpTimerRef.current);
     };
   }, [attachWorkerHandlers]);
@@ -782,7 +799,7 @@ function App() {
     setSearchState("pending");
     setSilentLossHint(null);
     track("run_click", { line_count: lineCount(source) });
-    appWorker?.postMessage({ type: "transpile", source, requestId });
+    bootWorkerRef.current()?.postMessage({ type: "transpile", source, requestId });
     // Nothing else can end the run until the worker replies (or the sandbox
     // takes over), so guarantee an exit even if it never does.
     disarmPlaygroundWatchdog();
@@ -825,7 +842,7 @@ function App() {
       transpile: { status: "pending" },
       runtime: { status: "pending" },
     });
-    appWorker?.postMessage({ type: "validate", source });
+    bootWorkerRef.current()?.postMessage({ type: "validate", source });
     disarmValidationWatchdog();
     validationWatchdogRef.current = window.setTimeout(() => {
       endValidationRuntime({

@@ -12,6 +12,7 @@ import { detectPitfalls } from "../rules/detector";
 import { pitfallToLintIssue } from "../rules/pitfallToLintIssue";
 import { classifyTranspileError } from "./transpileDiagnostics";
 import { classifySyntaxError } from "./syntaxDiagnostics";
+import { explainStructureIssue } from "./structureExplanation";
 import {
   errorCounter,
   statementScorer,
@@ -50,10 +51,21 @@ function mapSeverity(s: string): LintIssue["severity"] {
   return "info";
 }
 
+/** The explanation for a structure issue abaplint pins to (1,1), or null. */
+function explanationOf(issue: Issue): string | null {
+  const start = issue.getStart();
+  return explainStructureIssue(
+    issue.getKey(),
+    issue.getMessage(),
+    start.getRow(),
+    start.getCol(),
+  );
+}
+
 function issueToLintIssue(issue: Issue): LintIssue {
   const start = issue.getStart();
   const end = issue.getEnd();
-  return {
+  const base: LintIssue = {
     message: issue.getMessage(),
     key: issue.getKey(),
     startLine: start.getRow(),
@@ -61,6 +73,19 @@ function issueToLintIssue(issue: Issue): LintIssue {
     endLine: end.getRow(),
     endCol: end.getCol(),
     severity: mapSeverity(issue.getSeverity().toString()),
+  };
+  const explanation = explanationOf(issue);
+  if (explanation === null) return base;
+  // The editor needs a line for its marker, so it stays where abaplint put
+  // it; but the issue's own end runs to the end of the first statement, and
+  // underlining all of that would point at line 1 as surely as the old
+  // message did.
+  return {
+    ...base,
+    message: explanation,
+    endLine: base.startLine,
+    endCol: base.startCol + 1,
+    positionUnknown: true,
   };
 }
 
@@ -171,11 +196,28 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
     const errors = errorIssues(issues);
     if (errors.length > 0) {
       const first = errors[0];
+      // A structure issue pinned to (1,1) gets its explanation and no line:
+      // the line would only send the user to look at line 1 (#72). It is
+      // often a consequence of a later error that does have a line (a missing
+      // period on ENDIF), so that one is named too — otherwise it would only
+      // ever be visible on the Lint tab.
+      const explanation = explanationOf(first);
+      const located =
+        explanation === null
+          ? undefined
+          : errors.find((e) => explanationOf(e) === null);
       postVerdict("syntax", {
         type: "transpile-error",
         kind: "syntax",
-        message: first.getMessage(),
-        line: first.getStart().getRow(),
+        ...(explanation === null
+          ? { message: first.getMessage(), line: first.getStart().getRow() }
+          : {
+              message:
+                located === undefined
+                  ? explanation
+                  : `${explanation} The next error abaplint reports is on ` +
+                    `line ${located.getStart().getRow()}: ${located.getMessage()}`,
+            }),
         // The message above is what the user reads and it embeds their source;
         // this is the half we are allowed to count. `first` is deliberately the
         // same issue in both, so the metric can be checked against the screen.

@@ -15,12 +15,11 @@ import { defineConfig, devices } from "@playwright/test";
  * engine-specific behaviour, and Chromium-only coverage cannot rule out Run
  * being entirely broken (`load_error`) on WebKit or Firefox.
  *
- * One suite opts out of WebKit — `e2e/syntaxHint.spec.ts`, whose every test
- * needs a run to reach a terminal result, which WebKit does not do reliably
- * (#47: the transpile worker intermittently never answers). The policy above
- * is still served: `sandbox.spec.ts` is the suite that would catch Run being
- * broken outright, and it still runs on all three. Prefer a per-file opt-out
- * with its issue number over dropping an engine here.
+ * No suite opts out of an engine. Every WebKit opt-out there used to be was
+ * #47, which turned out not to be WebKit at all: a Run pressed before the
+ * abaplint worker's idle boot posted to no worker. WebKit merely boots later
+ * (no requestIdleCallback). If an engine has to be dropped from a test again,
+ * prefer a per-test opt-out with its issue number over dropping it here.
  */
 export default defineConfig({
   testDir: "./e2e",
