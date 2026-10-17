@@ -16,6 +16,7 @@ export function matchPythonLoopPattern(registry: Registry): PitfallMatch[] {
       if (!structure) continue;
 
       const allStatements = structure.findAllStatementNodes();
+      const fileStart = matches.length;
       let loopDepth = 0;
       let loopStartStmt: (typeof allStatements)[0] | null = null;
       let foundTabix = false;
@@ -60,18 +61,31 @@ export function matchPythonLoopPattern(registry: Registry): PitfallMatch[] {
         }
       }
 
-      matches.push(...matchIndexedReadInLoop(allStatements, rule));
+      // A block that is both (a DO inside a LOOP, or the reverse) is one
+      // finding: keep the LOOP report and drop the overlapping DO/WHILE one.
+      const loops = matches.slice(fileStart);
+      for (const m of matchIndexedReadInLoop(allStatements, rule)) {
+        const overlaps = loops.some(
+          (l) => m.startLine <= l.endLine && l.startLine <= m.endLine,
+        );
+        if (!overlaps) matches.push(m);
+      }
     }
   }
 
-  return matches;
+  return matches.sort(
+    (a, b) => a.startLine - b.startLine || a.startCol - b.startCol,
+  );
 }
 
 /**
  * The shape the pitfall page shows: `for i in range(len(xs))` written as
  * DO ... TIMES (or WHILE) around `READ TABLE ... INDEX <counter>` (#95).
- * A constant INDEX is a lookup, not iteration, so it does not count. Nested
- * blocks are reported once, spanning the outermost DO/WHILE.
+ * Only the loop's own counter counts: sy-index, or a variable the block
+ * steps by one (`x = x + 1`, `x += 1`, `ADD 1 TO x`). Any other INDEX - a
+ * constant, `lines( lt )` for a stack pop, a binary search's midpoint - is a
+ * lookup, not iteration. Nested blocks are reported once, spanning the
+ * outermost DO/WHILE.
  */
 function matchIndexedReadInLoop(
   statements: Nodes.StatementNode[],
@@ -80,14 +94,19 @@ function matchIndexedReadInLoop(
   const matches: PitfallMatch[] = [];
   let depth = 0;
   let blockStart: Nodes.StatementNode | null = null;
-  let found = false;
+  // Collected over the whole outermost block and judged at its end, because
+  // the counter is usually stepped after the READ that uses it.
+  let operands: string[][] = [];
+  let counters = new Set<string>();
 
   for (const stmt of statements) {
     const kind = stmt.get();
+    const tokens = stmt.getTokens().map((t) => t.getStr().toUpperCase());
     if (kind instanceof Statements.Do || kind instanceof Statements.While) {
       if (depth === 0) {
         blockStart = stmt;
-        found = false;
+        operands = [];
+        counters = new Set();
       }
       depth++;
     } else if (
@@ -95,6 +114,11 @@ function matchIndexedReadInLoop(
       kind instanceof Statements.EndWhile
     ) {
       depth--;
+      const found = operands.some(
+        (op) =>
+          op.join("").includes("SY-INDEX") ||
+          op.some((t) => counters.has(t)),
+      );
       if (depth === 0 && found && blockStart) {
         const start = blockStart.getFirstToken();
         const end = stmt.getLastToken();
@@ -113,8 +137,7 @@ function matchIndexedReadInLoop(
       }
     } else if (depth > 0 && kind instanceof Statements.ReadTable) {
       // INDEX as the statement's own keyword (a direct token child), not a
-      // field or table that happens to be called index; and its whole
-      // operand, so `1 + lv_i` and `lv_i + 1` are judged alike.
+      // field or table that happens to be called index.
       const children = stmt.getChildren();
       const at = children.findIndex(
         (c) =>
@@ -122,11 +145,32 @@ function matchIndexedReadInLoop(
           c.getFirstToken().getStr().toUpperCase() === "INDEX",
       );
       const operand = at === -1 ? undefined : children[at + 1];
-      if (operand && !/^\d+$/.test(operand.concatTokens())) {
-        found = true;
+      if (operand) {
+        // A bare token (INDEX 1) has no getTokens; concatTokens covers both.
+        operands.push(operand.concatTokens().toUpperCase().split(/\s+/));
       }
+    } else if (depth > 0) {
+      const counter = steppedCounter(kind, tokens);
+      if (counter) counters.add(counter);
     }
   }
 
   return matches;
+}
+
+/** The variable a statement increments by one, if that is all it does. */
+function steppedCounter(
+  kind: unknown,
+  t: string[],
+): string | undefined {
+  if (kind instanceof Statements.Add) {
+    // ADD 1 TO x .
+    return t.length === 5 && t[1] === "1" && t[2] === "TO" ? t[3] : undefined;
+  }
+  if (!(kind instanceof Statements.Move)) return undefined;
+  const [x] = t;
+  const body = t.slice(1, -1).join(" ");
+  return body === `= ${x} + 1` || body === "= 1 + " + x || body === "+ = 1"
+    ? x
+    : undefined;
 }

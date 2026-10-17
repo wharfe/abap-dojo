@@ -36,7 +36,10 @@ export function matchDynamicTyping(registry: Registry): PitfallMatch[] {
           const hasBegin = tokenStrs.includes("BEGIN");
           const hasEnd = tokenStrs.includes("END");
           if (!hasType && !hasLike && !hasBegin && !hasEnd) {
-            const firstToken = stmt.getFirstToken();
+            // The name, not the statement's first token: in a chain
+            // (`DATA: a TYPE i, b.`) that token is the chain's DATA, on the
+            // line where the chain starts.
+            const firstToken = tokens[1] ?? stmt.getFirstToken();
             const lastToken = stmt.getLastToken();
             matches.push({
               ruleId: rule.id,

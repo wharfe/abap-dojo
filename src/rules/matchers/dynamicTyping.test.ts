@@ -51,6 +51,14 @@ describe("matchDynamicTyping", () => {
     expect(matches.map((m) => m.startLine)).toEqual([2]);
   });
 
+  // From review: a chain member's first token is the chain's DATA, so the
+  // report landed on the chain's first line instead of the untyped name.
+  it("reports an untyped chain member at its own line", async () => {
+    const reg = await parseSource(`REPORT ztest.\nDATA: lv_a TYPE i,\n      lv_b.`);
+    const matches = matchDynamicTyping(reg);
+    expect(matches.map((m) => [m.startLine, m.endLine])).toEqual([[3, 3]]);
+  });
+
   it("ignores DATA: BEGIN OF structure declarations", async () => {
     const reg = await parseSource(
       `REPORT ztest.\nDATA: BEGIN OF ls_struct,\n        value TYPE i,\n      END OF ls_struct.`,
