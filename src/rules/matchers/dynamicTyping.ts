@@ -1,4 +1,4 @@
-import { Registry, ABAPObject } from "@abaplint/core";
+import { Registry, ABAPObject, Statements } from "@abaplint/core";
 import type { PitfallMatch } from "../../types/validation";
 import { getRuleById } from "../definitions";
 
@@ -23,7 +23,14 @@ export function matchDynamicTyping(registry: Registry): PitfallMatch[] {
 
         // DATA declaration without TYPE or LIKE keyword
         // Skip structure declarations (DATA: BEGIN OF ...)
-        if (tokenStrs[0] === "DATA" && tokenStrs.length >= 2) {
+        // The statement class, not the first token, decides: an inline
+        // declaration `DATA(x) = ...` also starts with DATA but is a Move,
+        // typed from its right-hand side (#95).
+        if (
+          stmt.get() instanceof Statements.Data &&
+          tokenStrs[0] === "DATA" &&
+          tokenStrs.length >= 2
+        ) {
           const hasType = tokenStrs.includes("TYPE");
           const hasLike = tokenStrs.includes("LIKE");
           const hasBegin = tokenStrs.includes("BEGIN");
