@@ -5,3 +5,8 @@
 @import "tailwindcss" source(none);
 
 @source "../public/docs/**/*.html";
+/* The landing pages at the root of public/ link this same stylesheet. Leaving
+   them out compiled away every class only they used (md:grid-cols-2,
+   space-y-3, border-blue-600, ...) and those pages rendered unstyled in
+   production. src/staticPages.test.ts now fails on any such class. */
+@source "../public/*.html";
