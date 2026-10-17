@@ -115,6 +115,37 @@ ENDDO.`);
       expect(matchPythonLoopPattern(reg).length).toBe(0);
     });
 
+    // From review: INDEX must be found as the statement's keyword, and its
+    // whole operand judged, not the first token after any "INDEX" string.
+    it("ignores a key field named index: WITH KEY index = 1", async () => {
+      const reg = await parseSource(`${header}DO 3 TIMES.
+READ TABLE lt_items INTO ls_item WITH KEY index = 1.
+ENDDO.`);
+      expect(matchPythonLoopPattern(reg).length).toBe(0);
+    });
+
+    it("ignores a table named index read at a constant INDEX", async () => {
+      const reg = await parseSource(`REPORT ztest.
+TYPES: BEGIN OF ty_item,
+         name TYPE string,
+       END OF ty_item.
+DATA index TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY.
+DATA ls_item TYPE ty_item.
+DO 3 TIMES.
+READ TABLE index INTO ls_item INDEX 1.
+ENDDO.`);
+      expect(matchPythonLoopPattern(reg).length).toBe(0);
+    });
+
+    it("detects INDEX 1 + lv_index the same as INDEX lv_index + 1", async () => {
+      for (const operand of ["1 + lv_index", "lv_index + 1"]) {
+        const reg = await parseSource(`${header}DO 3 TIMES.
+READ TABLE lt_items INTO ls_item INDEX ${operand}.
+ENDDO.`);
+        expect(matchPythonLoopPattern(reg).length, operand).toBe(1);
+      }
+    });
+
     it("ignores READ TABLE ... INDEX outside any loop", async () => {
       const reg = await parseSource(`${header}READ TABLE lt_items INTO ls_item INDEX lv_index.`);
       expect(matchPythonLoopPattern(reg).length).toBe(0);

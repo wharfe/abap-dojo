@@ -112,9 +112,17 @@ function matchIndexedReadInLoop(
         blockStart = null;
       }
     } else if (depth > 0 && kind instanceof Statements.ReadTable) {
-      const tokens = stmt.getTokens().map((t) => t.getStr().toUpperCase());
-      const at = tokens.indexOf("INDEX");
-      if (at !== -1 && !/^\d+$/.test(tokens[at + 1] ?? "")) {
+      // INDEX as the statement's own keyword (a direct token child), not a
+      // field or table that happens to be called index; and its whole
+      // operand, so `1 + lv_i` and `lv_i + 1` are judged alike.
+      const children = stmt.getChildren();
+      const at = children.findIndex(
+        (c) =>
+          c instanceof Nodes.TokenNode &&
+          c.getFirstToken().getStr().toUpperCase() === "INDEX",
+      );
+      const operand = at === -1 ? undefined : children[at + 1];
+      if (operand && !/^\d+$/.test(operand.concatTokens())) {
         found = true;
       }
     }
