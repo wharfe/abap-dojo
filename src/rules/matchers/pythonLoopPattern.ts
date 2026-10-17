@@ -65,8 +65,11 @@ export function matchPythonLoopPattern(registry: Registry): PitfallMatch[] {
       // finding: keep the LOOP report and drop the overlapping DO/WHILE one.
       const loops = matches.slice(fileStart);
       for (const m of matchIndexedReadInLoop(allStatements, rule)) {
+        // Compared with columns, so two separate blocks on one line both stay.
         const overlaps = loops.some(
-          (l) => m.startLine <= l.endLine && l.startLine <= m.endLine,
+          (l) =>
+            at(m.startLine, m.startCol) <= at(l.endLine, l.endCol) &&
+            at(l.startLine, l.startCol) <= at(m.endLine, m.endCol),
         );
         if (!overlaps) matches.push(m);
       }
@@ -77,6 +80,9 @@ export function matchPythonLoopPattern(registry: Registry): PitfallMatch[] {
     (a, b) => a.startLine - b.startLine || a.startCol - b.startCol,
   );
 }
+
+/** A source position as one comparable number. */
+const at = (line: number, col: number) => line * 1_000_000 + col;
 
 /**
  * The shape the pitfall page shows: `for i in range(len(xs))` written as
@@ -97,7 +103,7 @@ function matchIndexedReadInLoop(
   // Collected over the whole outermost block and judged at its end, because
   // the counter is usually stepped after the READ that uses it.
   let operands: string[][] = [];
-  let counters = new Set<string>();
+  let counters: string[][] = [];
 
   for (const stmt of statements) {
     const kind = stmt.get();
@@ -106,7 +112,7 @@ function matchIndexedReadInLoop(
       if (depth === 0) {
         blockStart = stmt;
         operands = [];
-        counters = new Set();
+        counters = [];
       }
       depth++;
     } else if (
@@ -116,8 +122,8 @@ function matchIndexedReadInLoop(
       depth--;
       const found = operands.some(
         (op) =>
-          op.join("").includes("SY-INDEX") ||
-          op.some((t) => counters.has(t)),
+          hasSequence(op, SY_INDEX) ||
+          counters.some((counter) => hasSequence(op, counter)),
       );
       if (depth === 0 && found && blockStart) {
         const start = blockStart.getFirstToken();
@@ -146,31 +152,60 @@ function matchIndexedReadInLoop(
       );
       const operand = at === -1 ? undefined : children[at + 1];
       if (operand) {
-        // A bare token (INDEX 1) has no getTokens; concatTokens covers both.
-        operands.push(operand.concatTokens().toUpperCase().split(/\s+/));
+        const opTokens =
+          operand instanceof Nodes.TokenNode
+            ? [operand.getFirstToken()]
+            : operand.getTokens();
+        operands.push(opTokens.map((t) => t.getStr().toUpperCase()));
       }
     } else if (depth > 0) {
       const counter = steppedCounter(kind, tokens);
-      if (counter) counters.add(counter);
+      if (counter) counters.push(counter);
     }
   }
 
   return matches;
 }
 
-/** The variable a statement increments by one, if that is all it does. */
-function steppedCounter(
-  kind: unknown,
-  t: string[],
-): string | undefined {
+/** abaplint splits `sy-index` into three tokens. */
+const SY_INDEX = ["SY", "-", "INDEX"];
+
+/** Tokens that join a name to the one before it: `ls-x`, `lo->x`, `lc=>x`. */
+const JOINERS = new Set(["-", "->", "=>"]);
+
+/**
+ * Whether `seq` occurs in `tokens` as a whole name: not the tail of a longer
+ * one (`ls_sy-index` is not sy-index) and not followed by a component.
+ */
+function hasSequence(tokens: string[], seq: string[]): boolean {
+  for (let i = 0; i + seq.length <= tokens.length; i++) {
+    if (!seq.every((s, k) => tokens[i + k] === s)) continue;
+    if (i > 0 && JOINERS.has(tokens[i - 1])) continue;
+    if (JOINERS.has(tokens[i + seq.length] ?? "")) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * The target a statement increments by one, as tokens, if that is all it
+ * does: `x = x + 1`, `x = 1 + x`, `x += 1`, `ADD 1 TO x`. Compared as whole
+ * token sequences, so a component like `ls-idx` is a counter too.
+ */
+function steppedCounter(kind: unknown, t: string[]): string[] | undefined {
+  const u = t.at(-1) === "." ? t.slice(0, -1) : t;
+  const same = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((x, i) => x === b[i]);
   if (kind instanceof Statements.Add) {
-    // ADD 1 TO x .
-    return t.length === 5 && t[1] === "1" && t[2] === "TO" ? t[3] : undefined;
+    return u[1] === "1" && u[2] === "TO" && u.length > 3 ? u.slice(3) : undefined;
   }
   if (!(kind instanceof Statements.Move)) return undefined;
-  const [x] = t;
-  const body = t.slice(1, -1).join(" ");
-  return body === `= ${x} + 1` || body === "= 1 + " + x || body === "+ = 1"
-    ? x
+  if (same(u.slice(-3), ["+", "=", "1"]) && u.length > 3) return u.slice(0, -3);
+  const eq = u.indexOf("=");
+  if (eq < 1) return undefined;
+  const target = u.slice(0, eq);
+  const rhs = u.slice(eq + 1);
+  return same(rhs, [...target, "+", "1"]) || same(rhs, ["1", "+", ...target])
+    ? target
     : undefined;
 }

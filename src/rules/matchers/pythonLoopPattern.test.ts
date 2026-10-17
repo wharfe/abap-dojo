@@ -234,6 +234,38 @@ ENDLOOP.`);
       expect(lines.length).toBe(2);
     });
 
+    // From review round 3, inputs verbatim.
+    describe("exact token matching", () => {
+      const run = async (body: string) => {
+        const reg = await parseSource("REPORT ztest.\n" + body);
+        return matchPythonLoopPattern(reg).map((m) => [m.startLine, m.endLine]);
+      };
+
+      it("detects a structure component as the counter: ls-idx", async () => {
+        expect(
+          await run("DO 3 TIMES.\nREAD TABLE lt INDEX ls-idx TRANSPORTING NO FIELDS.\nls-idx = ls-idx + 1.\nENDDO."),
+        ).toEqual([[2, 5]]);
+      });
+
+      it("ignores a name that merely contains sy-index: ls_sy-index", async () => {
+        expect(
+          await run("DO 3 TIMES.\nREAD TABLE lt INDEX ls_sy-index TRANSPORTING NO FIELDS.\nENDDO."),
+        ).toEqual([]);
+      });
+
+      it("ignores a component that only shares the counter's name: ls-idx vs idx", async () => {
+        expect(
+          await run("DO 3 TIMES.\nREAD TABLE lt INDEX ls-idx TRANSPORTING NO FIELDS.\nidx = idx + 1.\nENDDO."),
+        ).toEqual([]);
+      });
+
+      it("keeps a separate DO that only shares a line with a LOOP", async () => {
+        expect(
+          await run("LOOP AT lt INTO DATA(row). WRITE sy-tabix. ENDLOOP. DO 3 TIMES. READ TABLE lt INDEX sy-index TRANSPORTING NO FIELDS. ENDDO."),
+        ).toEqual([[2, 2], [2, 2]]);
+      });
+    });
+
     it("ignores READ TABLE ... INDEX outside any loop", async () => {
       const reg = await parseSource(`${header}READ TABLE lt_items INTO ls_item INDEX lv_index.`);
       expect(matchPythonLoopPattern(reg).length).toBe(0);
