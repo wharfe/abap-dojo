@@ -121,8 +121,9 @@
         </table>
       </div>
       <p class="text-gray-500 text-sm mt-3">
-        The transpiler targets <strong class="text-gray-300">ABAP 7.02 syntax</strong> as its base. Newer syntax generally works,
-        but if something very recent fails to transpile, that is usually why.
+        Modern syntax — inline declarations, <code class="text-blue-300">VALUE</code>, string templates,
+        <code class="text-blue-300">NEW</code> — parses and runs. When something fails to transpile, the usual cause is a
+        statement the transpiler has no handler for, not the ABAP release that introduced it.
       </p>
     </section>
 
@@ -131,7 +132,8 @@
       <ul class="text-gray-400 space-y-3">
         <li>
           <strong class="text-gray-200">Syntax error on line N</strong> — the parser could not read your code.
-          Usually a missing period, or a statement the 7.02 base does not know.
+          Usually a missing period, a <code class="text-blue-300">"</code> used as a string quote (in ABAP it starts a
+          comment), or a statement abaplint does not recognise.
         </li>
         <li>
           <strong class="text-gray-200">Transpile error</strong> — the code parsed, but there is no JavaScript equivalent.

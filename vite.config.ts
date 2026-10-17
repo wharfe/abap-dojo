@@ -40,5 +40,9 @@ export default defineConfig({
     // configDefaults.exclude (not replacing it) keeps Vitest's own defaults —
     // **/dist/**, **/node_modules/** and friends.
     exclude: [...configDefaults.exclude, "e2e/**"],
+    // Vitest replaces every CSS import with an empty string unless the file is
+    // listed here — `?raw` included. src/staticPages.test.ts reads the compiled
+    // docs stylesheet as text, and without this line it reads "".
+    css: { include: [/public\/docs\/style\.css/] },
   },
 });

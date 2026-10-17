@@ -90,26 +90,30 @@
         language model goes wrong — mostly by importing habits from languages it knows better.
       </p>
       <div class="grid gap-3 md:grid-cols-2">
-        <a href="/docs/pitfalls/hallucinated-class" class="block p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-500 transition-colors">
-          <h3 class="font-semibold text-gray-100 mb-1">Class names that do not exist</h3>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-1"><a href="/docs/pitfalls/hallucinated-class" class="hover:text-blue-400">Class names that do not exist</a></h3>
           <p class="text-sm text-gray-400">CL_ABAP_STRING_UTILITIES sounds real. It isn't. Models produce
              plausible SAP identifiers the way they produce plausible citations.</p>
-        </a>
-        <a href="/docs/pitfalls/string-char-confusion" class="block p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-500 transition-colors">
-          <h3 class="font-semibold text-gray-100 mb-1">STRING where CHAR belongs</h3>
+          <a href="/#mode=validator&code=eJxlkFFPwjAUhd_3K46-AAnOX4BJYUVqxrZsncanZc4rLqmQrAVB8b_bdUBm7FNzeu49X0_KkziV-DKkTaE2VamKSpVa-553DQanwCko1Wd50KB9rY0e44WqcqsJh80Wr_RWrwm1wTs15HuzkGUZVKWKVUNkqEHA5yISUsSR7wFJPg3FDBmfnRVgyeUiDjK4CacAYtnSiege9a5Ylx-E05HPCYc2Tb1enawpl3katdZHFuZ82OwKQ3sz6lt9j0eBY7Pf-89o00K-5JFkZ6qOqUPqKE9rMcFxQUptxvi-sP1cHVuTzejm_sQFTLZ1XsIcVsrnkHEfwnaXciY54umDbac3YXc8pcK-3PbEmzt3GV4YJhiwKUsGGPneL5zqj0U=" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
+        </div>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-1"><a href="/docs/pitfalls/string-char-confusion" class="hover:text-blue-400">STRING where CHAR belongs</a></h3>
           <p class="text-sm text-gray-400">Python has one string type, so models reach for TYPE string. ABAP's
              fixed-length types pad and truncate, and DDIC fields expect them.</p>
-        </a>
-        <a href="/docs/pitfalls/python-loop-pattern" class="block p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-500 transition-colors">
-          <h3 class="font-semibold text-gray-100 mb-1">Index-driven loops</h3>
+          <a href="/#mode=validator&code=eJxtjztvgzAUhff8irNZqiKaqBubA6hFoikipFWnyMGX4ApsZFvp49fXNAlTx3seV9-psvKlqvHjyfnDqHwr-n4dLe5QFM8oL3eMvVP6hF1d5dtHfHZkCckTr6Ac6GukxpNcpLzm6M8HLQZC_V5mcN5OtVde7DMwvuElUvNhWDRnGyP_za5WazZB5BqWRI8dL5dzflCnzkMTSXiD4_VB0wn7ECpBGoRvOgikaZ5AmkEoHd3ghZYX9CN14kyhIFXbhkHa999QGo0ZRmGVM9r9hdMNzEhWeBWUaPFW5XUWg23Dypgtb4Nn4x4sCZBXa-KNfgEKbW_J" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
+        </div>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-1"><a href="/docs/pitfalls/python-loop-pattern" class="hover:text-blue-400">Index-driven loops</a></h3>
           <p class="text-sm text-gray-400">Tracking SY-TABIX by hand is a for-i loop wearing ABAP syntax.
              LOOP AT ... ASSIGNING says the same thing and is faster.</p>
-        </a>
-        <a href="/docs/pitfalls/dynamic-typing" class="block p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-500 transition-colors">
-          <h3 class="font-semibold text-gray-100 mb-1">Declarations without a type</h3>
+          <a href="/#mode=validator&code=eJydkVFPgzAUhd_5FSe-TONWdYkvS_bQ2U4bJxComXsimNVJUmBKZ8RfLx2jkizGxD7Re889fKc34mEQSXwZVZlkm5mXVOsx8eQq5PEEM34rfARzmDrJjMqHHrpTpLmClaEy71mx6bXeTI22lbkq91nPh3iMSgpt9reqFceS-oxGDJLOFrynxlLIOzA-p48LiXu-6sartr2fds7eCcJyu9OpUTDps1beQTfaI08xWGbrjTKgA9JZjCzyFFeXBDQMLavzDhwl-c1odmR0TfAfo5sjo_EfRDZsbV7LYlSZWqsJ8rTYpRpZsVaf0GW5PTzVR9KW2rU0BF2hSd08Z4CF8Hl8-rOSM0jxwGPSLDDitFuKawvfchyQhM_4k_uHHVlGQvIJLtBPOuyHs6oehPs8tzxNXhYQ7xvttc2m" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
+        </div>
+        <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-gray-100 mb-1"><a href="/docs/pitfalls/dynamic-typing" class="hover:text-blue-400">Declarations without a type</a></h3>
           <p class="text-sm text-gray-400">A habit from dynamically typed languages. ABAP will pick a default
              for you, and it is rarely the one you meant.</p>
-        </a>
+          <a href="/#mode=validator&code=eJxNUM1Og0AYvO9TTLygxmLUizTpAVuiJFUJkjSemg1sYZNlIcuntp58CJ_QJ3G7pYXrzDc_36RR8ppm-CbR0Zp2rdSlz9gZom2rZC5J7WBRUeDv5xdfFSeED2ECsW1FTh1bhFkI9bnOmw9NQPaeRJD-Cda8FujhjowzP3K8dhrHtVhGL4_ZE-6xiObxc7h8w63tMTjPcOezwXEGbyWLUpDn0N7LojeBHwQWZKs0zqIpruHFJOqpd3Xs44-o-V7Wcy5oTIb1iD0kuGliraQWKESuuOEkG21_k0rB1unA3V6YQOqNMMYutzFNDaoEjCwrmlRcF-hkIdwS59abGuLqwrY_vXs5jhwaZfvDvpAT-ewfvXeNaw==" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
+        </div>
       </div>
     </section>
 
@@ -141,8 +145,11 @@
             unknown, which is not the same as knowing what the real one does.</li>
         <li><strong class="text-gray-200">Business correctness.</strong> Code can pass all four stages and still
             compute the wrong number.</li>
-        <li><strong class="text-gray-200">Anything above ABAP 7.02 syntax</strong> without downporting first —
-            that is a limit of the transpiler, not of your code.</li>
+        <li><strong class="text-gray-200">Statements the browser runtime does not implement.</strong> Modern syntax
+            parses fine, but selection screens (<code class="text-blue-300">PARAMETERS</code>,
+            <code class="text-blue-300">SELECT-OPTIONS</code>) and classic list formatting such as
+            <code class="text-blue-300">NEW-LINE</code> stop at transpile or run time — that is a limit of the
+            transpiler, not of your code.</li>
       </ul>
       <p class="text-gray-400 mt-4">
         What it does tell you is whether the code is <em>ABAP</em>, whether it runs, and whether it carries

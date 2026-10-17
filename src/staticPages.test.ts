@@ -41,6 +41,15 @@ const sitemapSources = import.meta.glob("/public/sitemap.xml", {
   eager: true,
 }) as Record<string, string>;
 
+const docsStylesheet =
+  Object.values(
+    import.meta.glob("/public/docs/style.css", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }) as Record<string, string>,
+  )[0] ?? "";
+
 /** Every file under public/, by repo path — used to resolve internal links. */
 const publicFilePaths = new Set(Object.keys(import.meta.glob("/public/**/*")));
 
@@ -86,6 +95,18 @@ function shareHashes(html: string): string[] {
   );
 }
 
+/** The class names a page uses, as written in its class attributes. */
+function classesOf(html: string): string[] {
+  const names = [...html.matchAll(/class="([^"]*)"/g)].flatMap((m) =>
+    m[1].split(/\s+/),
+  );
+  return [...new Set(names.filter((c) => c !== ""))];
+}
+
+/** The selector Tailwind emits for a class: `md:grid-cols-2` -> `.md\:grid-cols-2`. */
+const selectorOf = (className: string) =>
+  `.${className.replace(/[:./[\]]/g, "\\$&")}`;
+
 /** Resolve an internal URL back to the file that serves it, if any. */
 function resolvesToFile(url: string): boolean {
   if (url === "/") return true; // the SPA itself, built by Vite
@@ -125,6 +146,22 @@ describe("static pages under public/", () => {
 
     it("gates GA4 on the production host", () => {
       expect(html).toContain(GA4_HOST_GUARD);
+    });
+
+    /**
+     * /docs/style.css is compiled from the files src/docs.css lists as
+     * sources, and a class no source uses is compiled away without a warning.
+     * The landing pages at the root of public/ were not listed, so every class
+     * only they used — the validator page's two-column grid among them — was
+     * missing in production while the page looked fine in review.
+     * Fix: add the page to src/docs.css, then `npm run build:docs-css`.
+     */
+    it("uses only classes /docs/style.css defines", () => {
+      expect(docsStylesheet).toContain("tailwindcss");
+      const undefinedClasses = classesOf(html).filter(
+        (c) => !docsStylesheet.includes(selectorOf(c)),
+      );
+      expect(undefinedClasses).toEqual([]);
     });
 
     it("never links an internal .html URL", () => {

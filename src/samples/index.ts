@@ -91,8 +91,8 @@ DATA lv_first TYPE string VALUE 'Hello'.
 DATA lv_last  TYPE string VALUE 'World'.
 DATA lv_result TYPE string.
 
-* Concatenation with &&
-lv_result = lv_first && ' ' && lv_last.
+* Concatenation with && (backquotes keep the blank; ' ' would drop it)
+lv_result = lv_first && \` \` && lv_last.
 WRITE lv_result.
 
 * CONCATENATE statement
