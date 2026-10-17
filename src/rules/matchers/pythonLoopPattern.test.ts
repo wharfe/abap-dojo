@@ -124,6 +124,19 @@ ENDDO.`);
       expect(matchPythonLoopPattern(reg).length).toBe(0);
     });
 
+    it("ignores sy-index used as a key value: WITH KEY qty = sy-index", async () => {
+      const reg = await parseSource(`REPORT ztest.
+TYPES: BEGIN OF ty_item,
+         qty TYPE i,
+       END OF ty_item.
+DATA lt TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY.
+DATA ls TYPE ty_item.
+DO 3 TIMES.
+READ TABLE lt INTO ls WITH KEY qty = sy-index.
+ENDDO.`);
+      expect(matchPythonLoopPattern(reg).length).toBe(0);
+    });
+
     it("ignores a table named index read at a constant INDEX", async () => {
       const reg = await parseSource(`REPORT ztest.
 TYPES: BEGIN OF ty_item,
