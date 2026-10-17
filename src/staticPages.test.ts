@@ -50,6 +50,34 @@ const docsStylesheet =
     }) as Record<string, string>,
   )[0] ?? "";
 
+/**
+ * The `@source` globs src/docs.css compiles /docs/style.css from, as repo
+ * paths (`../public/*.html` -> `/public/*.html`). Production rebuilds the
+ * stylesheet from these, so the class check below — which reads the committed
+ * copy — only means something if every page linking it is also listed here.
+ */
+const docsCssSources = [
+  ...(
+    Object.values(
+      import.meta.glob("/src/docs.css", {
+        query: "?raw",
+        import: "default",
+        eager: true,
+      }) as Record<string, string>,
+    )[0] ?? ""
+  ).matchAll(/@source\s+"\.\.(\/[^"]+)"/g),
+].map((m) => m[1]);
+
+/** `**` crosses directories, `*` does not. Enough for the globs docs.css uses. */
+function globToRegExp(glob: string): RegExp {
+  const pattern = glob
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .split("**/")
+    .map((part) => part.replace(/\*/g, "[^/]*"))
+    .join("(?:.*/)?");
+  return new RegExp(`^${pattern}$`);
+}
+
 /** Every file under public/, by repo path — used to resolve internal links. */
 const publicFilePaths = new Set(Object.keys(import.meta.glob("/public/**/*")));
 
@@ -103,9 +131,16 @@ function classesOf(html: string): string[] {
   return [...new Set(names.filter((c) => c !== ""))];
 }
 
-/** The selector Tailwind emits for a class: `md:grid-cols-2` -> `.md\:grid-cols-2`. */
-const selectorOf = (className: string) =>
-  `.${className.replace(/[:./[\]]/g, "\\$&")}`;
+/**
+ * Every class name the stylesheet has a selector for, unescaped
+ * (`.md\:grid-cols-2` -> `md:grid-cols-2`). Compared by exact name: a
+ * substring test passed with `.mt-1` deleted because `.mt-10` contains it.
+ */
+const definedClasses = new Set(
+  [...docsStylesheet.matchAll(/\.((?:\\.|[\w-])+)/g)].map((m) =>
+    m[1].replace(/\\(.)/g, "$1"),
+  ),
+);
 
 /** Resolve an internal URL back to the file that serves it, if any. */
 function resolvesToFile(url: string): boolean {
@@ -123,7 +158,7 @@ describe("static pages under public/", () => {
     expect(sitemapXml).toContain("<urlset");
   });
 
-  describe.each(pages)("$path", ({ url, html }) => {
+  describe.each(pages)("$path", ({ path, url, html }) => {
     it("declares a canonical at the URL that serves 200", () => {
       expect(canonicalOf(html)).toBe(`${ORIGIN}${url}`);
     });
@@ -156,10 +191,19 @@ describe("static pages under public/", () => {
      * missing in production while the page looked fine in review.
      * Fix: add the page to src/docs.css, then `npm run build:docs-css`.
      */
+    it("is compiled into /docs/style.css if it links it", () => {
+      if (!html.includes('href="/docs/style.css"')) return;
+      expect(docsCssSources.length).toBeGreaterThan(0);
+      const covered = docsCssSources.some((glob) =>
+        globToRegExp(glob).test(path.replace(/^public/, "/public")),
+      );
+      expect(covered, `${path} is not an @source in src/docs.css`).toBe(true);
+    });
+
     it("uses only classes /docs/style.css defines", () => {
       expect(docsStylesheet).toContain("tailwindcss");
       const undefinedClasses = classesOf(html).filter(
-        (c) => !docsStylesheet.includes(selectorOf(c)),
+        (c) => !definedClasses.has(c),
       );
       expect(undefinedClasses).toEqual([]);
     });

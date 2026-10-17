@@ -92,9 +92,9 @@
       <div class="grid gap-3 md:grid-cols-2">
         <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
           <h3 class="font-semibold text-gray-100 mb-1"><a href="/docs/pitfalls/hallucinated-class" class="hover:text-blue-400">Class names that do not exist</a></h3>
-          <p class="text-sm text-gray-400">CL_ABAP_STRING_UTILITIES sounds real. It isn't. Models produce
+          <p class="text-sm text-gray-400">CL_STRING_HELPER sounds real. It isn't. Models produce
              plausible SAP identifiers the way they produce plausible citations.</p>
-          <a href="/#mode=validator&code=eJxlkFFPwjAUhd_3K46-AAnOX4BJYUVqxrZsncanZc4rLqmQrAVB8b_bdUBm7FNzeu49X0_KkziV-DKkTaE2VamKSpVa-553DQanwCko1Wd50KB9rY0e44WqcqsJh80Wr_RWrwm1wTs15HuzkGUZVKWKVUNkqEHA5yISUsSR7wFJPg3FDBmfnRVgyeUiDjK4CacAYtnSiege9a5Ylx-E05HPCYc2Tb1enawpl3katdZHFuZ82OwKQ3sz6lt9j0eBY7Pf-89o00K-5JFkZ6qOqUPqKE9rMcFxQUptxvi-sP1cHVuTzejm_sQFTLZ1XsIcVsrnkHEfwnaXciY54umDbac3YXc8pcK-3PbEmzt3GV4YJhiwKUsGGPneL5zqj0U=" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
+          <a href="/#mode=validator&code=eJw1j7FqAzEQRPv7iiGNu0vv7sAKBAI-LopDKrGx1jnhPa2R1rGTr4-IcTnDewMzuXE7efxGXjTMJHLep0zGMeyFau277gF-ZhxTjtADJGUGYdHIgktJxnXd8knoXNOnMF6HEf8qMi3cbJvJEJVboQa-pmpIGZR_UFiYKvfdZvADRMNBy0JmXOA_RofJPcFv21yoVlL-CjPLicud_w7GV7uhNwC74eXNYdU4UVy0SFy1C-_Ts3drPN6VvvsDDd5TBQ==" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
         </div>
         <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
           <h3 class="font-semibold text-gray-100 mb-1"><a href="/docs/pitfalls/string-char-confusion" class="hover:text-blue-400">STRING where CHAR belongs</a></h3>
@@ -106,13 +106,13 @@
           <h3 class="font-semibold text-gray-100 mb-1"><a href="/docs/pitfalls/python-loop-pattern" class="hover:text-blue-400">Index-driven loops</a></h3>
           <p class="text-sm text-gray-400">Tracking SY-TABIX by hand is a for-i loop wearing ABAP syntax.
              LOOP AT ... ASSIGNING says the same thing and is faster.</p>
-          <a href="/#mode=validator&code=eJydkVFPgzAUhd_5FSe-TONWdYkvS_bQ2U4bJxComXsimNVJUmBKZ8RfLx2jkizGxD7Re889fKc34mEQSXwZVZlkm5mXVOsx8eQq5PEEM34rfARzmDrJjMqHHrpTpLmClaEy71mx6bXeTI22lbkq91nPh3iMSgpt9reqFceS-oxGDJLOFrynxlLIOzA-p48LiXu-6sartr2fds7eCcJyu9OpUTDps1beQTfaI08xWGbrjTKgA9JZjCzyFFeXBDQMLavzDhwl-c1odmR0TfAfo5sjo_EfRDZsbV7LYlSZWqsJ8rTYpRpZsVaf0GW5PTzVR9KW2rU0BF2hSd08Z4CF8Hl8-rOSM0jxwGPSLDDitFuKawvfchyQhM_4k_uHHVlGQvIJLtBPOuyHs6oehPs8tzxNXhYQ7xvttc2m" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
+          <a href="/#mode=validator&code=eJyFUctuwjAQvPsrRr0gVcR9SL0gcTCy00aFJAquUk4ogAsWENPEFaRf3yRAiFq19WkfM7Oz60iEQSTxuVBbM9XpQh2mG2N2lBA5CcW4h4F49HwELmwx1VZtuwTnlyZbhQqG3GY6XbZa77bAsaWbqvB5S4cSziTDxtZZfgSPJfM5izgkGwxFC43Yk0_gwmUvQ4lnMTnT82O7ZjfK5FR2aod9dGK9WCoL1qFnhlM57OPuloKFYWWtkQoaU_Q3ocEPoQeKP4XIFd5M5mjYlU7X5bF6mJtdUaYKmdnDfNgu5qskXSroMtxnJbGMMEvma8wK1H9DhkEQgsnL2Ty_GpOfFsc3V-3sGvcVYBRwz51cBNwoGDWWPZ-LV-SFY5OZPlBSrlNNLO3_OziOPCl6uEH7ZN22g5bcFygJwsI=" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
         </div>
         <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
           <h3 class="font-semibold text-gray-100 mb-1"><a href="/docs/pitfalls/dynamic-typing" class="hover:text-blue-400">Declarations without a type</a></h3>
           <p class="text-sm text-gray-400">A habit from dynamically typed languages. ABAP will pick a default
              for you, and it is rarely the one you meant.</p>
-          <a href="/#mode=validator&code=eJxNUM1Og0AYvO9TTLygxmLUizTpAVuiJFUJkjSemg1sYZNlIcuntp58CJ_QJ3G7pYXrzDc_36RR8ppm-CbR0Zp2rdSlz9gZom2rZC5J7WBRUeDv5xdfFSeED2ECsW1FTh1bhFkI9bnOmw9NQPaeRJD-Cda8FujhjowzP3K8dhrHtVhGL4_ZE-6xiObxc7h8w63tMTjPcOezwXEGbyWLUpDn0N7LojeBHwQWZKs0zqIpruHFJOqpd3Xs44-o-V7Wcy5oTIb1iD0kuGliraQWKESuuOEkG21_k0rB1unA3V6YQOqNMMYutzFNDaoEjCwrmlRcF-hkIdwS59abGuLqwrY_vXs5jhwaZfvDvpAT-ewfvXeNaw==" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
+          <a href="/#mode=validator&code=eJxNjrEKwjAURfd-xcWli1YQp4JD1A5dtJSCOElIXm0hTSR5LdavNx0Et8vjvnNPXVTXusFH0-Aeo-X5RTpLkhUuDs29KnKIo6igHQVYx-htSx7OElrvBnBHmKQZCTKE_mlJw0gmn0VCyQi9IctmhiZlpI8MufxuVCe9VLEHpjej7cnoiA5MMq6fRSNgpodyUShLfgkH7HfR7VaXTfTaIj0t5zxd_5W_fTxE0Q==" class="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300">See it flagged in the validator →</a>
         </div>
       </div>
     </section>

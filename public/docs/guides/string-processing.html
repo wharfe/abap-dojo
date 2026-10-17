@@ -81,7 +81,7 @@
         (e.g. a database field) causes implicit conversions and potential truncation bugs.
         Choose the type that matches your use case and the target field definition.
       </p>
-      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Fixed-length: trailing spaces are significant, padded to length
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">" Fixed-length: padded with blanks to the declared length
 DATA lv_char TYPE c LENGTH 20.      " or: CHAR20 / char20
 lv_char = 'Hello'.                  " stored as 'Hello               '
 
@@ -247,7 +247,7 @@ WRITE: / lv_result.  " red, green, blue</code></pre>
       lv_length TYPE i.
 
 lv_length = strlen( lv_text ).
-WRITE: / 'Length:', lv_length.  " 12
+WRITE: / 'Length:', lv_length.  " Length: 12
 
 " Useful for conditional checks
 IF strlen( lv_text ) &gt; 10.
@@ -266,19 +266,19 @@ ENDIF.</code></pre>
 
 " CHAR field: trailing padding is not counted
 lv_length = strlen( lv_char ).
-WRITE: / 'CHAR(10):', lv_length.  " 2
+WRITE: / 'CHAR(10):', lv_length.  " CHAR(10): 2
 
 " STRING from a `string literal`: trailing blanks count
 lv_string = `Hi  `.
 lv_length = strlen( lv_string ).
-WRITE: / 'string:', lv_length.  " 4
+WRITE: / 'string:', lv_length.  " string: 4
 
 " STRING from a 'text field literal': the blanks were dropped on assignment
 lv_string = 'Hi  '.
 lv_length = strlen( lv_string ).
-WRITE: / 'from literal:', lv_length.  " 2</code></pre>
+WRITE: / 'from literal:', lv_length.  " from literal: 2</code></pre>
       <p class="mt-4">
-        <a href="/#code=eJyV0M9PwyAUB_A7f8U3u7AlS92MpyY7NNqsS5bF1KrZyWJhLZHRhuKPP98yOjudHuQC4T3e-_BuoiwKod6eiooZANn2NkaBdbxZZgnmMzxE6_sYNJF0SnBYXXJrjdSlT_bnk6ASurSVD8qAkBGukyjFTgrFQ1jDpHKPG8a522ULXVsU9au2gpOhwMKV7s7jL94kII_pKotDXIC6ouP5bBLS6dA1AEa4dD3vsnS1WWJn6j0Y8l6spBWGqfzE8ayYfml9fzL8bYE8kUAe_CXq876Z_N256OpcRK34sH4oRxXtVJU4gt6FEeCmbhrBUWuwtpWl3osfSuqU9F_Kg6Dv-dv0PgEryqbZ" class="text-blue-400 hover:text-blue-300 font-medium">Try STRLEN in ABAP Dojo →</a>
+        <a href="/#code=eJyV0M9LwzAUB_B7_oovXrLBqJt4KuxQtKyDMaRWxZONTdYGs7Sk8cefb9N0dnN4MJeE917e-yS3URaFUB8vRcUMgOz5LkaBTbxdZQkWczxGm4cYNJF0RtCvrri1RurSF_vzUVIJXdrKJ2VAyAVukijFTgrFQ1jDpHKXG8a522ULXVsU9bu2gpOxwdK17s6TH940IE_pOotDXIK6ppPFfBrS2Tg1APy4PoMrN_0-S9fbFXam3oMhH-xKWmGYyo9Er4rpt9ZLyPjKJfJEAnnwl22oO9H52LltiOP6XEat-LL-mw462ukqcYB9CiPATd00gqPWYG0rS70Xv7TUaem_tL1gmHluPsl2f_oNjxWxDw==" class="text-blue-400 hover:text-blue-300 font-medium">Try STRLEN in ABAP Dojo →</a>
       </p>
     </section>
 
@@ -311,7 +311,8 @@ WRITE: / lv_text.   " hello world (unchanged)</code></pre>
     <section id="full-example" class="mb-10">
       <h2 class="text-2xl font-semibold mb-3">Full Example</h2>
       <p class="text-gray-400 mb-4">
-        This complete example combines the string operations covered in this guide.
+        This example combines the core operations from this guide: &amp;&amp;, string templates, strlen( ),
+        to_upper( ) and CONCATENATE.
         Open it in ABAP Dojo and click Run to see each technique in action.
       </p>
       <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">REPORT zstring_processing.
