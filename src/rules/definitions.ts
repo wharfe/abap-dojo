@@ -12,9 +12,9 @@ export const pitfallRules: PitfallRule[] = [
   {
     id: "llm-python-loop-pattern",
     severity: "warning",
-    message: "Index-based loop pattern detected (SY-TABIX manipulation)",
+    message: "Index-based loop pattern detected",
     explanation:
-      "LLMs often write index-based loops influenced by Python's for-in-range or C-style for loops. In ABAP, explicit SY-TABIX manipulation inside LOOP AT is rarely needed and error-prone. LOOP AT ... ASSIGNING is more idiomatic and performant.",
+      "LLMs often write index-based loops influenced by Python's for-in-range or C-style for loops: a DO or WHILE loop that reads the table with READ TABLE ... INDEX and a counter, or explicit SY-TABIX handling inside LOOP AT. Both are rarely needed in ABAP and error-prone. LOOP AT ... ASSIGNING is more idiomatic and performant.",
     suggestion: "Use LOOP AT lt_data ASSIGNING FIELD-SYMBOL(<ls>).",
   },
   {
