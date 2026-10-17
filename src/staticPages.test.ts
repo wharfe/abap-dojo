@@ -65,7 +65,11 @@ const docsCssSources = [
         eager: true,
       }) as Record<string, string>,
     )[0] ?? ""
-  ).matchAll(/@source\s+"\.\.(\/[^"]+)"/g),
+  )
+    // A commented-out @source compiles nothing, so it must not count. Strings
+    // are matched first and kept: `"../public/docs/**/*.html"` contains `/*`.
+    .replace(/("[^"]*")|\/\*[\s\S]*?\*\//g, (_, str?: string) => str ?? "")
+    .matchAll(/@source\s+"\.\.(\/[^"]+)"/g),
 ].map((m) => m[1]);
 
 /** `**` crosses directories, `*` does not. Enough for the globs docs.css uses. */
