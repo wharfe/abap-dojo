@@ -105,12 +105,26 @@ DATA lv_bad.                              " c LENGTH 1 — almost never intended
       <p class="text-gray-500 text-sm mt-3">
         So the rule is not "always write TYPE". It is "never leave the type to chance".
       </p>
+      <h3 class="text-xl font-semibold mt-6 mb-3">The one inference that surprises everyone: packed arithmetic</h3>
+      <p class="text-gray-400 mb-4">
+        When the right-hand side is arithmetic on packed numbers (<code class="text-blue-300">TYPE p</code>), the
+        inferred type is not the operands' type. ABAP's rule for inline declarations is that a calculation type
+        <code class="text-blue-300">p</code> always declares <code class="text-blue-300">p LENGTH 8</code> with
+        <strong class="text-gray-200">no decimal places</strong>, so the result is rounded to a whole number.
+        That is how SAP specifies it, not a quirk of this site, and SAP's own documentation recommends
+        <code class="text-blue-300">CONV</code> or an explicit declaration instead.
+      </p>
+      <pre class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-300">TYPES ty_amount TYPE p LENGTH 8 DECIMALS 2.
+DATA lv_amount TYPE ty_amount VALUE '19.99'.
+
+DATA(lv_total) = 3 * lv_amount.                  " p LENGTH 8 DECIMALS 0: 60
+DATA(lv_exact) = CONV ty_amount( 3 * lv_amount ). " 59.97</code></pre>
     </section>
 
     <section class="mb-10">
       <h2 class="text-2xl font-semibold mb-3">How to fix it</h2>
       <ul class="text-gray-400 space-y-2 list-disc list-inside">
-        <li>Give every <code class="text-blue-300">DATA</code> an explicit <code class="text-blue-300">TYPE</code>, or use inline <code class="text-blue-300">DATA(...)</code> so the type is inferred.</li>
+        <li>Give every <code class="text-blue-300">DATA</code> an explicit <code class="text-blue-300">TYPE</code>, or use inline <code class="text-blue-300">DATA(...)</code> so the type is inferred — except for arithmetic on packed numbers, where you should use <code class="text-blue-300">CONV</code>.</li>
         <li>Pick the type deliberately: <code class="text-blue-300">i</code> for counters, <code class="text-blue-300">p LENGTH n DECIMALS m</code> for money, <code class="text-blue-300">string</code> for genuinely variable text, <code class="text-blue-300">char40</code> and friends for fixed fields.</li>
         <li>Prefer <code class="text-blue-300">TYPE REF TO &lt;class&gt;</code> over <code class="text-blue-300">TYPE REF TO object</code>.</li>
         <li>Reserve <code class="text-blue-300">TYPE any</code> for code that is deliberately generic — and say why in a comment.</li>
@@ -118,7 +132,7 @@ DATA lv_bad.                              " c LENGTH 1 — almost never intended
     </section>
 
     <div class="text-center mt-10">
-      <a href="/#mode=validator&code=eJxNUM1Og0AYvO9TTLygxmLUizTpAVuiJFUJkjSemg1sYZNlIcuntp58CJ_QJ3G7pYXrzDc_36RR8ppm-CbR0Zp2rdSlz9gZom2rZC5J7WBRUeDv5xdfFSeED2ECsW1FTh1bhFkI9bnOmw9NQPaeRJD-Cda8FujhjowzP3K8dhrHtVhGL4_ZE-6xiObxc7h8w63tMTjPcOezwXEGbyWLUpDn0N7LojeBHwQWZKs0zqIpruHFJOqpd3Xs44-o-V7Wcy5oTIb1iD0kuGliraQWKESuuOEkG21_k0rB1unA3V6YQOqNMMYutzFNDaoEjCwrmlRcF-hkIdwS59abGuLqwrY_vXs5jhwaZfvDvpAT-ewfvXeNaw==" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+      <a href="/#mode=validator&code=eJxtks9OwkAQxu99iomXgn9q0IuQcKjQaBMsBBqJp2bdjnRD_6UdBDz5ED6hT-LuttBiuHW_b2a-3-x27symcx--CEsKaJ-LdGUZxgU4uzwWXFC8B6liCL_fP7CNGIH9aM8AdzlyKg3_beYsZEXAkmyTEqgz5DBxvCf_GR5g7IzcF3uygDvLGNu-DfFnwHVlVSoaOWUJQi2XVGiQg9eefgyTnM20IdxbRjNlCOZShCskU6t1v1R7favfl6KxnLu-M4BbMF3CZGBeHxisljVSbbXHq8zGtJOWe0S6ADeNRYoQIo9ZwUhkaQnE1ggUoSj0dcJHkSXqDIVYRXQTsTSEUoRoWdXSHQWDO-pK5uOSV9Br53vSP3DLT50t-983BDnja_lmrBAUJUiC1zRYth9nK13wpsoTCYvLJpoyYnFQyNQQwxOGy_ayDYuvGqAj9OrdmupkisZbsL38iQSPqlvYZxvYMjlVk4ym3us_BBWt5ObRO2dRoHsGRjWeoFjGH1rI7rw=" class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
         Run the typed version →
       </a>
       <p class="text-gray-500 text-sm mt-3">
