@@ -920,6 +920,16 @@ The vocabulary lives in `src/types/diagnostics.ts`, apart from the classifier,
 because `analytics.ts` needs the enum and is reachable from the entry chunk —
 importing `@abaplint/core` there would put 2.7 MB back into `index-*.js`.
 
+**Do not compare any `run_result` outcome share across the release that added
+`src/workers/topLevelInline.ts`** (#95; `git log --diff-filter=A --format=%ad --
+src/workers/topLevelInline.ts` gives the date). Before it, a report with an
+inline declaration at the top level (`DATA(x) = ...` outside any
+METHOD/FORM/LOOP) died with `x is not defined` on its first use and counted as
+`runtime_error`. After it, the same program runs on, so it can end as
+`success`, but also as a later `runtime_error` with a different cause, a
+`timeout`, or `stopped`. The shift is therefore not confined to
+`runtime_error`.
+
 **Do not compare `timeout` rates across 2026-08-08** (#28, #41). Before that
 date the sandbox iframe ran the transpiled JS directly with `srcdoc`, sharing
 the parent's main thread: a CPU-bound ABAP loop froze the whole tab and the
@@ -971,6 +981,31 @@ GA4 treat a fragment change as a page view.
 ## Known Gotchas
 
 - abaplint packages assume Node.js APIs. `@abaplint/core` calls `Buffer.from(..., "hex")` during built-in symbol init — polyfill via `import { Buffer } from "buffer"; globalThis.Buffer = Buffer` in `src/main.tsx` and `src/workers/abaplintWorker.ts`.
+- **Top-level inline declarations are declared by us, not by the transpiler.**
+  `@abaplint/transpiler` emits the `let` for `DATA(x)` / `FIELD-SYMBOL(<fs>)` only
+  inside METHOD, FORM, FUNCTION and LOOP; upstream's answer is "wrap it in a FORM"
+  (abaplint/transpiler#1665). `src/workers/topLevelInline.ts` prepends the missing
+  declarations, built with the transpiler's own `TranspileTypes.declare`, through
+  **deep imports into `@abaplint/transpiler/build/src/`**. Four things to know:
+  - It must run after `transpiler.run(reg)`: the run rearranges the program tree in
+    place, and the walk reads that tree. `buildRunnableJs(reg, output)` takes the
+    output so a call before the run cannot be written.
+  - The result is compiled (not run) before it is used; any error returns the
+    transpiler's plain output. A duplicate `let` would be a SyntaxError, which is
+    worse than the ReferenceError it replaces.
+  - **When upstream starts declaring these itself, the tripwire in
+    `topLevelInline.test.ts` goes red. Delete the feature then; do not adjust it.**
+  - Known gaps, kept on purpose: a LOOP's inline variable read after an enclosing
+    top-level IF, DO, WHILE, CASE or TRY (upstream declares it inside that block;
+    declaring it again at the top would shadow it and print a stale value),
+    mixed-case field-symbols (`<FS>` declared, `<fs>` read), namespaced names
+    (`/abc/x`), and mixed-case names that are JS globals (`DATA(Date)`: no alias, so
+    it fails exactly as it did before).
+  - **The compile check cannot see shadowing.** A top-level `let` named like an
+    identifier the generated JS uses without declaring compiles cleanly and changes
+    what every reference means (`let undefined` made a failed ASSIGN succeed).
+    `RESERVED_BY_GENERATED_CODE` is a hand-kept list of those names; nothing checks
+    it against the emitted JS, so re-read it on a transpiler bump.
 - Vite 8's rolldown minifier collapses class names to single letters by default. abaplint identifies its 166 statement handlers via `handler.constructor.name`, so without `keepNames: true` in `vite.config.ts` (both `build.rolldownOptions` and `worker.rolldownOptions`), the worker dies on boot with `syntax.ts duplicate statement syntax handler`.
 - `@monaco-editor/react` defaults to fetching Monaco from `cdn.jsdelivr.net`, which is blocked by our CSP. `src/components/MonacoEditor.tsx` calls `loader.config({ monaco })` at module scope with a locally imported `monaco-editor/esm/vs/editor/editor.api.js` to short-circuit the CDN fetch. The `.api.js` entry skips TS/CSS/HTML/JSON language workers (~10 MB of unused chunks). That setup has to stay in the same module as the `<Editor>` it configures — the dynamic import is what guarantees it runs before the editor mounts.
 - Monaco is loaded lazily, so it must not be imported from the entry chunk. `src/components/EditorPanel.tsx` imports `./MonacoEditor` dynamically at the first idle moment and shows `EditorSkeleton` (a real textarea) until then. Importing Monaco anywhere eagerly puts 2.7 MB back into the entry chunk and undoes it — check `npm run build` output: `index-*.js` should stay around 350 kB with a separate `MonacoEditor-*.js`.

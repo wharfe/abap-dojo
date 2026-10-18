@@ -26,6 +26,7 @@ import { findStatementEndRepair } from "./statementEndRepair";
 import { findValueAssignRepair } from "./valueAssignRepair";
 import { errorSpanFinder, errorSpanOf } from "./strictAcceptance";
 import { bounded, SEARCH_BUDGET_MS } from "./searchDeadline";
+import { buildRunnableJs } from "./topLevelInline";
 import type { SyntaxRepair, TranspileDiagnostics } from "../types/diagnostics";
 import type { SilentLossSearch } from "./syntaxRepair";
 
@@ -269,13 +270,9 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
       const transpiler = new Transpiler({ ignoreSourceMap: true });
       const output = await transpiler.run(reg);
 
-      // Combine all transpiled chunks into a single JS string
-      const jsChunks = output.objects.map((o) => o.chunk.getCode());
-      const js = [
-        ...jsChunks,
-        output.initializationScript,
-        output.initializationScript2,
-      ].join("\n");
+      // Combine all transpiled chunks into a single JS string, declaring the
+      // top-level inline variables the transpiler leaves out (#95).
+      const { js } = buildRunnableJs(reg, output);
 
       postVerdict("other", { type: "transpile-result", js, requestId });
     } catch (e) {
@@ -404,12 +401,7 @@ async function handleValidate(source: string): Promise<void> {
   try {
     const transpiler = new Transpiler({ ignoreSourceMap: true });
     const output = await transpiler.run(reg);
-    const jsChunks = output.objects.map((o) => o.chunk.getCode());
-    const js = [
-      ...jsChunks,
-      output.initializationScript,
-      output.initializationScript2,
-    ].join("\n");
+    const { js } = buildRunnableJs(reg, output);
 
     postStageResult("transpile", { status: "pass", js });
     // Runtime will be handled by main thread

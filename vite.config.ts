@@ -10,6 +10,11 @@ export default defineConfig({
       "@abaplint/core",
       "@abaplint/transpiler",
       "@abaplint/runtime",
+      // Deep imports by src/workers/topLevelInline.ts. Listed so the dev
+      // server pre-bundles them instead of discovering them on first Run.
+      "@abaplint/transpiler/build/src/transpile_types",
+      "@abaplint/transpiler/build/src/traversal",
+      "@abaplint/transpiler/build/src/statements",
     ],
   },
   build: {
