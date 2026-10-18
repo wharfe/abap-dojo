@@ -996,8 +996,16 @@ GA4 treat a fragment change as a page view.
   - **When upstream starts declaring these itself, the tripwire in
     `topLevelInline.test.ts` goes red. Delete the feature then; do not adjust it.**
   - Known gaps, kept on purpose: a LOOP's inline variable read after an enclosing
-    top-level IF (fixing it would shadow and print a stale value), mixed-case
-    field-symbols (`<FS>` declared, `<fs>` read), namespaced names (`/abc/x`).
+    top-level IF, DO, WHILE, CASE or TRY (upstream declares it inside that block;
+    declaring it again at the top would shadow it and print a stale value),
+    mixed-case field-symbols (`<FS>` declared, `<fs>` read), namespaced names
+    (`/abc/x`), and mixed-case names that are JS globals (`DATA(Date)`: no alias, so
+    it fails exactly as it did before).
+  - **The compile check cannot see shadowing.** A top-level `let` named like an
+    identifier the generated JS uses without declaring compiles cleanly and changes
+    what every reference means (`let undefined` made a failed ASSIGN succeed).
+    `RESERVED_BY_GENERATED_CODE` is a hand-kept list of those names; nothing checks
+    it against the emitted JS, so re-read it on a transpiler bump.
 - Vite 8's rolldown minifier collapses class names to single letters by default. abaplint identifies its 166 statement handlers via `handler.constructor.name`, so without `keepNames: true` in `vite.config.ts` (both `build.rolldownOptions` and `worker.rolldownOptions`), the worker dies on boot with `syntax.ts duplicate statement syntax handler`.
 - `@monaco-editor/react` defaults to fetching Monaco from `cdn.jsdelivr.net`, which is blocked by our CSP. `src/components/MonacoEditor.tsx` calls `loader.config({ monaco })` at module scope with a locally imported `monaco-editor/esm/vs/editor/editor.api.js` to short-circuit the CDN fetch. The `.api.js` entry skips TS/CSS/HTML/JSON language workers (~10 MB of unused chunks). That setup has to stay in the same module as the `<Editor>` it configures — the dynamic import is what guarantees it runs before the editor mounts.
 - Monaco is loaded lazily, so it must not be imported from the entry chunk. `src/components/EditorPanel.tsx` imports `./MonacoEditor` dynamically at the first idle moment and shows `EditorSkeleton` (a real textarea) until then. Importing Monaco anywhere eagerly puts 2.7 MB back into the entry chunk and undoes it — check `npm run build` output: `index-*.js` should stay around 350 kB with a separate `MonacoEditor-*.js`.

@@ -194,7 +194,9 @@ function topLevelPrologue(reg: Registry): string {
     const code = new FieldSymbolTranspiler()
       .transpile(target as never, traversal)
       .getCode();
-    for (const line of code.split("\n")) if (line.trim()) add(line.trim());
+    // One declaration, possibly over several lines (a structured type):
+    // splitting it would truncate the prologue and fail the compile check.
+    add(code.trim());
   };
 
   walk(structure);

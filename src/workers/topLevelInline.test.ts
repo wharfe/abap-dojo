@@ -77,6 +77,24 @@ WRITE / <fs_in_if>.`);
     expectUpstreamStillOmits(r.raw, "fs_fs_");
   });
 
+  // Gate3 (/code-review): a structured field-symbol declares over several
+  // lines. Splitting it truncated the prologue, the compile check failed, and
+  // every other declaration in the program was dropped with it.
+  it("declares a structured FIELD-SYMBOL without losing the others", async () => {
+    const r = await run(`REPORT ztest.
+TYPES: BEGIN OF ty_s,
+         a TYPE i,
+       END OF ty_s.
+DATA lt TYPE STANDARD TABLE OF ty_s WITH DEFAULT KEY.
+APPEND VALUE #( a = 8 ) TO lt.
+DATA(lv_n) = 5.
+READ TABLE lt INDEX 1 ASSIGNING FIELD-SYMBOL(<ls>).
+WRITE / lv_n.
+WRITE / <ls>-a.`);
+    expect(r.fellBack).toBe(false);
+    expect(r.lines).toEqual(["5", "8"]);
+  });
+
   it("leaves a top-level LOOP's own declarations to upstream", async () => {
     // Without the LOOP skip this would be a duplicate `let`; the compile
     // check would then fall back and lv_z would be undefined again, so the
