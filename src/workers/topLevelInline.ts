@@ -53,12 +53,23 @@ const UPSTREAM_DECLARES = [
   Structures.Module,
 ];
 
+/**
+ * Lower-case names the generated JS uses without declaring them. A top-level
+ * `let` of one of these compiles fine and silently changes every reference in
+ * the program - `let undefined = ...` made a failed ASSIGN "succeed" (Gate3).
+ * Declared ids are always lower-case (TranspileTypes.declare lowercases), and
+ * a clash with a local class name is a SyntaxError the compile check catches,
+ * so this short list is the whole exposure. Not "everything on globalThis":
+ * that would also refuse ordinary names like `name`.
+ */
+const RESERVED_BY_GENERATED_CODE = new Set(["undefined", "eval", "arguments", "abap"]);
+
 export interface RunnableJs {
   /** The JS the sandbox runs. */
   js: string;
   /** The declarations prepended to the program, "" when there were none. */
   prologue: string;
-  /** True when a prologue was built but discarded, and `js` is the plain output. */
+  /** True when `js` is the plain output because building or compiling the prologue failed. */
   fellBack: boolean;
 }
 
@@ -127,7 +138,7 @@ function topLevelPrologue(reg: Registry): string {
     // throw when evaluated, and at line 1 they would kill the whole program.
     if (line.includes("typeTodo") || line.includes("throw new Error")) return;
     const id = /^let\s+([^\s=]+)/.exec(line)?.[1];
-    if (!id || declared.has(id)) return;
+    if (!id || declared.has(id) || RESERVED_BY_GENERATED_CODE.has(id)) return;
     declared.add(id);
     lines.push(line);
   };

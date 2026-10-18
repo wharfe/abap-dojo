@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { openProgram, clickRun, waitForRunToEnd } from "./helpers";
+import { encodeSource } from "../src/utils/urlShare";
 
 /**
  * #95, end to end: top-level inline declarations run.
@@ -30,4 +31,20 @@ WRITE / lv_count.`,
   await expect(lines.filter({ hasText: /^3$/ })).toBeVisible();
   await waitForRunToEnd(page);
   await expect(page.getByText(/is not defined/)).toHaveCount(0);
+});
+
+// The Validator transpiles in its own handler; both go through
+// buildRunnableJs, and this is the only test that exercises the second one.
+test("the Validator's runtime stage passes with top-level DATA(x)", async ({
+  page,
+}) => {
+  await page.goto(
+    `/#mode=validator&code=${encodeSource(`REPORT ztest.
+DATA(lv_total) = 2 * 3.
+WRITE / lv_total.`)}`,
+  );
+  await page.getByRole("button", { name: /Validate/i }).first().click();
+  const runtime = page.getByRole("button", { name: /Runtime/ });
+  await expect(runtime).toContainText(/OK|pass/i, { timeout: 30_000 });
+  await expect(runtime).not.toContainText(/is not defined/);
 });

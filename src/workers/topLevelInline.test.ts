@@ -67,8 +67,12 @@ WRITE / lv_do.`);
     const r = await run(`REPORT ztest.
 DATA lv TYPE i VALUE 7.
 ASSIGN lv TO FIELD-SYMBOL(<fs>).
-WRITE / <fs>.`);
-    expect(r.lines).toEqual(["7"]);
+IF 1 = 1.
+  ASSIGN lv TO FIELD-SYMBOL(<fs_in_if>).
+ENDIF.
+WRITE / <fs>.
+WRITE / <fs_in_if>.`);
+    expect(r.lines).toEqual(["7", "7"]);
     expect(r.fellBack).toBe(false);
     expectUpstreamStillOmits(r.raw, "fs_fs_");
   });
@@ -227,6 +231,23 @@ START-OF-SELECTION.
     expect(r.js).not.toContain(r.prologue);
   });
 
+  // Gate3 (codex), input verbatim: `let undefined = ...` compiles fine and
+  // silently redefines `undefined` for all generated code, so a failed ASSIGN
+  // started to "succeed". Plain output prints 4.
+  it("does not declare a name the generated code relies on: undefined", async () => {
+    const source = `REPORT ztest.
+DATA lt TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+FIELD-SYMBOLS <fs> TYPE i.
+IF 1 = 2.
+  DATA(undefined) = 1.
+ENDIF.
+ASSIGN lt[ 1 ] TO <fs>.
+WRITE / sy-subrc.`;
+    const r = await run(source);
+    expect(r.lines).toEqual(["4"]);
+    expect(r.prologue).not.toMatch(/\blet undefined\b/);
+  });
+
   it("does not declare a namespaced name it cannot escape", async () => {
     const r = await build("REPORT ztest.\nDATA(/abc/x) = 1.");
     expect(r.prologue).not.toContain("/abc/");
@@ -237,15 +258,18 @@ START-OF-SELECTION.
   // and a later read would print a stale value without any error. It stays
   // broken on purpose - do not "fix" it by removing Loop from the skip set.
   it("leaves a LOOP inside a top-level IF alone", async () => {
-    const r = await run(`REPORT ztest.
+    const r = await build(`REPORT ztest.
 DATA lt TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
 APPEND 5 TO lt.
 IF 1 = 1.
   LOOP AT lt INTO DATA(ls).
   ENDLOOP.
 ENDIF.
-WRITE / 'done'.`);
+WRITE / ls.`);
     expect(r.prologue).not.toMatch(/\blet ls\b/);
-    expect(r.lines).toEqual(["done"]);
+    // Still the transpiler's own failure, unchanged - not a stale value.
+    await expect(executeJs(prepareTranspiledJs(r.js))).rejects.toThrow(
+      /ls is not defined/,
+    );
   });
 });
