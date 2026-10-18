@@ -32,6 +32,33 @@ describe("matchDynamicTyping", () => {
     expect(matches.length).toBe(0);
   });
 
+  // An inline declaration takes its type from the right-hand side. It is an
+  // assignment that starts with the token DATA, not an untyped declaration,
+  // and it is how modern ABAP is written (#95).
+  it("ignores inline declarations DATA(x) = ...", async () => {
+    const reg = await parseSource(
+      `REPORT ztest.\nDATA lv_count TYPE i VALUE 3.\nDATA(lv_total) = lv_count * 2.\nWRITE / lv_total.`,
+    );
+    const matches = matchDynamicTyping(reg);
+    expect(matches.length).toBe(0);
+  });
+
+  it("still detects an untyped DATA next to an inline declaration", async () => {
+    const reg = await parseSource(
+      `REPORT ztest.\nDATA lv_flag.\nDATA(lv_total) = 1.`,
+    );
+    const matches = matchDynamicTyping(reg);
+    expect(matches.map((m) => m.startLine)).toEqual([2]);
+  });
+
+  // From review: a chain member's first token is the chain's DATA, so the
+  // report landed on the chain's first line instead of the untyped name.
+  it("reports an untyped chain member at its own line", async () => {
+    const reg = await parseSource(`REPORT ztest.\nDATA: lv_a TYPE i,\n      lv_b.`);
+    const matches = matchDynamicTyping(reg);
+    expect(matches.map((m) => [m.startLine, m.endLine])).toEqual([[3, 3]]);
+  });
+
   it("ignores DATA: BEGIN OF structure declarations", async () => {
     const reg = await parseSource(
       `REPORT ztest.\nDATA: BEGIN OF ls_struct,\n        value TYPE i,\n      END OF ls_struct.`,
