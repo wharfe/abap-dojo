@@ -19,9 +19,9 @@
 // Display only. Analytics keep reading the original Issue, so `syntax_key`
 // still reports `structure` and nothing about what is counted changes.
 
-import { describeOpenBlock, type OpenBlockFinding } from "./openBlock";
+import { describeOpenBlock, findingExplains, type OpenBlockFinding } from "./openBlock";
 
-const EXPECTED = /^Expected [A-Z]+$/;
+const EXPECTED = /^Expected ([A-Z]+)$/;
 const UNEXPECTED_STRUCTURE = "Unexpected code structure";
 
 const EXPLANATION =
@@ -52,9 +52,10 @@ export interface StructureExplanation {
  * real line comes back on its own.
  *
  * `finding` is the walk's answer for this program (null when it found
- * nothing, or was not run). It is used for `Expected <X>` only:
- * `Unexpected code structure` says nothing about a closer, so a block named
- * under it would be a guess.
+ * nothing, or was not run). It is used for `Expected <X>` only, and only
+ * when `X` closes a block that was open at the finding: `Unexpected code
+ * structure` says nothing about a closer, and a finding `X` cannot close is
+ * about a different mistake than the one on screen (`findingExplains`).
  */
 export function explainStructure(
   key: string,
@@ -64,8 +65,9 @@ export function explainStructure(
   finding: OpenBlockFinding | null = null,
 ): StructureExplanation | null {
   if (key !== "structure" || row !== 1 || col !== 1) return null;
-  if (!EXPECTED.test(message) && message !== UNEXPECTED_STRUCTURE) return null;
-  if (finding !== null && EXPECTED.test(message)) {
+  const expected = EXPECTED.exec(message);
+  if (expected === null && message !== UNEXPECTED_STRUCTURE) return null;
+  if (finding !== null && expected !== null && findingExplains(finding, expected[1])) {
     const detail = describeOpenBlock(finding);
     if (detail !== null) {
       return {
@@ -77,13 +79,7 @@ export function explainStructure(
   return { text: `${message}. ${EXPLANATION}` };
 }
 
-/** `explainStructure(...)?.text`, for callers that only need the words. */
-export function explainStructureIssue(
-  key: string,
-  message: string,
-  row: number,
-  col: number,
-  finding: OpenBlockFinding | null = null,
-): string | null {
-  return explainStructure(key, message, row, col, finding)?.text ?? null;
+/** Whether an issue is one the walk's finding could be attached to. */
+export function wantsOpenBlock(key: string, message: string, row: number, col: number): boolean {
+  return key === "structure" && row === 1 && col === 1 && EXPECTED.test(message);
 }

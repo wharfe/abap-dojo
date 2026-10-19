@@ -4,7 +4,8 @@ import { Buffer } from "buffer";
 
 import { Registry, MemoryFile, Config, Issue, ABAPObject } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
-import { explainStructure, explainStructureIssue } from "./structureExplanation";
+import { explainStructure } from "./structureExplanation";
+import type { OpenBlockFinding } from "./openBlock";
 import { findOpenBlock } from "./openBlock";
 
 const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
@@ -18,13 +19,20 @@ async function errorsOf(source: string): Promise<Issue[]> {
     .filter((i) => i.getSeverity().toString() === "Error");
 }
 
-function explain(issue: Issue): string | null {
-  return explainStructureIssue(
-    issue.getKey(),
-    issue.getMessage(),
-    issue.getStart().getRow(),
-    issue.getStart().getCol(),
+function explain(issue: Issue, finding: OpenBlockFinding | null = null): string | null {
+  return (
+    explainStructure(
+      issue.getKey(),
+      issue.getMessage(),
+      issue.getStart().getRow(),
+      issue.getStart().getCol(),
+      finding,
+    )?.text ?? null
   );
+}
+
+function explainStructureIssue(key: string, message: string, row: number, col: number) {
+  return explainStructure(key, message, row, col)?.text ?? null;
 }
 
 async function findingOf(source: string) {
@@ -69,6 +77,35 @@ describe("explainStructureIssue against the real parser, without a finding", () 
       expect(text).toContain("no line is given");
     });
   }
+
+  // The same four shapes with the walk's finding: each names its block.
+  // "a FORM inside an IF" is not here: every block in it is closed, the walk
+  // finds nothing, and the generic text stays (asserted above).
+  const named: ReadonlyArray<[string, string]> = [
+    ["a missing ENDIF", "the IF on line 2"],
+    ["a missing ENDIF inside a METHOD", "the IF on line 7"],
+    ["a double quote that comments out ENDDO", "the DO on line 2"],
+  ];
+  for (const [name, phrase] of named) {
+    it(`names the block for ${name}`, async () => {
+      const source = pinnedToLineOne.find(([n]) => n === name)![1];
+      const first = (await errorsOf(source))[0];
+      const text = explain(first, await findingOf(source));
+      expect(text).toContain(phrase);
+      expect(text).not.toContain("no line is given");
+    });
+  }
+
+  // Two independent mistakes: abaplint's `Expected ENDIF` is about the FORM
+  // on line 2, the walk's answer is the DO on line 5. No frame on the walk's
+  // stack is closed by ENDIF, so the finding is discarded (codex, Gate3).
+  it("keeps the generic text when the finding does not match the closer abaplint named", async () => {
+    const source = "IF 1 = 1.\nFORM f.\nENDFORM.\nENDIF.\nDO.\n";
+    const first = (await errorsOf(source))[0];
+    expect(first.getMessage()).toBe("Expected ENDIF");
+    const out = explainStructure("structure", first.getMessage(), 1, 1, await findingOf(source));
+    expect(out).toEqual({ text: expect.stringContaining("no line is given") });
+  });
 
   // Gate2 H1: the structure issue comes first even when the real mistake is a
   // missing period, which is why the text tells the user to fix the rest first.

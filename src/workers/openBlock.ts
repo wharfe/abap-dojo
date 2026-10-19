@@ -212,30 +212,46 @@ export interface OpenFrame {
   /** The statement came out of a macro: `row` is the macro call's row. */
   virtual: boolean;
   /**
-   * A block of the same kind was closed while this one was open. Set on the
-   * frame below when a frame is popped and the new top has the same class.
-   * `closedRow` is the closer's row, `closedOpenerRow` the row of the opener
-   * it closed.
+   * A block closed by the same closer was closed while this one was open:
+   * set on the frame below when a frame is popped and the new top shares its
+   * closer (IF inside IF, but also CLASS … DEFINITION over CLASS …
+   * IMPLEMENTATION through ENDCLASS, LOOP over LOOP AT SCREEN through
+   * ENDLOOP). `closedRow` is the closer's row, `closedOpenerRow` and
+   * `closedOpenerClass` the opener it closed. For a block that can nest the
+   * last such closer is kept (the nearest to where one is missing); for one
+   * that cannot, the first — the sibling that began while it was open is
+   * where its closer belongs.
    */
-  sameKind?: { closedRow: number; closedOpenerRow: number };
+  sameKind?: { closedRow: number; closedOpenerRow: number; closedOpenerClass: string };
+}
+
+interface FindingBase {
+  /** The innermost block still open: the one the text names. */
+  block: OpenFrame;
+  /**
+   * Every block open at the moment of the finding, outermost first. The
+   * caller checks abaplint's own `Expected <closer>` against it
+   * (`findingExplains`): a finding about a block none of whose open frames
+   * that closer could close is about a different mistake.
+   */
+  open: readonly OpenFrame[];
 }
 
 export type OpenBlockFinding =
   /** The file ended with `block` still open, and `outside` more below it. */
-  | { kind: "unclosed"; block: OpenFrame; outside: number }
+  | (FindingBase & { kind: "unclosed"; outside: number })
   /**
    * A closer arrived for `matched`, which sits below `block` in the stack;
    * `between` lists the frames between the two, innermost first.
    */
-  | {
+  | (FindingBase & {
       kind: "closed-over";
-      block: OpenFrame;
       closer: { className: string; row: number };
       matched: OpenFrame;
       between: OpenFrame[];
-    }
+    })
   /** A METHOD body began directly inside a CLASS … DEFINITION. */
-  | { kind: "method-in-definition"; block: OpenFrame; definition: OpenFrame };
+  | (FindingBase & { kind: "method-in-definition"; definition: OpenFrame });
 
 interface Classified {
   opener?: string;
@@ -244,13 +260,22 @@ interface Classified {
 
 type StatementClass = new () => IStatement;
 
-const PAIRS = deriveBlockPairs();
+const STATEMENT_CLASSES = Statements as Record<string, StatementClass | undefined>;
+/**
+ * Pairs whose both classes `Statements` exports. A structure naming a class
+ * it does not export would otherwise put `undefined` into an `instanceof`,
+ * which throws inside every lint with a structure error. The pinned test
+ * notices the pair; this keeps the worker alive if it lands anyway.
+ */
+const PAIRS = deriveBlockPairs().filter(
+  (p) => STATEMENT_CLASSES[p.opener] !== undefined && STATEMENT_CLASSES[p.closer] !== undefined,
+);
 const OPENER_CLASSES: ReadonlyArray<readonly [StatementClass, string]> = PAIRS.map(
-  (p) => [(Statements as Record<string, StatementClass>)[p.opener], p.opener] as const,
+  (p) => [STATEMENT_CLASSES[p.opener]!, p.opener] as const,
 );
 const CLOSER_CLASSES: ReadonlyArray<readonly [StatementClass, string]> = [
   ...new Set(PAIRS.map((p) => p.closer)),
-].map((c) => [(Statements as Record<string, StatementClass>)[c], c] as const);
+].map((c) => [STATEMENT_CLASSES[c]!, c] as const);
 /** closer class name -> the opener class names it closes (shared closers). */
 const OPENERS_OF: ReadonlyMap<string, readonly string[]> = new Map(
   [...new Set(PAIRS.map((p) => p.closer))].map((c) => [
@@ -273,10 +298,18 @@ function classify(statement: IStatement): Classified {
   return {};
 }
 
-function positionOf(node: StatementNode, opener: string): { row: number; col: number; virtual: boolean } {
+/** The closers of `CHAINED_BEGIN`: `END OF` inside a chain needs the same row rule. */
+const CHAINED_END: ReadonlySet<string> = new Set(
+  [...CHAINED_BEGIN].map((o) => CLOSER_OF.get(o)).filter((c): c is string => c !== undefined),
+);
+
+function positionOf(
+  node: StatementNode,
+  className: string,
+): { row: number; col: number; virtual: boolean } {
   let token: Token = node.getFirstToken();
   const colon = node.getColon();
-  if (colon !== undefined && CHAINED_BEGIN.has(opener)) {
+  if (colon !== undefined && (CHAINED_BEGIN.has(className) || CHAINED_END.has(className))) {
     const after = node.getTokens().find((t) => t.getStart().isAfter(colon.getStart()));
     if (after !== undefined) token = after;
   }
@@ -304,7 +337,7 @@ export function findOpenBlock(
       const frame: OpenFrame = { className: opener, ...positionOf(node, opener) };
       const top = stack[stack.length - 1];
       if (opener === "MethodImplementation" && top?.className === "ClassDefinition") {
-        return { kind: "method-in-definition", block: frame, definition: top };
+        return { kind: "method-in-definition", block: frame, definition: top, open: [...stack] };
       }
       stack.push(frame);
       continue;
@@ -317,10 +350,15 @@ export function findOpenBlock(
     if (idx === stack.length - 1) {
       const closed = stack.pop()!;
       const below = stack[stack.length - 1];
-      if (below !== undefined && below.className === closed.className) {
+      if (
+        below !== undefined &&
+        CLOSER_OF.get(below.className) === closer &&
+        (below.sameKind === undefined || !NOT_NESTABLE.has(below.className))
+      ) {
         below.sameKind = {
-          closedRow: node.getFirstToken().getStart().getRow(),
+          closedRow: positionOf(node, closer).row,
           closedOpenerRow: closed.row,
+          closedOpenerClass: closed.className,
         };
       }
       continue;
@@ -329,13 +367,28 @@ export function findOpenBlock(
     return {
       kind: "closed-over",
       block,
-      closer: { className: closer, row: node.getFirstToken().getStart().getRow() },
+      closer: { className: closer, row: positionOf(node, closer).row },
       matched: stack[idx],
       between: stack.slice(idx + 1, stack.length - 1).reverse(),
+      open: [...stack],
     };
   }
   if (stack.length === 0) return null;
-  return { kind: "unclosed", block: stack[stack.length - 1], outside: stack.length - 1 };
+  return { kind: "unclosed", block: stack[stack.length - 1], outside: stack.length - 1, open: [...stack] };
+}
+
+/**
+ * Whether abaplint's `Expected <X>` can be about this finding: true when
+ * `X` (the closer class name upper-cased, as abaplint prints it) closes some
+ * block that was open at the finding. Two independent mistakes — a FORM
+ * inside an IF, and an unrelated DO left open at the end — give
+ * `Expected ENDIF` with a walk that names the DO; naming it would send the
+ * user to a line that has nothing to do with the error on screen.
+ */
+export function findingExplains(finding: OpenBlockFinding, expectedNode: string): boolean {
+  return finding.open.some(
+    (frame) => (CLOSER_OF.get(frame.className) ?? "").toUpperCase() === expectedNode,
+  );
 }
 
 function nameOf(frame: OpenFrame): string {
@@ -355,26 +408,43 @@ function selectNote(frame: OpenFrame): string {
     : "";
 }
 
-function sameKindSentence(frame: OpenFrame): string {
+function sameKindSentence(frame: OpenFrame): string | null {
   if (frame.sameKind === undefined) return "";
-  const keyword = OPENER_KEYWORD[frame.className];
-  const { closedRow, closedOpenerRow } = frame.sameKind;
+  const { closedRow, closedOpenerRow, closedOpenerClass } = frame.sameKind;
+  const closed = OPENER_KEYWORD[closedOpenerClass];
+  if (closed === undefined) return null;
   if (NOT_NESTABLE.has(frame.className)) {
-    return ` It was still open when the ${keyword} on line ${closedOpenerRow} began.`;
+    return ` It was still open when the ${closed} on line ${closedOpenerRow} began.`;
   }
   return (
-    ` The ${closerKeywordOf(frame)} on line ${closedRow} closed the ${keyword} on line ` +
-    `${closedOpenerRow}; if it was meant for line ${frame.row}, the ${keyword} on line ` +
+    ` The ${closerKeywordOf(frame)} on line ${closedRow} closed the ${closed} on line ` +
+    `${closedOpenerRow}; if it was meant for line ${frame.row}, the ${closed} on line ` +
     `${closedOpenerRow} is the one left open.`
   );
 }
 
-function tail(closer: string): string {
+/**
+ * The closing sentences. They never say the closer is absent or that it did
+ * not parse — a closer that closed a different block (ENDIF and ENDLOOP in
+ * the wrong order) parsed fine, and a closer a `"` turned into a comment
+ * leaves no parser error to point at. What is true in every case is that
+ * abaplint did not take it as closing this block.
+ */
+function tailAtEnd(closer: string, keyword: string): string {
   return (
-    ` If you did write ${closer}, abaplint did not see it as a statement. If another error ` +
-    "is listed below, that is usually the line: a missing period, a ; or a : chain. If this " +
-    'is the only error, look for a " earlier on that line or on the line above it: a " starts ' +
-    "a comment, and the statement it cuts short swallows the next line."
+    ` If you did write ${closer} for it, abaplint did not take it as closing this ${keyword}. ` +
+    "If another error is listed below, that is usually the line: a missing period, a ; or a " +
+    ': chain. If this is the only error, look for a " earlier on that line or on the line ' +
+    'above it: a " starts a comment, and the statement it cuts short swallows the next line.'
+  );
+}
+
+function tailAtCloser(closer: string, keyword: string, reached: string, row: number): string {
+  return (
+    ` If you did write ${closer} for it before the ${reached} on line ${row}, abaplint did not ` +
+    `take it as closing this ${keyword}: it may close a different block, it may not have parsed ` +
+    "(a missing period, a ; or a : chain; another error below usually names the line), or a " +
+    '" earlier on its line may have turned it into a comment.'
   );
 }
 
@@ -384,7 +454,10 @@ function tail(closer: string): string {
  * to the generic explanation rather than printing an empty keyword.
  */
 export function describeOpenBlock(finding: OpenBlockFinding): string | null {
-  if (OPENER_KEYWORD[finding.block.className] === undefined) return null;
+  const keyword = OPENER_KEYWORD[finding.block.className];
+  if (keyword === undefined) return null;
+  const hedge = sameKindSentence(finding.block);
+  if (hedge === null) return null;
   switch (finding.kind) {
     case "unclosed": {
       const closer = closerKeywordOf(finding.block);
@@ -396,8 +469,8 @@ export function describeOpenBlock(finding: OpenBlockFinding): string | null {
       return (
         `abaplint found no ${closer} for the ${nameOf(finding.block)}${selectNote(finding.block)} ` +
         `(the innermost block still open${outside}).` +
-        sameKindSentence(finding.block) +
-        tail(closer)
+        hedge +
+        tailAtEnd(closer, keyword)
       );
     }
     case "closed-over": {
@@ -415,8 +488,8 @@ export function describeOpenBlock(finding: OpenBlockFinding): string | null {
       return (
         `When abaplint reached the ${reached} on line ${finding.closer.row}, the ` +
         `${nameOf(finding.block)}${selectNote(finding.block)} was still open${between}.` +
-        sameKindSentence(finding.block) +
-        tail(closer)
+        hedge +
+        tailAtCloser(closer, keyword, reached, finding.closer.row)
       );
     }
     case "method-in-definition":

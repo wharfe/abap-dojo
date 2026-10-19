@@ -522,14 +522,10 @@ did not change across either release. It is also often a *consequence*: a
 missing period on `ENDIF` produces `structure` as `errors[0]` ahead of the
 `parser_error` that caused it.
 
-Measured 2026-10-14..18 (the first five days of `structure_kind`): of 52
-classified events, `expected` was ENDCLASS 12 / ENDLOOP 10 / ENDIF 6 /
-ENDSELECT 3 / ENDWHILE 3 / TYPEEND 1 and `unexpected` was
-METHODIMPLEMENTATION 7 / ENDIF 2 / ENDWHILE 2 / five singletons. Probed by
-hand, `Expected ENDCLASS` comes from at least six shapes (a definition or an
-implementation left open, a `METHOD` or `ENDMETHOD` without its period, a
-method body written inside the DEFINITION), so the node alone does not say
-which; the walk's text does, on screen, and nothing about it is measured.
+The first five days of `structure_kind` (2026-10-14..18, 52 events) and the
+hand probe of what produces `Expected ENDCLASS` are in #72; the node alone
+does not say which shape, the walk's text on screen does, and nothing about
+the text is measured.
 
 `parser_error` and `unknown_types` point at opposite investments, and before
 this parameter existed the metric could not tell them apart. Do not assume the

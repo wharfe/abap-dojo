@@ -12,7 +12,7 @@ import { detectPitfalls } from "../rules/detector";
 import { pitfallToLintIssue } from "../rules/pitfallToLintIssue";
 import { classifyTranspileError } from "./transpileDiagnostics";
 import { classifySyntaxError } from "./syntaxDiagnostics";
-import { explainStructure } from "./structureExplanation";
+import { explainStructure, wantsOpenBlock } from "./structureExplanation";
 import { findOpenBlock, type OpenBlockFinding } from "./openBlock";
 import {
   errorCounter,
@@ -67,17 +67,25 @@ function explanationOf(issue: Issue, finding: OpenBlockFinding | null = null) {
 
 /**
  * The block the user left open, for the structure explanation — or null when
- * no issue needs one, so the walk is skipped on every ordinary lint. One walk
- * per Registry: it reads the whole statement list, and every issue in the
- * same program shares the answer.
+ * no issue in `issues` could use one, so the walk is skipped on every
+ * ordinary lint. One walk per Registry: it reads the whole statement list,
+ * and every issue in the same program shares the answer. A throw inside the
+ * walk degrades to the generic text rather than losing the lint result.
  */
 function openBlockFor(reg: Registry, issues: readonly Issue[]): OpenBlockFinding | null {
-  if (!issues.some((i) => explanationOf(i) !== null)) return null;
+  const wanted = issues.some((i) =>
+    wantsOpenBlock(i.getKey(), i.getMessage(), i.getStart().getRow(), i.getStart().getCol()),
+  );
+  if (!wanted) return null;
   const object = reg.getFirstObject();
   if (!(object instanceof ABAPObject)) return null;
   const file = object.getABAPFiles()[0];
   if (file === undefined) return null;
-  return findOpenBlock(file.getStatements());
+  try {
+    return findOpenBlock(file.getStatements());
+  } catch {
+    return null;
+  }
 }
 
 function issueToLintIssue(issue: Issue, finding: OpenBlockFinding | null = null): LintIssue {
@@ -228,12 +236,13 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
     const errors = errorIssues(issues);
     if (errors.length > 0) {
       const first = errors[0];
-      // A structure issue pinned to (1,1) gets its explanation and no line:
-      // the line would only send the user to look at line 1 (#72). It is
-      // often a consequence of a later error that does have a line (a missing
-      // period on ENDIF), so that one is named too — otherwise it would only
-      // ever be visible on the Lint tab.
-      const explanation = explanationOf(first, openBlockFor(reg, errors));
+      // A structure issue pinned to (1,1) gets its explanation, and the line
+      // of the block the walk found open — or no line at all when the walk
+      // could not name one, since abaplint's own line would only send the
+      // user to line 1 (#72). It is often a consequence of a later error that
+      // does have a line (a missing period on ENDIF), so that one is named
+      // too — otherwise it would only ever be visible on the Lint tab.
+      const explanation = explanationOf(first, openBlockFor(reg, [first]));
       const located =
         explanation === null
           ? undefined

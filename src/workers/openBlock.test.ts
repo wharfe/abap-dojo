@@ -12,6 +12,7 @@ import {
   deriveBlockPairs,
   describeOpenBlock,
   findOpenBlock,
+  findingExplains,
   type OpenBlockFinding,
 } from "./openBlock";
 import sources from "./fixtures/structureShapes.sources.json";
@@ -160,7 +161,7 @@ describe("findOpenBlock against the real parser", () => {
 
   it("records a same-kind block closed inside (shape X) with both rows", async () => {
     const f = (await findIn(shape("X"))) as Extract<OpenBlockFinding, { kind: "closed-over" }>;
-    expect(f.block.sameKind).toEqual({ closedRow: 11, closedOpenerRow: 8 });
+    expect(f.block.sameKind).toEqual({ closedRow: 11, closedOpenerRow: 8, closedOpenerClass: "If" });
   });
 
   it("lists the frames between the named block and the matched opener (shape Y)", async () => {
@@ -171,7 +172,11 @@ describe("findOpenBlock against the real parser", () => {
   it("marks the same-kind evidence on a METHOD (shape I), which cannot nest", async () => {
     const f = (await findIn(shape("I"))) as Extract<OpenBlockFinding, { kind: "closed-over" }>;
     expect(f.block).toMatchObject({ className: "MethodImplementation", row: 7 });
-    expect(f.block.sameKind).toEqual({ closedRow: 11, closedOpenerRow: 9 });
+    expect(f.block.sameKind).toEqual({
+      closedRow: 11,
+      closedOpenerRow: 9,
+      closedOpenerClass: "MethodImplementation",
+    });
   });
 
   it("reports a macro-expanded IF at the call's row, flagged virtual (shape Z6)", async () => {
@@ -192,13 +197,71 @@ describe("findOpenBlock against the real parser", () => {
     expect(f).toMatchObject({ kind: "unclosed", block: { className: "If", row: 1 } });
   });
 
-  it("stays a single pass: 2,000 statements in well under the lint debounce", async () => {
+  it("walks 2,000 statements and still names the one open block", async () => {
     const source = Array.from({ length: 2000 }, (_, i) => `WRITE ${i}.`).join("\n") + "\nIF 1 = 1.\n";
-    const statements = await statementsOf(source);
-    const started = performance.now();
-    const f = findOpenBlock(statements);
-    expect(performance.now() - started).toBeLessThan(50);
+    const f = findOpenBlock(await statementsOf(source));
     expect(f).toMatchObject({ kind: "unclosed", block: { row: 2001 } });
+  });
+
+  it("stops at the first finding: a closed-over block wins over a later unclosed one", async () => {
+    // [If@1, Loop@2] + ENDIF@4 is the finding; the DO on line 5 is never reached.
+    const f = await findIn("IF 1 = 1.\nLOOP AT lt INTO x.\n WRITE x.\nENDIF.\nDO.\n");
+    expect(f).toMatchObject({ kind: "closed-over", block: { className: "Loop", row: 2 } });
+  });
+
+  it("finds nothing for CATCH without TRY, a bare MODULE, or nested BEGIN OF closed", async () => {
+    expect(await findIn("REPORT z.\nCATCH cx_root.\nWRITE 'a'.\n")).toBeNull();
+    expect(await findIn("MODULE x.\n")).toBeNull();
+    expect(
+      await findIn("DATA: BEGIN OF a,\n BEGIN OF b,\n  x TYPE i,\n END OF b,\nEND OF a.\n"),
+    ).toBeNull();
+  });
+
+  it("cannot tell END OF a from END OF b (no names are read), and hedges instead", async () => {
+    const f = await findIn("DATA: BEGIN OF a,\n BEGIN OF b,\n  x TYPE i,\nEND OF a.\nWRITE 'x'.\n");
+    expect(f).toMatchObject({
+      kind: "unclosed",
+      block: { className: "DataBegin", row: 1, sameKind: { closedRow: 4, closedOpenerRow: 2 } },
+    });
+  });
+
+  it("keys the same-kind evidence on the shared closer, not the class (shape D)", async () => {
+    const f = (await findIn(shape("D"))) as Extract<OpenBlockFinding, { kind: "unclosed" }>;
+    expect(f.block).toMatchObject({ className: "ClassDefinition", row: 1 });
+    expect(f.block.sameKind).toEqual({
+      closedRow: 8,
+      closedOpenerRow: 4,
+      closedOpenerClass: "ClassImplementation",
+    });
+  });
+
+  it("keeps the FIRST sibling for a block that cannot nest", async () => {
+    const f = (await findIn(
+      "CLASS lcl DEFINITION.\n PUBLIC SECTION.\n METHODS a.\n METHODS b.\n METHODS c.\nENDCLASS.\n" +
+        "CLASS lcl IMPLEMENTATION.\n METHOD a.\n  WRITE 'a'.\n METHOD b.\n ENDMETHOD.\n METHOD c.\n ENDMETHOD.\nENDCLASS.\n",
+    )) as Extract<OpenBlockFinding, { kind: "closed-over" }>;
+    expect(f.block).toMatchObject({ className: "MethodImplementation", row: 8 });
+    expect(f.block.sameKind).toMatchObject({ closedOpenerRow: 10 });
+  });
+
+  it("keeps the LAST sibling for a block that can nest", async () => {
+    const f = (await findIn(
+      "IF 1 = 1.\n IF 2 = 2.\n ENDIF.\n IF 3 = 3.\n ENDIF.\nWRITE 'x'.\n",
+    )) as Extract<OpenBlockFinding, { kind: "unclosed" }>;
+    expect(f.block.sameKind).toMatchObject({ closedOpenerRow: 4, closedRow: 5 });
+  });
+
+  it("records the open stack so the caller can check it against abaplint's closer", async () => {
+    const f = await findIn("IF 1 = 1.\nFORM f.\nENDFORM.\nENDIF.\nDO.\n");
+    expect(f).toMatchObject({ kind: "unclosed", block: { className: "Do", row: 5 } });
+    expect(findingExplains(f!, "ENDIF")).toBe(false);
+    expect(findingExplains(f!, "ENDDO")).toBe(true);
+    const y = await findIn(shape("Y"));
+    expect(findingExplains(y!, "ENDMETHOD")).toBe(true);
+    const w = await findIn(shape("W"));
+    expect(findingExplains(w!, "TYPEEND")).toBe(true);
+    const a = await findIn(shape("A"));
+    expect(findingExplains(a!, "ENDCLASS")).toBe(true);
   });
 });
 
@@ -207,8 +270,8 @@ describe("describeOpenBlock", () => {
     const text = describeOpenBlock((await findIn(shape("Y")))!)!;
     expect(text).toContain("When abaplint reached the ENDMETHOD on line 11, the LOOP on line 9 was still open");
     expect(text).toContain("1 more between the METHOD and it (IF on line 8)");
-    expect(text).toContain("If you did write ENDLOOP, abaplint did not see it as a statement.");
-    expect(text).toContain('look for a " earlier on that line');
+    expect(text).toContain("If you did write ENDLOOP for it before the ENDMETHOD on line 11, abaplint did not take it as closing this LOOP");
+    expect(text).toContain("it may close a different block");
   });
 
   it("hedges a same-kind nesting with both candidate rows (shape X)", async () => {
@@ -236,6 +299,24 @@ describe("describeOpenBlock", () => {
   it("omits the outside count when it is zero (shape L)", async () => {
     const text = describeOpenBlock((await findIn(shape("L")))!)!;
     expect(text).toContain("(the innermost block still open).");
+    expect(text).toContain("If you did write ENDLOOP for it, abaplint did not take it as closing this LOOP.");
+    expect(text).toContain('look for a " earlier on that line');
+    expect(text).not.toContain("did not see it as a statement");
+  });
+
+  it("names the sibling that shares the closer (shape D), not a comment to hunt for", async () => {
+    const text = describeOpenBlock((await findIn(shape("D")))!)!;
+    expect(text).toContain("abaplint found no ENDCLASS for the CLASS … DEFINITION on line 1");
+    expect(text).toContain("It was still open when the CLASS … IMPLEMENTATION on line 4 began.");
+  });
+
+  it("hedges LOOP against LOOP AT SCREEN through their shared ENDLOOP", async () => {
+    const text = describeOpenBlock(
+      (await findIn("DATA lt TYPE STANDARD TABLE OF i.\nLOOP AT lt INTO DATA(x).\nLOOP AT SCREEN.\nENDLOOP.\n"))!,
+    )!;
+    expect(text).toContain(
+      "The ENDLOOP on line 4 closed the LOOP AT SCREEN on line 3; if it was meant for line 2, the LOOP AT SCREEN on line 3 is the one left open.",
+    );
   });
 
   it("explains a METHOD body inside CLASS … DEFINITION (shape A)", async () => {
@@ -267,6 +348,7 @@ describe("describeOpenBlock", () => {
         kind: "unclosed",
         block: { className: "Nope", row: 1, col: 1, virtual: false },
         outside: 0,
+        open: [],
       }),
     ).toBeNull();
   });

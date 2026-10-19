@@ -3,6 +3,8 @@ import { Buffer } from "buffer";
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
 import type { WorkerResponse } from "../types/messages";
+import structureSources from "./fixtures/structureShapes.sources.json";
+import structureExpected from "./fixtures/structureShapes.expected.json";
 
 // The verdict path calls this, and making it throw is the only way to build
 // the case Gate2 H3 found: an exception between "the parse succeeded" and
@@ -252,6 +254,49 @@ describe("abaplintWorker — a structure error that abaplint pins to line 1", ()
     expect(v.message).toBe("Unexpected ENDIF");
     expect(v.line).toBe(3);
   });
+});
+
+// What analytics receive must not move when the explanation does (#72). For
+// every structure shape recorded on main before the open-block walk existed,
+// the verdict's `syntaxDiagnostics` must equal the fixture, and the lint
+// result must list the raw issues in the raw order (the structure issue may
+// move to the opener's line, which is why positions are not compared here).
+describe("abaplintWorker — structure shapes: what analytics see is unchanged", () => {
+  beforeEach(() => {
+    failClassify.on = false;
+    postSpy = vi
+      .spyOn(self, "postMessage")
+      .mockImplementation(((m: WorkerResponse) => {
+        posted.push(m);
+      }) as unknown as typeof self.postMessage);
+  });
+
+  afterEach(() => {
+    postSpy.mockRestore();
+  });
+
+  for (const [name, source] of Object.entries(structureSources as Record<string, string>)) {
+    const expected = (structureExpected as Record<string, { keys: string[]; syntaxDiagnostics: unknown }>)[
+      name
+    ];
+    it(name, async () => {
+      const [verdict] = await request(source);
+      expect(verdict).toMatchObject({ type: "transpile-error", kind: "syntax" });
+      const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
+      expect(v.syntaxDiagnostics).toEqual(expected.syntaxDiagnostics);
+
+      posted.length = 0;
+      await (self.onmessage as (e: MessageEvent) => Promise<void>)({
+        data: { type: "lint", source },
+      } as MessageEvent);
+      const result = posted.find((m) => m.type === "lint-result") as Extract<
+        WorkerResponse,
+        { type: "lint-result" }
+      >;
+      const rawKeys = expected.keys.map((k) => k.replace(/@.*$/, ""));
+      expect(result.issues.slice(0, rawKeys.length).map((i) => i.key)).toEqual(rawKeys);
+    });
+  }
 });
 
 // The order of the two replies above does not prove the verdict went out
