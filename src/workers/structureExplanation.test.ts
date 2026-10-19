@@ -2,9 +2,10 @@ import { describe, it, expect } from "vitest";
 import { Buffer } from "buffer";
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
-import { Registry, MemoryFile, Config, Issue } from "@abaplint/core";
+import { Registry, MemoryFile, Config, Issue, ABAPObject } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
-import { explainStructureIssue } from "./structureExplanation";
+import { explainStructure, explainStructureIssue } from "./structureExplanation";
+import { findOpenBlock } from "./openBlock";
 
 const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
 
@@ -26,9 +27,17 @@ function explain(issue: Issue): string | null {
   );
 }
 
-describe("explainStructureIssue against the real parser", () => {
+async function findingOf(source: string) {
+  const reg = new Registry(abaplintConfig);
+  reg.addFile(new MemoryFile("ztest.prog.abap", source));
+  await reg.parseAsync();
+  return findOpenBlock((reg.getFirstObject() as ABAPObject).getABAPFiles()[0].getStatements());
+}
+
+describe("explainStructureIssue against the real parser, without a finding", () => {
   // Each of these is reported by abaplint at (1,1) whatever line the mistake
-  // is on, which is the whole reason the explanation exists.
+  // is on, which is the whole reason the explanation exists. With no finding
+  // from the walk the text is the generic one and names no line.
   const pinnedToLineOne: Array<[string, string, string]> = [
     ["a missing ENDIF", "REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n", "Expected ENDIF"],
     [
@@ -84,6 +93,37 @@ describe("explainStructureIssue against the real parser", () => {
       for (const e of errors) expect(explain(e)).toBeNull();
     });
   }
+});
+
+describe("explainStructure with the walk's finding", () => {
+  it("names the open block and carries its position", async () => {
+    const source = "REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n";
+    const first = (await errorsOf(source))[0];
+    const finding = await findingOf(source);
+    expect(finding).not.toBeNull();
+    const out = explainStructure("structure", first.getMessage(), 1, 1, finding);
+    expect(out).toEqual({
+      text: expect.stringContaining("Expected ENDIF. abaplint found no ENDIF for the IF on line 2"),
+      at: { row: 2, col: 1 },
+    });
+    expect(out!.text).not.toContain("no line is given");
+  });
+
+  it("keeps the generic text and no position when the walk found nothing", async () => {
+    const out = explainStructure("structure", "Expected ENDIF", 1, 1, null);
+    expect(out).toEqual({ text: expect.stringContaining("no line is given") });
+  });
+
+  it("does not name a block under Unexpected code structure", async () => {
+    const finding = await findingOf("REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n");
+    const out = explainStructure("structure", "Unexpected code structure", 1, 1, finding);
+    expect(out).toEqual({ text: expect.stringContaining("no line is given") });
+  });
+
+  it("still does nothing for a real position, finding or not", async () => {
+    const finding = await findingOf("REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n");
+    expect(explainStructure("structure", "Expected ENDIF", 3, 1, finding)).toBeNull();
+  });
 });
 
 describe("explainStructureIssue on shapes the parser did not produce in probes", () => {

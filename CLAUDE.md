@@ -509,11 +509,27 @@ broke" from "the whole program did".
 `check_syntax`. Its `Expected <statement>` form is reported at (1,1) whatever
 line the mistake is on, and the statement it names is the **outer** block's
 closer, not the open one's (a missing `ENDIF` inside a `METHOD` reports
-`Expected ENDMETHOD`). Since #72 the worker shows an explanation and no line for
-that form (`src/workers/structureExplanation.ts`); analytics still read the raw
-issue, so the bucket's meaning did not change across that release. It is also
-often a *consequence*: a missing period on `ENDIF` produces `structure` as
-`errors[0]` ahead of the `parser_error` that caused it.
+`Expected ENDMETHOD`). Since #72 the worker replaces that form with an
+explanation (`src/workers/structureExplanation.ts`). It names the block that is
+actually open, with its line, when a one-pass stack walk over the parsed
+statements can tell (`src/workers/openBlock.ts`: the opener/closer table is
+derived from abaplint's own `Structures`, and a test pins it); when the walk
+finds nothing it keeps the generic text and names no line. The walk cannot see
+a closer that failed to parse or that a `"` turned into a comment, so the text
+never asserts the closer is absent — it says abaplint did not see one and points
+at the closing line. Analytics still read the raw issue, so the bucket's meaning
+did not change across either release. It is also often a *consequence*: a
+missing period on `ENDIF` produces `structure` as `errors[0]` ahead of the
+`parser_error` that caused it.
+
+Measured 2026-10-14..18 (the first five days of `structure_kind`): of 52
+classified events, `expected` was ENDCLASS 12 / ENDLOOP 10 / ENDIF 6 /
+ENDSELECT 3 / ENDWHILE 3 / TYPEEND 1 and `unexpected` was
+METHODIMPLEMENTATION 7 / ENDIF 2 / ENDWHILE 2 / five singletons. Probed by
+hand, `Expected ENDCLASS` comes from at least six shapes (a definition or an
+implementation left open, a `METHOD` or `ENDMETHOD` without its period, a
+method body written inside the DEFINITION), so the node alone does not say
+which; the walk's text does, on screen, and nothing about it is measured.
 
 `parser_error` and `unknown_types` point at opposite investments, and before
 this parameter existed the metric could not tell them apart. Do not assume the

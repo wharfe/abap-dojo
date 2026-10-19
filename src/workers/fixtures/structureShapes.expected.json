@@ -1,0 +1,348 @@
+{
+  "A java-style METHOD body inside DEFINITION": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDCLASS"
+    }
+  },
+  "B impl ENDCLASS missing": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDCLASS"
+    }
+  },
+  "C METHOD impl at top level": {
+    "keys": [
+      "structure@5:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "unexpected",
+      "structureNode": "METHODIMPLEMENTATION"
+    }
+  },
+  "D definition ENDCLASS missing": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDCLASS"
+    }
+  },
+  "E definition only unclosed": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDCLASS"
+    }
+  },
+  "F ENDMETHOD missing": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDMETHOD"
+    }
+  },
+  "G IF unclosed inside METHOD": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDMETHOD"
+    }
+  },
+  "H impl ENDCLASS missing at EOF": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDCLASS"
+    }
+  },
+  "I first ENDMETHOD missing": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDMETHOD"
+    }
+  },
+  "J METHOD without period": {
+    "keys": [
+      "structure@1:1",
+      "parser_error@6:3"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 2,
+      "structureKind": "expected",
+      "structureNode": "ENDCLASS"
+    }
+  },
+  "K ENDMETHOD without period": {
+    "keys": [
+      "structure@1:1",
+      "parser_error@8:3"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 2,
+      "structureKind": "expected",
+      "structureNode": "ENDMETHOD"
+    }
+  },
+  "L LOOP unclosed at top level": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDLOOP"
+    }
+  },
+  "M LOOP unclosed in FORM": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDFORM"
+    }
+  },
+  "N ENDLOOP without period": {
+    "keys": [
+      "structure@1:1",
+      "parser_error@4:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 2,
+      "structureKind": "expected",
+      "structureNode": "ENDLOOP"
+    }
+  },
+  "O METHODS at top level": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "unexpected",
+      "structureNode": "METHODDEF"
+    }
+  },
+  "P METHOD body in DEFINITION plus empty IMPLEMENTATION": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDCLASS"
+    }
+  },
+  "Q CLASS without DEFINITION": {
+    "keys": [
+      "structure@2:3",
+      "parser_error@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 2,
+      "structureKind": "unexpected",
+      "structureNode": "METHODIMPLEMENTATION"
+    }
+  },
+  "R METHOD impl without IMPLEMENTATION header then ENDCLASS": {
+    "keys": [
+      "structure@5:3"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "unexpected",
+      "structureNode": "METHODIMPLEMENTATION"
+    }
+  },
+  "S bare MODULE inside unclosed IF": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDIF"
+    }
+  },
+  "T closers swapped": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDIF"
+    }
+  },
+  "U comment eats ENDDO on same line": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDDO"
+    }
+  },
+  "V comment eats ENDDO": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDDO"
+    }
+  },
+  "W chained TYPES second BEGIN unclosed": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "TYPEEND"
+    }
+  },
+  "X same-kind nested IF inner unclosed": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDMETHOD"
+    }
+  },
+  "Y IF and LOOP unclosed in METHOD": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDMETHOD"
+    }
+  },
+  "Z existing MISSING_ENDIF": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDIF"
+    }
+  },
+  "Z2 ENDIF without period": {
+    "keys": [
+      "structure@1:1",
+      "parser_error@4:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 2,
+      "structureKind": "expected",
+      "structureNode": "ENDIF"
+    }
+  },
+  "Z3 stray ENDIF": {
+    "keys": [
+      "structure@3:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "unexpected",
+      "structureNode": "ENDIF"
+    }
+  },
+  "Z4 INTO TABLE with ENDSELECT in METHOD": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDMETHOD"
+    }
+  },
+  "Z5 comment eats IF opener": {
+    "keys": [
+      "structure@4:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "unexpected",
+      "structureNode": "ENDIF"
+    }
+  },
+  "Z6 macro expanding to IF": {
+    "keys": [
+      "structure@1:1"
+    ],
+    "syntaxDiagnostics": {
+      "key": "structure",
+      "errorCount": 1,
+      "structureKind": "expected",
+      "structureNode": "ENDIF"
+    }
+  }
+}
