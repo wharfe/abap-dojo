@@ -3,6 +3,8 @@ import { Buffer } from "buffer";
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
 import type { WorkerResponse } from "../types/messages";
+import structureSources from "./fixtures/structureShapes.sources.json";
+import structureExpected from "./fixtures/structureShapes.expected.json";
 
 // The verdict path calls this, and making it throw is the only way to build
 // the case Gate2 H3 found: an exception between "the parse succeeded" and
@@ -140,9 +142,17 @@ describe("abaplintWorker — one transpile request, exactly two replies", () => 
 });
 
 // abaplint pins `Expected ENDIF` to (1,1) wherever the IF is (#72). The user
-// is shown the explanation and no line; analytics still see the raw issue.
+// is shown the explanation; when the worker can tell which block is open the
+// explanation names it and carries its line, otherwise it carries no line.
+// Analytics see the raw issue either way.
 describe("abaplintWorker — a structure error that abaplint pins to line 1", () => {
   const MISSING_ENDIF = "REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n";
+  // SELECT … INTO TABLE never opens a block, so the stray ENDSELECT matches
+  // nothing and the walk finds no open block: the generic text, no line.
+  const STRAY_ENDSELECT =
+    "CLASS lcl DEFINITION.\n  PUBLIC SECTION.\n    METHODS run.\nENDCLASS.\n" +
+    "CLASS lcl IMPLEMENTATION.\n  METHOD run.\n    DATA lt TYPE STANDARD TABLE OF i.\n" +
+    "    SELECT * FROM ztab INTO TABLE lt.\n    ENDSELECT.\n  ENDMETHOD.\nENDCLASS.\n";
 
   beforeEach(() => {
     failClassify.on = false;
@@ -157,17 +167,26 @@ describe("abaplintWorker — a structure error that abaplint pins to line 1", ()
     postSpy.mockRestore();
   });
 
-  it("explains it on Run without claiming a line", async () => {
+  it("names the open IF and its line on Run", async () => {
     const [verdict] = await request(MISSING_ENDIF);
     expect(verdict).toMatchObject({ type: "transpile-error", kind: "syntax" });
     const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
     expect(v.message.startsWith("Expected ENDIF. ")).toBe(true);
+    expect(v.message).toContain("abaplint found no ENDIF for the IF on line 2");
+    expect(v.line).toBe(2);
+    expect(v.syntaxDiagnostics?.key).toBe("structure");
+  });
+
+  it("falls back to the generic text and no line when no block can be named", async () => {
+    const [verdict] = await request(STRAY_ENDSELECT);
+    const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
+    expect(v.message.startsWith("Expected ENDMETHOD. ")).toBe(true);
     expect(v.message).toContain("no line is given");
     expect(v).not.toHaveProperty("line");
     expect(v.syntaxDiagnostics?.key).toBe("structure");
   });
 
-  it("marks it on lint as having no position, shrunk to one character", async () => {
+  it("marks the open IF's keyword on lint, one character wide", async () => {
     posted.length = 0;
     await (self.onmessage as (e: MessageEvent) => Promise<void>)({
       data: { type: "lint", source: MISSING_ENDIF },
@@ -177,14 +196,25 @@ describe("abaplintWorker — a structure error that abaplint pins to line 1", ()
       { type: "lint-result" }
     >;
     const issue = result.issues.find((i) => i.key === "structure")!;
-    expect(issue.message.startsWith("Expected ENDIF. ")).toBe(true);
+    expect(issue.message).toContain("the IF on line 2");
+    expect(issue.positionUnknown).toBeUndefined();
+    expect([issue.startLine, issue.startCol, issue.endLine, issue.endCol]).toEqual([2, 1, 2, 2]);
+  });
+
+  it("marks lint as having no position when no block can be named", async () => {
+    posted.length = 0;
+    await (self.onmessage as (e: MessageEvent) => Promise<void>)({
+      data: { type: "lint", source: STRAY_ENDSELECT },
+    } as MessageEvent);
+    const result = posted.find((m) => m.type === "lint-result") as Extract<
+      WorkerResponse,
+      { type: "lint-result" }
+    >;
+    const issue = result.issues.find((i) => i.key === "structure")!;
     expect(issue.positionUnknown).toBe(true);
     expect([issue.startLine, issue.startCol, issue.endLine, issue.endCol]).toEqual([1, 1, 1, 2]);
   });
 
-  // A missing period on ENDIF puts `structure` first and the parser error that
-  // caused it second. The explanation has no line, so without this the one
-  // error that can point at line 4 never reached the Output panel.
   // The Validator's syntax row keeps the raw message (it is a narrow status
   // label, Gate2 M-c); its Lint list is where the explanation goes.
   it("explains it in the Validator's lint stage and keeps the syntax label raw", async () => {
@@ -200,17 +230,21 @@ describe("abaplintWorker — a structure error that abaplint pins to line 1", ()
       ).result;
     expect(stage("syntax").error).toBe("Expected ENDIF");
     const issue = stage("lint").issues!.find((i) => i.key === "structure")!;
-    expect(issue.message.startsWith("Expected ENDIF. ")).toBe(true);
-    expect(issue.positionUnknown).toBe(true);
-    expect([issue.endLine, issue.endCol]).toEqual([1, 2]);
+    expect(issue.message).toContain("the IF on line 2");
+    expect(issue.positionUnknown).toBeUndefined();
+    expect([issue.startLine, issue.endLine, issue.endCol]).toEqual([2, 2, 2]);
   });
 
+  // A missing period on ENDIF puts `structure` first and the parser error that
+  // caused it second. The walk names the IF (the ENDIF is an Unknown statement
+  // it cannot see), and the one error that can point at line 4 is named too.
   it("names the next error that does have a line", async () => {
     const [verdict] = await request("REPORT z.\nIF 1 = 1.\n WRITE 'a'.\nENDIF");
     const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
     expect(v.message.startsWith("Expected ENDIF. ")).toBe(true);
+    expect(v.message).toContain("the IF on line 2");
     expect(v.message).toMatch(/The next error abaplint reports is on line 4: Statement does not exist/);
-    expect(v).not.toHaveProperty("line");
+    expect(v.line).toBe(2);
     expect(v.syntaxDiagnostics?.key).toBe("structure");
   });
 
@@ -220,6 +254,49 @@ describe("abaplintWorker — a structure error that abaplint pins to line 1", ()
     expect(v.message).toBe("Unexpected ENDIF");
     expect(v.line).toBe(3);
   });
+});
+
+// What analytics receive must not move when the explanation does (#72). For
+// every structure shape recorded on main before the open-block walk existed,
+// the verdict's `syntaxDiagnostics` must equal the fixture, and the lint
+// result must list the raw issues in the raw order (the structure issue may
+// move to the opener's line, which is why positions are not compared here).
+describe("abaplintWorker — structure shapes: what analytics see is unchanged", () => {
+  beforeEach(() => {
+    failClassify.on = false;
+    postSpy = vi
+      .spyOn(self, "postMessage")
+      .mockImplementation(((m: WorkerResponse) => {
+        posted.push(m);
+      }) as unknown as typeof self.postMessage);
+  });
+
+  afterEach(() => {
+    postSpy.mockRestore();
+  });
+
+  for (const [name, source] of Object.entries(structureSources as Record<string, string>)) {
+    const expected = (structureExpected as Record<string, { keys: string[]; syntaxDiagnostics: unknown }>)[
+      name
+    ];
+    it(name, async () => {
+      const [verdict] = await request(source);
+      expect(verdict).toMatchObject({ type: "transpile-error", kind: "syntax" });
+      const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
+      expect(v.syntaxDiagnostics).toEqual(expected.syntaxDiagnostics);
+
+      posted.length = 0;
+      await (self.onmessage as (e: MessageEvent) => Promise<void>)({
+        data: { type: "lint", source },
+      } as MessageEvent);
+      const result = posted.find((m) => m.type === "lint-result") as Extract<
+        WorkerResponse,
+        { type: "lint-result" }
+      >;
+      const rawKeys = expected.keys.map((k) => k.replace(/@.*$/, ""));
+      expect(result.issues.slice(0, rawKeys.length).map((i) => i.key)).toEqual(rawKeys);
+    });
+  }
 });
 
 // The order of the two replies above does not prove the verdict went out

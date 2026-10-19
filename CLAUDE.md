@@ -509,11 +509,23 @@ broke" from "the whole program did".
 `check_syntax`. Its `Expected <statement>` form is reported at (1,1) whatever
 line the mistake is on, and the statement it names is the **outer** block's
 closer, not the open one's (a missing `ENDIF` inside a `METHOD` reports
-`Expected ENDMETHOD`). Since #72 the worker shows an explanation and no line for
-that form (`src/workers/structureExplanation.ts`); analytics still read the raw
-issue, so the bucket's meaning did not change across that release. It is also
-often a *consequence*: a missing period on `ENDIF` produces `structure` as
-`errors[0]` ahead of the `parser_error` that caused it.
+`Expected ENDMETHOD`). Since #72 the worker replaces that form with an
+explanation (`src/workers/structureExplanation.ts`). It names the block that is
+actually open, with its line, when a one-pass stack walk over the parsed
+statements can tell (`src/workers/openBlock.ts`: the opener/closer table is
+derived from abaplint's own `Structures`, and a test pins it); when the walk
+finds nothing it keeps the generic text and names no line. The walk cannot see
+a closer that failed to parse or that a `"` turned into a comment, so the text
+never asserts the closer is absent — it says abaplint did not see one and points
+at the closing line. Analytics still read the raw issue, so the bucket's meaning
+did not change across either release. It is also often a *consequence*: a
+missing period on `ENDIF` produces `structure` as `errors[0]` ahead of the
+`parser_error` that caused it.
+
+The first five days of `structure_kind` (2026-10-14..18, 52 events) and the
+hand probe of what produces `Expected ENDCLASS` are in #72; the node alone
+does not say which shape, the walk's text on screen does, and nothing about
+the text is measured.
 
 `parser_error` and `unknown_types` point at opposite investments, and before
 this parameter existed the metric could not tell them apart. Do not assume the

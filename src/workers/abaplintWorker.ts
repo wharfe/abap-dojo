@@ -4,7 +4,7 @@ import { Buffer } from "buffer";
 // supply a polyfill before any abaplint import sees a missing global.
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
-import { Registry, MemoryFile, Config, Issue } from "@abaplint/core";
+import { Registry, MemoryFile, Config, Issue, ABAPObject } from "@abaplint/core";
 import { Transpiler, config as transpilerConfig } from "@abaplint/transpiler";
 import type { WorkerRequest, WorkerResponse, LintIssue } from "../types/messages";
 import type { StageResult, ValidationStage } from "../types/validation";
@@ -12,7 +12,8 @@ import { detectPitfalls } from "../rules/detector";
 import { pitfallToLintIssue } from "../rules/pitfallToLintIssue";
 import { classifyTranspileError } from "./transpileDiagnostics";
 import { classifySyntaxError } from "./syntaxDiagnostics";
-import { explainStructureIssue } from "./structureExplanation";
+import { explainStructure, wantsOpenBlock } from "./structureExplanation";
+import { findOpenBlock, type OpenBlockFinding } from "./openBlock";
 import {
   errorCounter,
   statementScorer,
@@ -53,17 +54,41 @@ function mapSeverity(s: string): LintIssue["severity"] {
 }
 
 /** The explanation for a structure issue abaplint pins to (1,1), or null. */
-function explanationOf(issue: Issue): string | null {
+function explanationOf(issue: Issue, finding: OpenBlockFinding | null = null) {
   const start = issue.getStart();
-  return explainStructureIssue(
+  return explainStructure(
     issue.getKey(),
     issue.getMessage(),
     start.getRow(),
     start.getCol(),
+    finding,
   );
 }
 
-function issueToLintIssue(issue: Issue): LintIssue {
+/**
+ * The block the user left open, for the structure explanation — or null when
+ * no issue in `issues` could use one, so the walk is skipped on every
+ * ordinary lint. One walk per Registry: it reads the whole statement list,
+ * and every issue in the same program shares the answer. A throw inside the
+ * walk degrades to the generic text rather than losing the lint result.
+ */
+function openBlockFor(reg: Registry, issues: readonly Issue[]): OpenBlockFinding | null {
+  const wanted = issues.some((i) =>
+    wantsOpenBlock(i.getKey(), i.getMessage(), i.getStart().getRow(), i.getStart().getCol()),
+  );
+  if (!wanted) return null;
+  const object = reg.getFirstObject();
+  if (!(object instanceof ABAPObject)) return null;
+  const file = object.getABAPFiles()[0];
+  if (file === undefined) return null;
+  try {
+    return findOpenBlock(file.getStatements());
+  } catch {
+    return null;
+  }
+}
+
+function issueToLintIssue(issue: Issue, finding: OpenBlockFinding | null = null): LintIssue {
   const start = issue.getStart();
   const end = issue.getEnd();
   const base: LintIssue = {
@@ -75,15 +100,27 @@ function issueToLintIssue(issue: Issue): LintIssue {
     endCol: end.getCol(),
     severity: mapSeverity(issue.getSeverity().toString()),
   };
-  const explanation = explanationOf(issue);
+  const explanation = explanationOf(issue, finding);
   if (explanation === null) return base;
+  if (explanation.at !== undefined) {
+    // The walk named the open block: mark its first keyword, one character
+    // wide, and say so by leaving `positionUnknown` off.
+    return {
+      ...base,
+      message: explanation.text,
+      startLine: explanation.at.row,
+      startCol: explanation.at.col,
+      endLine: explanation.at.row,
+      endCol: explanation.at.col + 1,
+    };
+  }
   // The editor needs a line for its marker, so it stays where abaplint put
   // it; but the issue's own end runs to the end of the first statement, and
   // underlining all of that would point at line 1 as surely as the old
   // message did.
   return {
     ...base,
-    message: explanation,
+    message: explanation.text,
     endLine: base.startLine,
     endCol: base.startCol + 1,
     positionUnknown: true,
@@ -94,7 +131,9 @@ async function handleLint(source: string): Promise<WorkerResponse> {
   const reg = new Registry(abaplintConfig);
   reg.addFile(new MemoryFile(SOURCE_FILENAME, source));
   await reg.parseAsync();
-  const issues = reg.findIssues().map(issueToLintIssue);
+  const raw = reg.findIssues();
+  const finding = openBlockFor(reg, raw);
+  const issues = raw.map((i) => issueToLintIssue(i, finding));
   // The LLM-pitfall rules run here as well as in AI Validator mode: they are
   // the reason to use this tool over an ordinary linter, and hiding them behind
   // a mode switch meant almost nobody saw them.
@@ -197,12 +236,13 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
     const errors = errorIssues(issues);
     if (errors.length > 0) {
       const first = errors[0];
-      // A structure issue pinned to (1,1) gets its explanation and no line:
-      // the line would only send the user to look at line 1 (#72). It is
-      // often a consequence of a later error that does have a line (a missing
-      // period on ENDIF), so that one is named too — otherwise it would only
-      // ever be visible on the Lint tab.
-      const explanation = explanationOf(first);
+      // A structure issue pinned to (1,1) gets its explanation, and the line
+      // of the block the walk found open — or no line at all when the walk
+      // could not name one, since abaplint's own line would only send the
+      // user to line 1 (#72). It is often a consequence of a later error that
+      // does have a line (a missing period on ENDIF), so that one is named
+      // too — otherwise it would only ever be visible on the Lint tab.
+      const explanation = explanationOf(first, openBlockFor(reg, [first]));
       const located =
         explanation === null
           ? undefined
@@ -215,9 +255,12 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
           : {
               message:
                 located === undefined
-                  ? explanation
-                  : `${explanation} The next error abaplint reports is on ` +
+                  ? explanation.text
+                  : `${explanation.text} The next error abaplint reports is on ` +
                     `line ${located.getStart().getRow()}: ${located.getMessage()}`,
+              // The walk's line, when it found the block; otherwise none, so
+              // the Output panel does not send the user to line 1.
+              ...(explanation.at === undefined ? {} : { line: explanation.at.row }),
             }),
         // The message above is what the user reads and it embeds their source;
         // this is the half we are allowed to count. `first` is deliberately the
@@ -370,7 +413,8 @@ async function handleValidate(source: string): Promise<void> {
 
   // Stage 2: Lint + LLM Pitfalls
   postProgress("lint", "running");
-  const lintIssues = allIssues.map(issueToLintIssue);
+  const openBlock = openBlockFor(reg, allIssues);
+  const lintIssues = allIssues.map((i) => issueToLintIssue(i, openBlock));
   const pitfalls = detectPitfalls(reg, lintIssues);
 
   const hasLintWarnings = lintIssues.some((i) => i.severity === "warning");

@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import { Buffer } from "buffer";
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
-import { Registry, MemoryFile, Config, Issue } from "@abaplint/core";
+import { Registry, MemoryFile, Config, Issue, ABAPObject } from "@abaplint/core";
 import { config as transpilerConfig } from "@abaplint/transpiler";
-import { explainStructureIssue } from "./structureExplanation";
+import { explainStructure } from "./structureExplanation";
+import type { OpenBlockFinding } from "./openBlock";
+import { findOpenBlock } from "./openBlock";
 
 const abaplintConfig = new Config(JSON.stringify(transpilerConfig));
 
@@ -17,18 +19,33 @@ async function errorsOf(source: string): Promise<Issue[]> {
     .filter((i) => i.getSeverity().toString() === "Error");
 }
 
-function explain(issue: Issue): string | null {
-  return explainStructureIssue(
-    issue.getKey(),
-    issue.getMessage(),
-    issue.getStart().getRow(),
-    issue.getStart().getCol(),
+function explain(issue: Issue, finding: OpenBlockFinding | null = null): string | null {
+  return (
+    explainStructure(
+      issue.getKey(),
+      issue.getMessage(),
+      issue.getStart().getRow(),
+      issue.getStart().getCol(),
+      finding,
+    )?.text ?? null
   );
 }
 
-describe("explainStructureIssue against the real parser", () => {
+function explainStructureIssue(key: string, message: string, row: number, col: number) {
+  return explainStructure(key, message, row, col)?.text ?? null;
+}
+
+async function findingOf(source: string) {
+  const reg = new Registry(abaplintConfig);
+  reg.addFile(new MemoryFile("ztest.prog.abap", source));
+  await reg.parseAsync();
+  return findOpenBlock((reg.getFirstObject() as ABAPObject).getABAPFiles()[0].getStatements());
+}
+
+describe("explainStructureIssue against the real parser, without a finding", () => {
   // Each of these is reported by abaplint at (1,1) whatever line the mistake
-  // is on, which is the whole reason the explanation exists.
+  // is on, which is the whole reason the explanation exists. With no finding
+  // from the walk the text is the generic one and names no line.
   const pinnedToLineOne: Array<[string, string, string]> = [
     ["a missing ENDIF", "REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n", "Expected ENDIF"],
     [
@@ -61,6 +78,35 @@ describe("explainStructureIssue against the real parser", () => {
     });
   }
 
+  // The same four shapes with the walk's finding: each names its block.
+  // "a FORM inside an IF" is not here: every block in it is closed, the walk
+  // finds nothing, and the generic text stays (asserted above).
+  const named: ReadonlyArray<[string, string]> = [
+    ["a missing ENDIF", "the IF on line 2"],
+    ["a missing ENDIF inside a METHOD", "the IF on line 7"],
+    ["a double quote that comments out ENDDO", "the DO on line 2"],
+  ];
+  for (const [name, phrase] of named) {
+    it(`names the block for ${name}`, async () => {
+      const source = pinnedToLineOne.find(([n]) => n === name)![1];
+      const first = (await errorsOf(source))[0];
+      const text = explain(first, await findingOf(source));
+      expect(text).toContain(phrase);
+      expect(text).not.toContain("no line is given");
+    });
+  }
+
+  // Two independent mistakes: abaplint's `Expected ENDIF` is about the FORM
+  // on line 2, the walk's answer is the DO on line 5. No frame on the walk's
+  // stack is closed by ENDIF, so the finding is discarded (codex, Gate3).
+  it("keeps the generic text when the finding does not match the closer abaplint named", async () => {
+    const source = "IF 1 = 1.\nFORM f.\nENDFORM.\nENDIF.\nDO.\n";
+    const first = (await errorsOf(source))[0];
+    expect(first.getMessage()).toBe("Expected ENDIF");
+    const out = explainStructure("structure", first.getMessage(), 1, 1, await findingOf(source));
+    expect(out).toEqual({ text: expect.stringContaining("no line is given") });
+  });
+
   // Gate2 H1: the structure issue comes first even when the real mistake is a
   // missing period, which is why the text tells the user to fix the rest first.
   it("comes first ahead of the parser error that caused it", async () => {
@@ -84,6 +130,37 @@ describe("explainStructureIssue against the real parser", () => {
       for (const e of errors) expect(explain(e)).toBeNull();
     });
   }
+});
+
+describe("explainStructure with the walk's finding", () => {
+  it("names the open block and carries its position", async () => {
+    const source = "REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n";
+    const first = (await errorsOf(source))[0];
+    const finding = await findingOf(source);
+    expect(finding).not.toBeNull();
+    const out = explainStructure("structure", first.getMessage(), 1, 1, finding);
+    expect(out).toEqual({
+      text: expect.stringContaining("Expected ENDIF. abaplint found no ENDIF for the IF on line 2"),
+      at: { row: 2, col: 1 },
+    });
+    expect(out!.text).not.toContain("no line is given");
+  });
+
+  it("keeps the generic text and no position when the walk found nothing", async () => {
+    const out = explainStructure("structure", "Expected ENDIF", 1, 1, null);
+    expect(out).toEqual({ text: expect.stringContaining("no line is given") });
+  });
+
+  it("does not name a block under Unexpected code structure", async () => {
+    const finding = await findingOf("REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n");
+    const out = explainStructure("structure", "Unexpected code structure", 1, 1, finding);
+    expect(out).toEqual({ text: expect.stringContaining("no line is given") });
+  });
+
+  it("still does nothing for a real position, finding or not", async () => {
+    const finding = await findingOf("REPORT z.\nIF 1 = 1.\n  WRITE 'a'.\n");
+    expect(explainStructure("structure", "Expected ENDIF", 3, 1, finding)).toBeNull();
+  });
 });
 
 describe("explainStructureIssue on shapes the parser did not produce in probes", () => {

@@ -17,8 +17,11 @@ export interface LintIssue {
   severity: "error" | "warning" | "info";
   /**
    * The issue's position is not where the problem is: abaplint pins some
-   * structure errors to (1,1) wherever the mistake is (#72). The editor still
-   * marks (1,1), because a marker needs a line; the lists print no line.
+   * structure errors to (1,1) wherever the mistake is (#72), and the worker
+   * could not work out which block is open. The editor still marks (1,1),
+   * because a marker needs a line; the lists print no line. When the worker
+   * does find the open block, the issue is moved to its first keyword and
+   * this flag is left off.
    */
   positionUnknown?: true;
 }
