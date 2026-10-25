@@ -19,7 +19,7 @@
 //
 // Where X belongs is derived, not listed: abaplint's own `Structures` say
 // which structures contain X, and the climb stops at the first block pair
-// (`deriveBlockPairs`). A statement that can also be reached from the top level
+// (`PAIRS` in openBlock.ts). A statement that can also be reached from the top level
 // (WRITE, DATA, FORM) gets no explanation, nor does one whose containers number
 // more than three — a long list helps nobody. The derived sets are pinned by
 // a test, and the expected sentences are written out by hand there, because a
@@ -28,9 +28,11 @@
 // Display only. Analytics read the raw Issue, as with structureExplanation.ts.
 
 import { Statements, Structures } from "@abaplint/core";
-import { CLOSER_KEYWORD, OPENER_KEYWORD, deriveBlockPairs } from "./openBlock";
+import { CLOSER_KEYWORD, OPENER_KEYWORD, PAIRS } from "./openBlock";
 
-const UNEXPECTED = /^Unexpected ([A-Z]+)$/;
+// Same shape as `NAMED_STRUCTURE` in syntaxDiagnostics.ts, so a class the
+// metric counts is a class this can explain.
+const UNEXPECTED = /^Unexpected ([A-Z][A-Z0-9]*)$/;
 
 /**
  * What to call the statements that are not closers but can only appear inside
@@ -74,8 +76,30 @@ interface Grammar {
 
 let grammar: Grammar | null = null;
 
+/** What `loadGrammar` keeps after a failed build: it explains nothing. */
+const NO_GRAMMAR: Grammar = {
+  byUpper: new Map(),
+  parentsOf: new Map(),
+  openerOf: new Map(),
+  blockOpener: new Map(),
+};
+
+/**
+ * Built once. A build that throws is remembered as `NO_GRAMMAR`, so a bump
+ * that breaks it costs one attempt instead of one per lint keystroke, and
+ * every message falls back to abaplint's own text.
+ */
 function loadGrammar(): Grammar {
   if (grammar !== null) return grammar;
+  try {
+    grammar = buildGrammar();
+  } catch {
+    grammar = NO_GRAMMAR;
+  }
+  return grammar;
+}
+
+function buildGrammar(): Grammar {
   const parentsOf = new Map<string, Set<string>>();
   const openerOf = new Map<string, string>();
   for (const [name, cls] of Object.entries(Structures)) {
@@ -92,10 +116,11 @@ function loadGrammar(): Grammar {
       set.add(name);
     });
   }
-  const blockOpener = new Map(deriveBlockPairs().map((p) => [p.structure, p.opener]));
+  // openBlock's own pairs, so `Expected` and `Unexpected` texts describe a
+  // closer from the same table.
+  const blockOpener = new Map(PAIRS.map((p) => [p.structure, p.opener]));
   const byUpper = new Map(Object.keys(Statements).map((k) => [k.toUpperCase(), k]));
-  grammar = { byUpper, parentsOf, openerOf, blockOpener };
-  return grammar;
+  return { byUpper, parentsOf, openerOf, blockOpener };
 }
 
 /**

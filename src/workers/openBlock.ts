@@ -267,7 +267,7 @@ const STATEMENT_CLASSES = Statements as Record<string, StatementClass | undefine
  * which throws inside every lint with a structure error. The pinned test
  * notices the pair; this keeps the worker alive if it lands anyway.
  */
-const PAIRS = deriveBlockPairs().filter(
+export const PAIRS: readonly BlockPair[] = deriveBlockPairs().filter(
   (p) => STATEMENT_CLASSES[p.opener] !== undefined && STATEMENT_CLASSES[p.closer] !== undefined,
 );
 const OPENER_CLASSES: ReadonlyArray<readonly [StatementClass, string]> = PAIRS.map(

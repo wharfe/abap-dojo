@@ -73,12 +73,36 @@ function explanationOf(issue: Issue, finding: OpenBlockFinding | null = null) {
  * result, and on the Run path the verdict's diagnostics (Gate2 M2).
  */
 function displayMessage(issue: Issue): string {
-  const raw = issue.getMessage();
+  return explainedMessage(issue) ?? issue.getMessage();
+}
+
+/** The `Unexpected <X>` explanation alone, or null. Never throws. */
+function explainedMessage(issue: Issue): string | null {
   try {
-    return explainUnexpected(issue.getKey(), raw) ?? raw;
+    return explainUnexpected(issue.getKey(), issue.getMessage());
   } catch {
-    return raw;
+    return null;
   }
+}
+
+/** `text` followed by another error, with the sentence that introduces it. */
+function withError(text: string, lead: string, error: Issue): string {
+  return `${text} ${lead} line ${error.getStart().getRow()}: ${displayMessage(error)}`;
+}
+
+/**
+ * The error most likely behind an `Unexpected <X>`: the nearest one on a row
+ * above it, since what the statement needed was opened earlier. abaplint's own
+ * order would name an unrelated error at the top of the file first.
+ */
+function causeAbove(errors: readonly Issue[], first: Issue): Issue | undefined {
+  const row = first.getStart().getRow();
+  let best: Issue | undefined;
+  for (const e of errors) {
+    const r = e.getStart().getRow();
+    if (e !== first && r < row && (best === undefined || r > best.getStart().getRow())) best = e;
+  }
+  return best;
 }
 
 /**
@@ -264,31 +288,29 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
           ? undefined
           : errors.find((e) => explanationOf(e) === null);
       // An `Unexpected <X>` keeps its own line, but its usual cause is an
-      // opener that did not parse, reported AFTER it — so that error is named
-      // too, or the user would only ever see it on the Lint tab (Gate2 H2).
-      const shown = displayMessage(first);
-      const next =
-        explanation === null && shown !== first.getMessage()
-          ? errors.find((e) => e !== first)
-          : undefined;
+      // opener above it that did not parse, which abaplint lists AFTER it — so
+      // that error is named too, or the user would only ever see it on the
+      // Lint tab (Gate2 H2).
+      const unexpected = explanation === null ? explainedMessage(first) : null;
+      const cause = unexpected === null ? undefined : causeAbove(errors, first);
       postVerdict("syntax", {
         type: "transpile-error",
         kind: "syntax",
         ...(explanation === null
           ? {
               message:
-                next === undefined
-                  ? shown
-                  : `${shown} The next error abaplint reports is on ` +
-                    `line ${next.getStart().getRow()}: ${next.getMessage()}`,
+                unexpected === null
+                  ? first.getMessage()
+                  : cause === undefined
+                    ? unexpected
+                    : withError(unexpected, "The nearest error above it is on", cause),
               line: first.getStart().getRow(),
             }
           : {
               message:
                 located === undefined
                   ? explanation.text
-                  : `${explanation.text} The next error abaplint reports is on ` +
-                    `line ${located.getStart().getRow()}: ${displayMessage(located)}`,
+                  : withError(explanation.text, "The next error abaplint reports is on", located),
               // The walk's line, when it found the block; otherwise none, so
               // the Output panel does not send the user to line 1.
               ...(explanation.at === undefined ? {} : { line: explanation.at.row }),

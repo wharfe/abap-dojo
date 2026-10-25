@@ -256,7 +256,7 @@ describe("abaplintWorker — a structure error that abaplint pins to line 1", ()
     expect(v.message).toMatch(
       /^Unexpected ENDIF\. ENDIF closes a block opened by IF, but abaplint saw no IF block open/,
     );
-    expect(v.message).not.toContain("The next error");
+    expect(v.message).not.toContain("error above");
     expect(v.line).toBe(3);
     expect(v.syntaxDiagnostics?.key).toBe("structure");
   });
@@ -288,9 +288,20 @@ describe("abaplintWorker — a structure error that abaplint pins to line 1", ()
     );
     const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
     expect(v.message.startsWith("Unexpected ELSE. ELSE is only allowed inside IF")).toBe(true);
-    expect(v.message).toMatch(/The next error abaplint reports is on line 2: Statement does not exist/);
+    expect(v.message).toMatch(/The nearest error above it is on line 2: Statement does not exist/);
     expect(v.line).toBe(4);
     expect(v.syntaxDiagnostics?.key).toBe("structure");
+  });
+
+  // abaplint lists the unrelated semicolon on line 1 before the IF on line 3;
+  // the one behind the floating ELSE is the nearest above it (/code-review).
+  it("names the nearest error above, not abaplint's next one", async () => {
+    const [verdict] = await request(
+      "WRITE 'a';\nDATA x TYPE i.\nIF x == 1.\n  WRITE 'a'.\nELSE.\nENDIF.",
+    );
+    const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
+    expect(v.message).toMatch(/The nearest error above it is on line 3: .*"IF"$/);
+    expect(v.line).toBe(5);
   });
 
   it("explains it in the lint result without moving the marker", async () => {
