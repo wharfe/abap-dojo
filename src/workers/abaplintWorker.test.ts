@@ -248,11 +248,44 @@ describe("abaplintWorker — a structure error that abaplint pins to line 1", ()
     expect(v.syntaxDiagnostics?.key).toBe("structure");
   });
 
-  it("leaves a structure error with a real line exactly as it was", async () => {
+  // `Unexpected <X>` is reported at its own line: the text is explained, the
+  // line is left exactly where abaplint put it.
+  it("explains an Unexpected structure error and keeps its real line", async () => {
     const [verdict] = await request("REPORT z.\nWRITE 'a'.\nENDIF.\n");
     const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
-    expect(v.message).toBe("Unexpected ENDIF");
+    expect(v.message).toMatch(
+      /^Unexpected ENDIF\. ENDIF closes a block opened by IF, but abaplint saw no IF block open/,
+    );
+    expect(v.message).not.toContain("The next error");
     expect(v.line).toBe(3);
+    expect(v.syntaxDiagnostics?.key).toBe("structure");
+  });
+
+  // Its commonest cause is an opener that did not parse, reported after it.
+  it("names the parser error behind an Unexpected ELSE", async () => {
+    const [verdict] = await request(
+      "DATA x TYPE i.\nIF x == 1.\n  WRITE 'a'.\nELSE.\n  WRITE 'b'.\nENDIF.\n",
+    );
+    const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
+    expect(v.message.startsWith("Unexpected ELSE. ELSE is only allowed inside IF")).toBe(true);
+    expect(v.message).toMatch(/The next error abaplint reports is on line 2: Statement does not exist/);
+    expect(v.line).toBe(4);
+    expect(v.syntaxDiagnostics?.key).toBe("structure");
+  });
+
+  it("explains it in the lint result without moving the marker", async () => {
+    posted.length = 0;
+    await (self.onmessage as (e: MessageEvent) => Promise<void>)({
+      data: { type: "lint", source: "METHOD run.\n  WRITE 'a'.\nENDMETHOD.\n" },
+    } as MessageEvent);
+    const result = posted.find((m) => m.type === "lint-result") as Extract<
+      WorkerResponse,
+      { type: "lint-result" }
+    >;
+    const issue = result.issues.find((i) => i.key === "structure")!;
+    expect(issue.message).toContain("METHOD is only allowed inside CLASS … IMPLEMENTATION");
+    expect(issue.positionUnknown).toBeUndefined();
+    expect([issue.startLine, issue.startCol]).toEqual([1, 1]);
   });
 });
 

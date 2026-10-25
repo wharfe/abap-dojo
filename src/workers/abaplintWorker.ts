@@ -14,6 +14,7 @@ import { classifyTranspileError } from "./transpileDiagnostics";
 import { classifySyntaxError } from "./syntaxDiagnostics";
 import { explainStructure, wantsOpenBlock } from "./structureExplanation";
 import { findOpenBlock, type OpenBlockFinding } from "./openBlock";
+import { explainUnexpected } from "./unexpectedStatement";
 import {
   errorCounter,
   statementScorer,
@@ -66,6 +67,21 @@ function explanationOf(issue: Issue, finding: OpenBlockFinding | null = null) {
 }
 
 /**
+ * The message to show for an issue whose line is abaplint's own: an
+ * `Unexpected <X>` structure issue gets its explanation, everything else its
+ * raw message. Never throws — a failure here would cost the whole lint
+ * result, and on the Run path the verdict's diagnostics (Gate2 M2).
+ */
+function displayMessage(issue: Issue): string {
+  const raw = issue.getMessage();
+  try {
+    return explainUnexpected(issue.getKey(), raw) ?? raw;
+  } catch {
+    return raw;
+  }
+}
+
+/**
  * The block the user left open, for the structure explanation — or null when
  * no issue in `issues` could use one, so the walk is skipped on every
  * ordinary lint. One walk per Registry: it reads the whole statement list,
@@ -92,7 +108,7 @@ function issueToLintIssue(issue: Issue, finding: OpenBlockFinding | null = null)
   const start = issue.getStart();
   const end = issue.getEnd();
   const base: LintIssue = {
-    message: issue.getMessage(),
+    message: displayMessage(issue),
     key: issue.getKey(),
     startLine: start.getRow(),
     startCol: start.getCol(),
@@ -247,11 +263,26 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
         explanation === null
           ? undefined
           : errors.find((e) => explanationOf(e) === null);
+      // An `Unexpected <X>` keeps its own line, but its usual cause is an
+      // opener that did not parse, reported AFTER it — so that error is named
+      // too, or the user would only ever see it on the Lint tab (Gate2 H2).
+      const shown = displayMessage(first);
+      const next =
+        explanation === null && shown !== first.getMessage()
+          ? errors.find((e) => e !== first)
+          : undefined;
       postVerdict("syntax", {
         type: "transpile-error",
         kind: "syntax",
         ...(explanation === null
-          ? { message: first.getMessage(), line: first.getStart().getRow() }
+          ? {
+              message:
+                next === undefined
+                  ? shown
+                  : `${shown} The next error abaplint reports is on ` +
+                    `line ${next.getStart().getRow()}: ${next.getMessage()}`,
+              line: first.getStart().getRow(),
+            }
           : {
               message:
                 located === undefined
