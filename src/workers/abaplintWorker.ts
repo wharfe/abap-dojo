@@ -90,20 +90,6 @@ function withError(text: string, lead: string, error: Issue): string {
   return `${text} ${lead} line ${error.getStart().getRow()}: ${displayMessage(error)}`;
 }
 
-/**
- * The error most likely behind an `Unexpected <X>`: the nearest one on a row
- * above it, since what the statement needed was opened earlier. abaplint's own
- * order would name an unrelated error at the top of the file first.
- */
-function causeAbove(errors: readonly Issue[], first: Issue): Issue | undefined {
-  const row = first.getStart().getRow();
-  let best: Issue | undefined;
-  for (const e of errors) {
-    const r = e.getStart().getRow();
-    if (e !== first && r < row && (best === undefined || r > best.getStart().getRow())) best = e;
-  }
-  return best;
-}
 
 /**
  * The block the user left open, for the structure explanation — or null when
@@ -287,12 +273,16 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
         explanation === null
           ? undefined
           : errors.find((e) => explanationOf(e) === null);
-      // An `Unexpected <X>` keeps its own line, but its usual cause is an
-      // opener above it that did not parse, which abaplint lists AFTER it — so
-      // that error is named too, or the user would only ever see it on the
-      // Lint tab (Gate2 H2).
+      // An `Unexpected <X>` keeps its own line. Its usual cause is an opener
+      // that did not parse, which abaplint lists AFTER it, so the next error is
+      // named too or it would only ever be visible on the Lint tab (Gate2 H2).
+      // It is named as abaplint's next error, not as the cause: choosing the
+      // cause by position was tried and named the wrong line in three
+      // different shapes (an error inside the dropped block, one on the same
+      // row, an unrelated one above), and a confident wrong line is worse than
+      // a plain fact the user can check against the Lint list.
       const unexpected = explanation === null ? explainedMessage(first) : null;
-      const cause = unexpected === null ? undefined : causeAbove(errors, first);
+      const cause = unexpected === null ? undefined : errors.find((e) => e !== first);
       postVerdict("syntax", {
         type: "transpile-error",
         kind: "syntax",
@@ -303,7 +293,7 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
                   ? first.getMessage()
                   : cause === undefined
                     ? unexpected
-                    : withError(unexpected, "The nearest error above it is on", cause),
+                    : withError(unexpected, "The next error abaplint reports is on", cause),
               line: first.getStart().getRow(),
             }
           : {

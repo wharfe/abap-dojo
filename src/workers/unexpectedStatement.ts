@@ -72,6 +72,8 @@ interface Grammar {
   openerOf: Map<string, string>;
   /** Block structure name -> its opener's class name. */
   blockOpener: Map<string, string>;
+  /** `containersOf`'s answers, filled on first use. */
+  containers: Map<string, string[] | null>;
 }
 
 let grammar: Grammar | null = null;
@@ -82,6 +84,7 @@ const NO_GRAMMAR: Grammar = {
   parentsOf: new Map(),
   openerOf: new Map(),
   blockOpener: new Map(),
+  containers: new Map(),
 };
 
 /**
@@ -120,7 +123,7 @@ function buildGrammar(): Grammar {
   // closer from the same table.
   const blockOpener = new Map(PAIRS.map((p) => [p.structure, p.opener]));
   const byUpper = new Map(Object.keys(Statements).map((k) => [k.toUpperCase(), k]));
-  return { byUpper, parentsOf, openerOf, blockOpener };
+  return { byUpper, parentsOf, openerOf, blockOpener, containers: new Map() };
 }
 
 /**
@@ -134,6 +137,12 @@ function buildGrammar(): Grammar {
  */
 export function containersOf(statement: string): string[] | null {
   const g = loadGrammar();
+  // Lint runs per keystroke; the answer depends on the name alone.
+  if (!g.containers.has(statement)) g.containers.set(statement, climb(g, statement));
+  return g.containers.get(statement) ?? null;
+}
+
+function climb(g: Grammar, statement: string): string[] | null {
   const own = new Set<string>();
   for (const [structure, opener] of g.openerOf) {
     if (opener === statement) own.add(structure);
