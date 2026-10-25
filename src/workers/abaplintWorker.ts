@@ -288,7 +288,7 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
                 located === undefined
                   ? explanation.text
                   : `${explanation.text} The next error abaplint reports is on ` +
-                    `line ${located.getStart().getRow()}: ${located.getMessage()}`,
+                    `line ${located.getStart().getRow()}: ${displayMessage(located)}`,
               // The walk's line, when it found the block; otherwise none, so
               // the Output panel does not send the user to line 1.
               ...(explanation.at === undefined ? {} : { line: explanation.at.row }),

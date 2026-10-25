@@ -98,6 +98,58 @@ describe("explainUnexpected against the real parser", () => {
     ],
   ];
 
+  shapes.push(
+    [
+      "a METHOD after an extra ENDCLASS",
+      "CLASS lcl DEFINITION.\n  PUBLIC SECTION.\n    METHODS run.\nENDCLASS.\n" +
+        "CLASS lcl IMPLEMENTATION.\nENDCLASS.\n  METHOD run.\n  ENDMETHOD.\nENDCLASS.\n",
+      7,
+      "Unexpected METHODIMPLEMENTATION. METHOD is only allowed inside " +
+        "CLASS … IMPLEMENTATION, and abaplint saw no such block open at this line. " +
+        CAUSES,
+    ],
+    [
+      "an ENDIF whose IF did not parse",
+      "IF 1 = .\n  WRITE 'a'.\nENDIF.\n",
+      3,
+      "Unexpected ENDIF. ENDIF closes a block opened by IF, but abaplint saw no " +
+        "IF block open for it to close at this line. " +
+        CAUSES,
+    ],
+    [
+      "a stray TYPES END OF",
+      "TYPES END OF ty.\n",
+      1,
+      "Unexpected TYPEEND. END OF closes a block opened by TYPES BEGIN OF, but " +
+        "abaplint saw no TYPES BEGIN OF block open for it to close at this line. " +
+        CAUSES,
+    ],
+    [
+      "a stray WHEN OTHERS",
+      "WHEN OTHERS.\n",
+      1,
+      "Unexpected WHENOTHERS. WHEN OTHERS is only allowed inside CASE TYPE OF or " +
+        "CASE, and abaplint saw no such block open at this line. " +
+        CAUSES,
+    ],
+    [
+      "a stray CATCH",
+      "CATCH cx_root.\n",
+      1,
+      "Unexpected CATCH. CATCH is only allowed inside TRY, and abaplint saw no " +
+        "such block open at this line. " +
+        CAUSES,
+    ],
+    [
+      "a stray ELSEIF",
+      "ELSEIF 1 = 1.\n",
+      1,
+      "Unexpected ELSEIF. ELSEIF is only allowed inside IF, and abaplint saw no " +
+        "such block open at this line. " +
+        CAUSES,
+    ],
+  );
+
   it.each(shapes)("%s", async (_name, source, row, text) => {
     const [first] = await errorsOf(source);
     expect(first.getKey()).toBe("structure");
@@ -172,8 +224,43 @@ describe("containersOf", () => {
     }
   });
 
-  it("derives the opener for most closers, never more than three", () => {
-    const unnamed = Object.keys(CLOSER_KEYWORD).filter((k) => containersOf(k) === null);
-    expect(unnamed).toEqual(["EndLoop"]);
+  // Every closer's derived opener reaches the screen, so every one is pinned.
+  it("derives the opener named for every closer", () => {
+    const derived = Object.fromEntries(
+      Object.keys(CLOSER_KEYWORD).map((k) => [k, containersOf(k)?.slice().sort() ?? null]),
+    );
+    expect(derived).toEqual({
+      ClassDataEnd: ["CLASS-DATA BEGIN OF"],
+      ConstantEnd: ["CONSTANTS BEGIN OF"],
+      DataEnd: ["DATA BEGIN OF"],
+      EndAt: ["AT FIRST", "AT LAST", "AT NEW / AT END OF"],
+      EndCase: ["CASE", "CASE TYPE OF"],
+      EndCatch: ["CATCH SYSTEM-EXCEPTIONS"],
+      EndChain: ["CHAIN"],
+      EndClass: ["CLASS … DEFINITION", "CLASS … IMPLEMENTATION"],
+      EndDo: ["DO"],
+      EndEnhancement: ["ENHANCEMENT"],
+      EndEnhancementSection: ["ENHANCEMENT-SECTION"],
+      EndExec: ["EXEC SQL"],
+      EndForm: ["FORM"],
+      EndFunction: ["FUNCTION"],
+      EndIf: ["IF"],
+      EndInterface: ["INTERFACE"],
+      EndLoop: null,
+      EndMethod: ["METHOD"],
+      EndOfDefinition: ["DEFINE"],
+      EndOn: ["ON CHANGE OF"],
+      EndProvide: ["PROVIDE"],
+      EndSelect: ["SELECT"],
+      EndTestInjection: ["TEST-INJECTION"],
+      EndTestSeam: ["TEST-SEAM"],
+      EndTry: ["TRY"],
+      EndWhile: ["WHILE"],
+      EndWith: ["WITH … SELECT"],
+      StaticEnd: ["STATICS BEGIN OF"],
+      TypeEnumEnd: ["TYPES BEGIN OF ENUM"],
+      TypeEnd: ["TYPES BEGIN OF"],
+      TypeMeshEnd: ["TYPES BEGIN OF MESH"],
+    });
   });
 });

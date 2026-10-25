@@ -261,6 +261,26 @@ describe("abaplintWorker — a structure error that abaplint pins to line 1", ()
     expect(v.syntaxDiagnostics?.key).toBe("structure");
   });
 
+  // The explanation is display only: what analytics receive is read from the
+  // raw Issue, so the kind and node stay abaplint's own words.
+  it.each([
+    ["METHOD run.\n  WRITE 'a'.\nENDMETHOD.\n", "METHODIMPLEMENTATION", 1],
+    ["CLASS lcl DEFINITION.\nENDCLASS.\n  PUBLIC SECTION.\n", "PUBLIC", 1],
+    ["DATA x TYPE i.\nIF x == 1.\nELSE.\nENDIF.\n", "ELSE", 2],
+    ["WRITE 'a'.\nENDIF.\n", "ENDIF", 1],
+  ])("sends unchanged diagnostics for %j", async (source, node, errorCount) => {
+    const [verdict] = await request(source);
+    const v = verdict as Extract<WorkerResponse, { type: "transpile-error" }>;
+    expect(v.message).toContain("abaplint saw no");
+    expect(v.syntaxDiagnostics).toEqual({
+      key: "structure",
+      errorCount,
+      statement: undefined,
+      structureKind: "unexpected",
+      structureNode: node,
+    });
+  });
+
   // Its commonest cause is an opener that did not parse, reported after it.
   it("names the parser error behind an Unexpected ELSE", async () => {
     const [verdict] = await request(
