@@ -14,6 +14,7 @@ import { classifyTranspileError } from "./transpileDiagnostics";
 import { classifySyntaxError } from "./syntaxDiagnostics";
 import { explainStructure, wantsOpenBlock } from "./structureExplanation";
 import { findOpenBlock, type OpenBlockFinding } from "./openBlock";
+import { explainUnexpected } from "./unexpectedStatement";
 import {
   errorCounter,
   statementScorer,
@@ -66,6 +67,31 @@ function explanationOf(issue: Issue, finding: OpenBlockFinding | null = null) {
 }
 
 /**
+ * The message to show for an issue whose line is abaplint's own: an
+ * `Unexpected <X>` structure issue gets its explanation, everything else its
+ * raw message. Never throws — a failure here would cost the whole lint
+ * result, and on the Run path the verdict's diagnostics (Gate2 M2).
+ */
+function displayMessage(issue: Issue): string {
+  return explainedMessage(issue) ?? issue.getMessage();
+}
+
+/** The `Unexpected <X>` explanation alone, or null. Never throws. */
+function explainedMessage(issue: Issue): string | null {
+  try {
+    return explainUnexpected(issue.getKey(), issue.getMessage());
+  } catch {
+    return null;
+  }
+}
+
+/** `text` followed by another error, with the sentence that introduces it. */
+function withError(text: string, lead: string, error: Issue): string {
+  return `${text} ${lead} line ${error.getStart().getRow()}: ${displayMessage(error)}`;
+}
+
+
+/**
  * The block the user left open, for the structure explanation — or null when
  * no issue in `issues` could use one, so the walk is skipped on every
  * ordinary lint. One walk per Registry: it reads the whole statement list,
@@ -92,7 +118,7 @@ function issueToLintIssue(issue: Issue, finding: OpenBlockFinding | null = null)
   const start = issue.getStart();
   const end = issue.getEnd();
   const base: LintIssue = {
-    message: issue.getMessage(),
+    message: displayMessage(issue),
     key: issue.getKey(),
     startLine: start.getRow(),
     startCol: start.getCol(),
@@ -247,17 +273,34 @@ async function handleTranspile(source: string, requestId: string): Promise<void>
         explanation === null
           ? undefined
           : errors.find((e) => explanationOf(e) === null);
+      // An `Unexpected <X>` keeps its own line. Its usual cause is an opener
+      // that did not parse, which abaplint lists AFTER it, so the next error is
+      // named too or it would only ever be visible on the Lint tab (Gate2 H2).
+      // It is named as abaplint's next error, not as the cause: choosing the
+      // cause by position was tried and named the wrong line in three
+      // different shapes (an error inside the dropped block, one on the same
+      // row, an unrelated one above), and a confident wrong line is worse than
+      // a plain fact the user can check against the Lint list.
+      const unexpected = explanation === null ? explainedMessage(first) : null;
+      const cause = unexpected === null ? undefined : errors.find((e) => e !== first);
       postVerdict("syntax", {
         type: "transpile-error",
         kind: "syntax",
         ...(explanation === null
-          ? { message: first.getMessage(), line: first.getStart().getRow() }
+          ? {
+              message:
+                unexpected === null
+                  ? first.getMessage()
+                  : cause === undefined
+                    ? unexpected
+                    : withError(unexpected, "The next error abaplint reports is on", cause),
+              line: first.getStart().getRow(),
+            }
           : {
               message:
                 located === undefined
                   ? explanation.text
-                  : `${explanation.text} The next error abaplint reports is on ` +
-                    `line ${located.getStart().getRow()}: ${located.getMessage()}`,
+                  : withError(explanation.text, "The next error abaplint reports is on", located),
               // The walk's line, when it found the block; otherwise none, so
               // the Output panel does not send the user to line 1.
               ...(explanation.at === undefined ? {} : { line: explanation.at.row }),
