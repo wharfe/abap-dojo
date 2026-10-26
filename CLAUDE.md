@@ -522,6 +522,17 @@ did not change across either release. It is also often a *consequence*: a
 missing period on `ENDIF` produces `structure` as `errors[0]` ahead of the
 `parser_error` that caused it.
 
+The `Unexpected <statement>` form is reported at the statement's own line and
+is explained too (`src/workers/unexpectedStatement.ts`): which block the
+statement belongs inside, or which opener a closer closes, derived from the
+parents in abaplint's `Structures` (the derived names are pinned by a test).
+Statements that may also stand at the top level, or that would get misleading
+advice (`METHODS`, `CLASS-DATA`), keep abaplint's text. On a Run the message
+also carries "the next error abaplint reports is on line N" — the next error,
+not a guessed cause: picking the cause by position named the wrong line in
+three shapes and was removed. The Validator's Syntax stage still shows the raw
+text. Analytics read the raw issue here as well.
+
 The first five days of `structure_kind` (2026-10-14..18, 52 events) and the
 hand probe of what produces `Expected ENDCLASS` are in #72; the node alone
 does not say which shape, the walk's text on screen does, and nothing about
